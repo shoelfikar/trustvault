@@ -67,6 +67,7 @@ the choice, not the choice.
 | 2026-08-02 | **D-11** `arboard` (1Password's fork) for clipboard | Needs the platform MIME hints (`x-kde-passwordManagerHint`) that thinner wrappers do not expose, and the crate documents the Wayland ownership caveat that bites password managers | `tauri-plugin-clipboard-manager` — simpler but no MIME hint control; `copypasta` — less maintained |
 | 2026-08-02 | **D-12** `zxcvbn` crate for strength scoring | The design's crack-time strings ("takes ~8 centuries to crack") are zxcvbn's own output format, so using anything else means reimplementing its phrasing | Entropy-only scoring — cheap but reports `Jakarta2019!` as strong, which is exactly the case Watchtower exists to catch |
 | 2026-08-02 | **D-13** Six phases, none merged | The 'no plaintext across IPC' rule needs its own gate; folding it into a larger phase is how it becomes an aspiration | Merging 0 into 1; compressing to three phases |
+| 2026-08-02 | **D-20** `src-tauri/icons/` stays committed although it is derivative | `90-MOC/Gitignore Standard.md`'s single test says ignore it — one command regenerates it. Two things override that. It is a shipped artifact, so building it would let a `tauri` CLI upgrade change the user-visible icon with no diff to review; and measured on the day, `tauri icon` is **not byte-deterministic** — the same input yields a different `icon.icns` each run, so ignoring it would add unreviewable churn to every CI run rather than removing 380 KB of noise. `scripts/make-icon.py` was added so `icon-source.png` is itself reproducible byte-for-byte, which is what the artifact was missing | Ignoring `src-tauri/icons/` and generating during the build (churn, and an unreviewed icon change on every CLI bump); leaving `icon-source.png` as a binary nobody could regenerate, which is the weakest possible reason to commit something |
 | 2026-08-02 | **D-18** Workspace MSRV raised from 1.85 to 1.88 | 1.85 was picked as a conservative default and turned out to be actively harmful: it pinned `cargo update` to versions still carrying RUSTSEC-2026-0009 (`time`) and RUSTSEC-2026-0194/0195 (`quick-xml` via `plist`). The patched releases require 1.88. An MSRV below what the security patches need is an MSRV that blocks them | Staying on 1.85 and ignoring three real DoS advisories; `--ignore-rust-version` in CI, which fixes the lockfile while leaving the manifest lying about what the project needs |
 | 2026-08-02 | **D-19** `.cargo/audit.toml` ignores 17 advisories individually, with reasons | The GTK3 binding crates, `glib`'s unsoundness, and the `unic-*`/`proc-macro-error` crates all arrive through Tauri's Linux backend and cannot be fixed from here. Leaving CI permanently red on them trains everyone to ignore CI, which costs more than the advisories do. Each entry names why it is unfixable and what retires it, and anything not listed still fails | A blanket `--ignore-warnings`, which would hide new findings too; leaving the job red, which makes the signal worthless; dropping the audit job entirely, which is how N-04 quietly dies |
 | 2026-08-02 | **D-17** The repository is public: `github.com/shoelfikar/trustvault` | Two reasons. A password manager asking for trust should be auditable, and a public repository gets unlimited GitHub Actions minutes — which matters because CI builds Linux, macOS, and Windows on every push, and the macOS runner bills at a 10× multiplier on private repositories. Consequence carried: every commit message, the design system, and anything pushed by mistake are permanently public, so the pre-push secret scan becomes a habit rather than a one-off | Private — safer default and trivially flipped to public later, rejected for the Actions cost and because the audit argument only works if the code is actually visible |
@@ -192,3 +193,26 @@ network tab is not.
 
 Phase 0 is closed at 23/23. **Phase 1 is not open** — its entry check has not been run, and running
 it is the first next action.
+
+Audited `.gitignore` against `90-MOC/Gitignore Standard.md`. Three real findings, none of them a
+wrong pattern:
+
+- The repo's `.gitignore` carried `.DS_Store`, `Thumbs.db`, `.idea/`, and `*.swp`. Per the
+  standard those are a statement about somebody's editor, not about this project, and belong in
+  `~/.config/git/ignore` — which did not exist and was not configured. Created it, set
+  `core.excludesFile`, and removed the lines from the repo.
+- `!.env.example` had no comment. The standard requires a reason on every `!` line, because an
+  exception without one gets deleted by the next person tidying up and the effect surfaces much
+  later.
+- `*.cer` was grouped with secrets. A `.cer` is a public certificate; the line was dropped and
+  `*.pem` and `*.key` added in its place, which are the ones that actually matter.
+
+Two things were checked and found **correct**, contrary to first impressions. The KAT-vector
+exception `!crates/trustvault-core/tests/vectors/*.tvault` works — `git check-ignore -v` prints
+negated matches too, so its output initially read as a failure; `git add --dry-run` shows the
+vectors are committable while `personal.tvault` is refused. And nothing derivative was tracked by
+accident: `git status --ignored` lists only `dist/`, `node_modules/`, `target/`, and
+`src-tauri/gen/`.
+
+The icon question is written up as D-20. It is the one place this repo knowingly departs from the
+standard's default, so the reason is recorded rather than left to be rediscovered.

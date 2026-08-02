@@ -1,34 +1,73 @@
-# Build output
-/dist/
+# TrustVault — .gitignore
+#
+# Contract: 90-MOC/Gitignore Standard.md. Grouped by what produces the artifact rather than
+# by file type, because what you look for later is "what does the build emit", not "where is
+# *.png". Every `!` line carries the reason it exists, so the next person tidying up does not
+# delete it and discover the effect months later.
+#
+# The test applied to every line below: if this file vanished, could one command regenerate
+# it from the contents of this repo? Yes -> ignore. No -> commit. Unsure -> commit, because
+# a bloated repo can be cleaned up at any time and a lost source cannot.
+#
+# Editor and OS artifacts are deliberately absent. They belong in ~/.config/git/ignore —
+# this file is a statement about the project, not about anyone's editor.
+
+# --- Rust build output ---
 /target/
 /src-tauri/target/
+
+# --- Tauri generated code: capability schemas and permission types ---
 /src-tauri/gen/
 
-# Dependencies
+# --- Node ---
 /node_modules/
+/dist/
 
-# Never commit a real vault. This is the single most important line in this file:
-# a .tvault in git history is a leaked vault forever, and the recovery kit does not help.
+# Cargo.lock and package-lock.json are committed deliberately. A lock file is the only thing
+# that makes today's build reproducible next year, so it is source even though a machine
+# wrote it.
+
+# --- Vaults: the most important lines in this file ---
+# A .tvault that reaches git history is a leaked vault forever. The recovery kit does not
+# help, and rewriting history does not help anyone who already cloned.
 *.tvault
 *.tvault.bak
 /vaults/
+# Known-answer test vectors are the deliberate exception. They hold throwaway passwords and
+# exist precisely to be committed: they are the evidence that a refactor has not silently
+# changed the on-disk format (phases/phase-1-vault-core.md, Phase 1 exit gate).
+!crates/trustvault-core/tests/vectors/*.tvault
 
-# Nor the things that unlock one
+# --- Key material: things that unlock a vault or sign a release ---
 *.recovery-kit
 *.p12
 *.pfx
-*.cer
 *.keystore
+*.pem
+*.key
 .env
 .env.*
+# The example file is committed so the next person knows which variables a signed release
+# build expects, instead of reverse-engineering them from a CI failure. The standard's fixed
+# pattern: the real file is ignored, the example file is committed.
 !.env.example
 
-# Test fixtures are the deliberate exception — they hold known throwaway passwords and are
-# the whole point of the known-answer vectors (see phases/phase-1-vault-core.md).
-!crates/trustvault-core/tests/vectors/*.tvault
+# .gitignore is not a security mechanism. It prevents carelessness, not an attacker, and it
+# does nothing about a file that is already tracked. A key that has ever entered this repo is
+# treated as leaked forever: rotate it first, then deal with the history.
 
-# Editor / OS
-.DS_Store
-Thumbs.db
-.idea/
-*.swp
+# --- Deliberately NOT ignored, though they look derivative ---
+#
+# src-tauri/icons/ is generated from src-tauri/icon-source.png by `npm run icons`, so the
+# single test says ignore it. It stays committed anyway, for two reasons.
+#
+# First, it is a shipped artifact: generating it during the build would let a `tauri` CLI
+# upgrade change the icon users see with nobody reviewing the diff. Committed, it is pinned.
+#
+# Second, measured on 2026-08-02: `tauri icon` is not byte-deterministic. Re-running it on a
+# byte-identical source produces a different icon.icns every time, so ignoring the directory
+# and building it would put unreviewable churn into every CI run rather than removing it.
+#
+# icon-source.png itself is reproducible — scripts/make-icon.py regenerates it byte-for-byte —
+# so the source-to-artifact chain is documented rather than being a binary nobody can recreate.
+# The standard's tiebreaker applies: unsure -> commit.

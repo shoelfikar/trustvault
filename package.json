@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vite",
     "dev:app": "bash scripts/dev.sh",
+    "icons": "python3 scripts/make-icon.py && tauri icon src-tauri/icon-source.png && rm -rf src-tauri/icons/android src-tauri/icons/ios",
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",

@@ -5,7 +5,11 @@ members = ["crates/trustvault-core", "src-tauri"]
 [workspace.package]
 version = "0.0.0"
 edition = "2024"
-rust-version = "1.85"
+# 1.88, not 1.85. The lower figure held `cargo update` back to versions that still carried
+# RUSTSEC-2026-0009 (time) and RUSTSEC-2026-0194/0195 (quick-xml, via plist) — an MSRV set
+# below what the patched dependencies require is an MSRV that blocks security updates.
+# Raise this when a patch needs it; do not raise it for taste.
+rust-version = "1.88"
 license = "GPL-3.0-or-later"
 authors = ["Sulfikardi"]
 

@@ -74,9 +74,18 @@ jobs:
   audit:
     name: Dependency audit (N-04)
     runs-on: ubuntu-latest
+    # The action publishes its findings as a check run, which the default read-only
+    # GITHUB_TOKEN cannot create — without this the job fails with
+    # "Resource not accessible by integration" no matter what the audit itself found.
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+      # Policy lives in .cargo/audit.toml: vulnerabilities always fail, and the handful of
+      # advisories we cannot act on are ignored there individually, each with its reason and
+      # the condition that retires it.
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

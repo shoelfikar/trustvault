@@ -1,0 +1,64 @@
+# cargo-audit policy — requirement N-04.
+#
+# The rule: a *vulnerability* fails the build, always. The entries below are advisories we
+# cannot act on, each one with the reason it is unfixable and the condition that retires it.
+# Nothing goes in this list because it is noisy — it goes in because there is no version of
+# this project that does not carry it.
+#
+# Review this file whenever Tauri is upgraded. An entry that has become fixable and is still
+# listed here is worse than no list at all, because it hides a real finding.
+#
+# Last reviewed: 2026-08-02, against tauri 2.11.5.
+
+[advisories]
+ignore = [
+  # ---------------------------------------------------------------------------------------
+  # gtk-rs GTK3 bindings — unmaintained upstream, 16 crates.
+  #
+  # Reached via tauri -> tao/muda -> gtk. Tauri v2's Linux backend is GTK3 and there is no
+  # supported alternative today; the GTK4 migration is Tauri's to make, not ours. Carrying
+  # them is a condition of shipping a Tauri app on Linux at all.
+  #
+  # Retires when: Tauri's Linux backend moves off GTK3, or we leave Tauri.
+  # Risk carried: these crates receive no upstream fixes. A future vulnerability in them
+  # would need a fork or a backend change, neither of which is a quick patch.
+  "RUSTSEC-2024-0411", # gdkwayland-sys
+  "RUSTSEC-2024-0412", # gdk
+  "RUSTSEC-2024-0413", # atk
+  "RUSTSEC-2024-0414", # gdkx11-sys
+  "RUSTSEC-2024-0415", # gtk
+  "RUSTSEC-2024-0416", # atk-sys
+  "RUSTSEC-2024-0417", # gdkx11
+  "RUSTSEC-2024-0418", # gdk-sys
+  "RUSTSEC-2024-0419", # gtk3-macros
+  "RUSTSEC-2024-0420", # gtk-sys
+
+  # ---------------------------------------------------------------------------------------
+  # glib 0.18.5 — unsoundness in VariantStrIter's Iterator impls.
+  #
+  # Same GTK3 stack, same lack of an exit. Worth stating plainly: this one is *unsound*, not
+  # merely unmaintained — it can produce a NULL-pointer dereference. TrustVault does not call
+  # VariantStrIter itself; the exposure is whatever tao/gtk does internally.
+  #
+  # Retires when: the GTK3 stack goes, or glib 0.18.x is patched.
+  "RUSTSEC-2024-0429", # glib
+
+  # ---------------------------------------------------------------------------------------
+  # Unmaintained build-time and text-processing crates, reached transitively.
+  # proc-macro-error runs only at compile time. The unic-* crates are Unicode tables.
+  # Neither touches vault data at runtime.
+  #
+  # Retires when: the crates that depend on them move on. Not actionable from here.
+  "RUSTSEC-2024-0370", # proc-macro-error
+  "RUSTSEC-2025-0075", # unic-char-range
+  "RUSTSEC-2025-0080", # unic-common
+  "RUSTSEC-2025-0081", # unic-char-property
+  "RUSTSEC-2025-0098", # unic-ucd-version
+  "RUSTSEC-2025-0100", # unic-ucd-ident
+]
+
+# Report unmaintained and unsound findings as warnings rather than errors. Anything not
+# listed in `ignore` above still shows up in the log, so a new one is visible without
+# turning the build red for a condition nobody can fix this week. Actual vulnerabilities
+# are unaffected by this and always fail.
+informational_warnings = ["unmaintained", "unsound"]

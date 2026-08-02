@@ -14,7 +14,7 @@ Last updated: 2026-08-02
 | Phase document | `phases/phase-0-workbench.md` |
 | Phases passed | 0 of 6 |
 | Last gate passed | none |
-| Next gate | Phase 0 — blocked only by CI: the workflow has never run on a clean checkout |
+| Next gate | Phase 0 — CI ran; all three platform builds passed, audit job fixed and re-running |
 | Status | on track |
 
 ## Current phase
@@ -26,9 +26,10 @@ can be about cryptography and nothing else.
 - Tasks: **21 of 23 done**, as of 2026-08-02. Snapshot only — the checkboxes in the phase document
   are authoritative.
 - In progress right now: closing the Phase 0 gate
-- Blocked: nothing under the author's control. The specimen was confirmed visually on 2026-08-02
-  and the bundle identifier is fixed at `id.sulfikardi.trustvault`. What remains is CI running for
-  the first time on a clean checkout, including the macOS and Windows legs that have never executed
+- Blocked: nothing. The specimen was confirmed visually on 2026-08-02, the bundle identifier is
+  fixed at `id.sulfikardi.trustvault`, and CI has run — all three platform builds passed first try.
+  The audit job failed on three transitive DoS advisories and a token-permission problem; both are
+  fixed (D-18, D-19) and awaiting a green re-run
 
 ## Gates
 
@@ -67,6 +68,8 @@ the choice, not the choice.
 | 2026-08-02 | **D-11** `arboard` (1Password's fork) for clipboard | Needs the platform MIME hints (`x-kde-passwordManagerHint`) that thinner wrappers do not expose, and the crate documents the Wayland ownership caveat that bites password managers | `tauri-plugin-clipboard-manager` — simpler but no MIME hint control; `copypasta` — less maintained |
 | 2026-08-02 | **D-12** `zxcvbn` crate for strength scoring | The design's crack-time strings ("takes ~8 centuries to crack") are zxcvbn's own output format, so using anything else means reimplementing its phrasing | Entropy-only scoring — cheap but reports `Jakarta2019!` as strong, which is exactly the case Watchtower exists to catch |
 | 2026-08-02 | **D-13** Six phases, none merged | The 'no plaintext across IPC' rule needs its own gate; folding it into a larger phase is how it becomes an aspiration | Merging 0 into 1; compressing to three phases |
+| 2026-08-02 | **D-18** Workspace MSRV raised from 1.85 to 1.88 | 1.85 was picked as a conservative default and turned out to be actively harmful: it pinned `cargo update` to versions still carrying RUSTSEC-2026-0009 (`time`) and RUSTSEC-2026-0194/0195 (`quick-xml` via `plist`). The patched releases require 1.88. An MSRV below what the security patches need is an MSRV that blocks them | Staying on 1.85 and ignoring three real DoS advisories; `--ignore-rust-version` in CI, which fixes the lockfile while leaving the manifest lying about what the project needs |
+| 2026-08-02 | **D-19** `.cargo/audit.toml` ignores 17 advisories individually, with reasons | The GTK3 binding crates, `glib`'s unsoundness, and the `unic-*`/`proc-macro-error` crates all arrive through Tauri's Linux backend and cannot be fixed from here. Leaving CI permanently red on them trains everyone to ignore CI, which costs more than the advisories do. Each entry names why it is unfixable and what retires it, and anything not listed still fails | A blanket `--ignore-warnings`, which would hide new findings too; leaving the job red, which makes the signal worthless; dropping the audit job entirely, which is how N-04 quietly dies |
 | 2026-08-02 | **D-17** The repository is public: `github.com/shoelfikar/trustvault` | Two reasons. A password manager asking for trust should be auditable, and a public repository gets unlimited GitHub Actions minutes — which matters because CI builds Linux, macOS, and Windows on every push, and the macOS runner bills at a 10× multiplier on private repositories. Consequence carried: every commit message, the design system, and anything pushed by mistake are permanently public, so the pre-push secret scan becomes a habit rather than a one-off | Private — safer default and trivially flipped to public later, rejected for the Actions cost and because the audit argument only works if the code is actually visible |
 | 2026-08-02 | **D-15** `@lucide/svelte`, not `lucide-svelte` | The package installed first emitted a deprecation notice on install: `lucide-svelte` is superseded by the scoped package. Swapped before the first commit rather than carrying a deprecated dependency into the history | Staying on `lucide-svelte`; Phosphor (the approved alternate in `MASTER.md` §8) — no reason to switch icon families, only packages |
 | 2026-08-02 | **D-16** `scripts/dev.sh` strips the snap environment before launching | The editor on this machine is a snap, and its integrated terminal exports `SNAP_LIBRARY_PATH`, `LOCPATH`, `GTK_PATH`, and `GIO_MODULE_DIR` pointing into `/snap/core20/`. A natively-built binary started from that terminal loads the snap's libc and dies before `main()` with `undefined symbol: __libc_pthread_init`. The binary is fine; the environment is not | Telling the developer to always use an external terminal (works, but is a trap that will be rediscovered every few months); patching `LD_LIBRARY_PATH` only (insufficient — the GTK and GIO module paths poison it too) |
@@ -91,8 +94,8 @@ the choice, not the choice.
 
 ## Next actions
 
-1. **Watch the first CI run** on `github.com/shoelfikar/trustvault` and fix whatever the macOS and
-   Windows legs surface — they have never executed, so treat a green Linux leg as no evidence.
+1. **Confirm the second CI run is fully green.** The first run built cleanly on all three platforms
+   but the audit job failed; the fixes are pushed and unverified.
 2. **Confirm zero network font requests** with devtools offline, closing the last Phase 0 task.
 3. Then close the Phase 0 gate, run the Phase 1 entry check, and settle the Argon2id parameters by
    measuring them rather than guessing.
@@ -152,3 +155,29 @@ The app now compiles, launches, and serves the specimen. What is *not* verified:
 renders correctly and that both themes switch — there is no screenshot tool on this machine, so the
 visual half of the gate needs human eyes. CI has never executed either, because the repository has
 no remote yet. Neither is ticked.
+
+### 2026-08-02 (later)
+
+Repository published at `github.com/shoelfikar/trustvault` (public, D-17) and CI ran for the first
+time. **All three platform builds passed on the first attempt** — Linux, macOS 15, and Windows 2025
+— which was the sequencing risk most likely to bite, since none of those runners had ever executed.
+
+The audit job failed, for two unrelated reasons that looked like one:
+
+1. `rustsec/audit-check` could not create its check run — `Resource not accessible by integration`.
+   The default `GITHUB_TOKEN` is read-only, so the job needs `permissions: checks: write`. This is a
+   reporting failure, not a finding, and it masked the real result.
+2. Three genuine vulnerabilities, all denial-of-service, all transitive through Tauri:
+   RUSTSEC-2026-0009 (`time`, stack exhaustion) and RUSTSEC-2026-0194/0195 (`quick-xml`, quadratic
+   parse and unbounded allocation, reached via `plist`).
+
+The interesting part is why they were not simply patched away: `cargo update` refused to move,
+reporting "Locking 0 packages to latest Rust 1.85 compatible versions". The workspace `rust-version`
+had been set to 1.85 as a conservative default, and the patched releases need 1.88 — so a setting
+chosen for caution was holding three security fixes out of the build. Raised to 1.88 (D-18), after
+which `time` went 0.3.45 → 0.3.55 and `quick-xml` 0.38.4 → 0.41.0. Clippy and the tests still pass.
+
+The remaining 17 findings — 16 unmaintained gtk-rs GTK3 crates plus `glib`'s `VariantStrIter`
+unsoundness — arrive through Tauri's Linux backend and cannot be fixed here. They are now ignored
+individually in `.cargo/audit.toml` with a reason and a retirement condition each (D-19), rather
+than left to make the audit job permanently red.

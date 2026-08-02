@@ -1,0 +1,6 @@
+# trustvault-core denies unwrap, expect, and panic in library code (Tier 1 — a panic there
+# is unrecoverable data loss). Tests are the exception: assert! and friends expand to panics,
+# and a test that cannot panic cannot fail.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

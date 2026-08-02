@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = ["crates/trustvault-core", "src-tauri"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "GPL-3.0-or-later"
+authors = ["Sulfikardi"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+zeroize = { version = "1.9", features = ["derive"] }
+
+# Release profile. A password manager spends its life idle in the dock, so size and
+# startup (S-01, S-06) matter more than throughput.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Debug assertions stay on in the dev profile for the core crate's invariants.
+[profile.dev]
+debug = true

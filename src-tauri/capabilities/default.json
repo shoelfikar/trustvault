@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Baseline capability for the main window. Deliberately minimal — a permission is added when a requirement needs it, and removed when that requirement goes away. Anything touching the filesystem, the clipboard, or the network is handled by a Rust command rather than granted to the webview.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

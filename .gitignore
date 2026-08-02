@@ -1,0 +1,34 @@
+# Build output
+/dist/
+/target/
+/src-tauri/target/
+/src-tauri/gen/
+
+# Dependencies
+/node_modules/
+
+# Never commit a real vault. This is the single most important line in this file:
+# a .tvault in git history is a leaked vault forever, and the recovery kit does not help.
+*.tvault
+*.tvault.bak
+/vaults/
+
+# Nor the things that unlock one
+*.recovery-kit
+*.p12
+*.pfx
+*.cer
+*.keystore
+.env
+.env.*
+!.env.example
+
+# Test fixtures are the deliberate exception — they hold known throwaway passwords and are
+# the whole point of the known-answer vectors (see phases/phase-1-vault-core.md).
+!crates/trustvault-core/tests/vectors/*.tvault
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+*.swp

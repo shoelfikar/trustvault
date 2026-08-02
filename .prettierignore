@@ -1,0 +1,12 @@
+dist/
+node_modules/
+target/
+src-tauri/gen/
+src-tauri/icons/
+src/lib/fonts/
+design-system/
+LICENSE
+
+# The design documents are hand-formatted for reading in a 100-column terminal;
+# Prettier reflows the tables and makes the diffs unreadable.
+*.md

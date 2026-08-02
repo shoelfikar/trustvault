@@ -1,0 +1,29 @@
+[package]
+name = "trustvault"
+description = "Local-first desktop password manager"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+# The lib/bin split is what lets the app be built for mobile targets later and, more
+# usefully here, what lets integration tests drive the app without going through main().
+name = "trustvault_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6", features = [] }
+
+[dependencies]
+# Deliberately minimal. Every Tauri plugin is a widened attack surface in a process that
+# holds decrypted secrets, so a plugin is added when a requirement needs it and not before.
+# Notably absent: tauri-plugin-opener — nothing in TrustVault opens arbitrary URLs.
+tauri = { version = "2.11", features = [] }
+trustvault-core = { path = "../crates/trustvault-core" }
+serde.workspace = true
+serde_json = "1"
+
+[lints.clippy]
+unwrap_used = "warn"

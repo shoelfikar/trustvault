@@ -1,0 +1,200 @@
+/*
+ * TrustVault design tokens.
+ *
+ * Authority: design-system/password-manager/MASTER.md. Values cross-checked against the
+ * prototype at Claude Design project "Brankas App Design" > TrustVault App.dc.html.
+ * Where the two disagree, MASTER.md wins and the disagreement is logged in trustvault-state.md.
+ *
+ * Do not add a token here without a line in MASTER.md that justifies it.
+ */
+
+:root {
+  /* ---- Dark theme (default) — MASTER.md §2 ------------------------------ */
+  --desk: #0b0a09; /* the surface the window floats on, prototype only */
+  --bg-base: #131211; /* titlebar, sidebar, window edge */
+  --bg-surface: #1a1917; /* main content pane */
+  --bg-raised: #211f1d; /* cards, dialogs, detail pane */
+  --bg-hover: #2a2724; /* row hover */
+  --bg-selected: #33302b; /* selected list row */
+  --border: #332f2b; /* hairlines, dividers */
+  --border-strong: #45403a; /* input outlines, focus track */
+  --fg: #ede9e3; /* titles, values — warm off-white, never #FFF */
+  --fg-muted: #a8a19a; /* usernames, metadata */
+  --fg-subtle: #766f68; /* placeholders, empty states */
+
+  /* Brass. Brand and interaction only — it never means "good" or "warning". */
+  --accent: #c08a2e;
+  --accent-hover: #d6a044;
+  --on-accent: #17150f;
+  --accent-wash: rgb(192 138 46 / 0.12);
+
+  /* Status. Desaturated so an all-red Watchtower is not a fire alarm.
+     Never used alone: every status carries an icon and a text label. */
+  --ok: #4e9e63;
+  --warn: #c2643a;
+  --danger: #ce5148;
+  --info: #6e93b8;
+
+  /* Elevation — MASTER.md §4. Hairlines do the work; shadows are for true overlays only. */
+  --shadow-popover: 0 4px 12px rgb(0 0 0 / 0.28), 0 0 0 1px var(--border);
+  --shadow-dialog: 0 16px 48px rgb(0 0 0 / 0.44), 0 0 0 1px var(--border);
+  --shadow-window: 0 32px 90px rgb(0 0 0 / 0.55), 0 0 0 1px var(--border);
+
+  /* ---- Typography — MASTER.md §3 ---------------------------------------- */
+  --font-sans: 'Geist', -apple-system, 'Segoe UI Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', monospace;
+
+  /* Desktop density: 13px body, not the web's 16px. Mitigated by the UI Scale setting,
+     which scales --ui-scale and therefore every size below. Nothing renders under 11px. */
+  --ui-scale: 1; /* Compact 0.92 · Default 1 · Large 1.15 */
+
+  --text-micro: calc(11px * var(--ui-scale)); /* section labels, field captions */
+  --text-micro-lh: calc(14px * var(--ui-scale));
+  --text-sm: calc(12px * var(--ui-scale)); /* metadata, timestamps, helper text */
+  --text-sm-lh: calc(16px * var(--ui-scale));
+  --text-base: calc(13px * var(--ui-scale)); /* list rows, field values, body */
+  --text-base-lh: calc(18px * var(--ui-scale));
+  --text-md: calc(15px * var(--ui-scale)); /* item titles, dialog body */
+  --text-md-lh: calc(20px * var(--ui-scale));
+  --text-lg: calc(20px * var(--ui-scale)); /* view headings */
+  --text-lg-lh: calc(26px * var(--ui-scale));
+  --text-xl: calc(26px * var(--ui-scale)); /* lock screen only */
+  --text-xl-lh: calc(32px * var(--ui-scale));
+
+  --tracking-micro: 0.04em;
+  --tracking-lg: -0.01em;
+  --tracking-xl: -0.02em;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* ---- Space — MASTER.md §4, density 8/10, 4px base grid ---------------- */
+  --space-1: 2px; /* icon-to-label nudge */
+  --space-2: 4px; /* inline gaps */
+  --space-3: 8px; /* standard padding, row padding-y */
+  --space-4: 12px; /* row padding-x, field gaps */
+  --space-5: 16px; /* panel padding */
+  --space-6: 24px; /* section separation */
+  --space-7: 32px; /* dialog padding, empty-state breathing room */
+
+  /* ---- Fixed metrics — MASTER.md §4 ------------------------------------- */
+  --sidebar-w: 232px; /* resizable 180–320 */
+  --sidebar-min: 180px;
+  --sidebar-max: 320px;
+  --list-w: 300px; /* resizable 240–460 */
+  --list-min: 240px;
+  --list-max: 460px;
+  --titlebar-h: 38px;
+  --toolbar-h: 40px;
+  --row-h: calc(34px * var(--ui-scale)); /* compact 30 / large 40 via --ui-scale */
+  --field-row-h: 30px;
+  --window-min-w: 720px;
+  --window-min-h: 520px;
+
+  /* ---- Shape — MASTER.md §4. Nothing at 12–16px. ------------------------ */
+  --radius-sm: 4px; /* inputs, chips, buttons */
+  --radius-md: 6px; /* cards, dialogs, popovers */
+  --radius-full: 9999px; /* avatars only */
+
+  /* ---- Motion — MASTER.md §5, functional only --------------------------- */
+  --dur-instant: 120ms; /* hover, focus, colour */
+  --dur-enter: 160ms; /* popover, dropdown, toast in */
+  --dur-exit: 100ms; /* overlay out — exit faster than enter */
+  --dur-scrim: 220ms; /* lock/unlock, the app's one expressive moment */
+  --ease-out: ease-out;
+  --ease-in: ease-in;
+  --ease-enter: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Minimum pointer target. 28px for mouse and keyboard; coarse pointers get 44px below. */
+  --target-min: 28px;
+}
+
+/* ---- Light theme — MASTER.md §2 ----------------------------------------- */
+:root[data-theme='light'] {
+  --desk: #d8d3c8;
+  --bg-base: #efebe4;
+  --bg-surface: #f7f5f1;
+  --bg-raised: #ffffff;
+  --bg-hover: #ede9e1;
+  --bg-selected: #e6e0d5;
+  --border: #e0dacf;
+  --border-strong: #c9c1b4;
+  --fg: #211f1c;
+  --fg-muted: #5f594f;
+  --fg-subtle: #8c857a;
+
+  --accent: #8a5d0f; /* darkened for 5.2:1 on light */
+  --accent-hover: #6f4a0b;
+  --on-accent: #ffffff;
+  --accent-wash: rgb(138 93 15 / 0.1);
+
+  --ok: #2f6b41;
+  --warn: #8f4520;
+  --danger: #a03229;
+  --info: #3d617f;
+
+  --shadow-popover: 0 4px 12px rgb(60 50 35 / 0.14), 0 0 0 1px var(--border);
+  --shadow-dialog: 0 16px 48px rgb(60 50 35 / 0.22), 0 0 0 1px var(--border);
+  --shadow-window: 0 32px 90px rgb(60 50 35 / 0.28), 0 0 0 1px var(--border);
+}
+
+/* Follow the OS when the user has not overridden the theme (R-28).
+   data-theme is only set on :root once the user picks one explicitly. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --desk: #d8d3c8;
+    --bg-base: #efebe4;
+    --bg-surface: #f7f5f1;
+    --bg-raised: #ffffff;
+    --bg-hover: #ede9e1;
+    --bg-selected: #e6e0d5;
+    --border: #e0dacf;
+    --border-strong: #c9c1b4;
+    --fg: #211f1c;
+    --fg-muted: #5f594f;
+    --fg-subtle: #8c857a;
+
+    --accent: #8a5d0f;
+    --accent-hover: #6f4a0b;
+    --on-accent: #ffffff;
+    --accent-wash: rgb(138 93 15 / 0.1);
+
+    --ok: #2f6b41;
+    --warn: #8f4520;
+    --danger: #a03229;
+    --info: #3d617f;
+
+    --shadow-popover: 0 4px 12px rgb(60 50 35 / 0.14), 0 0 0 1px var(--border);
+    --shadow-dialog: 0 16px 48px rgb(60 50 35 / 0.22), 0 0 0 1px var(--border);
+    --shadow-window: 0 32px 90px rgb(60 50 35 / 0.28), 0 0 0 1px var(--border);
+  }
+}
+
+/* UI Scale setting — MASTER.md §3. Applied to :root by the settings store. */
+:root[data-ui-scale='compact'] {
+  --ui-scale: 0.92;
+}
+:root[data-ui-scale='large'] {
+  --ui-scale: 1.15;
+}
+
+/* Touch-size deviation — MASTER.md §4. The 44px rule is a mobile rule; this is a
+   mouse-and-keyboard app. Coarse pointers get the larger target back. */
+@media (pointer: coarse) {
+  :root {
+    --target-min: 44px;
+    --row-h: 44px;
+  }
+}
+
+/* MASTER.md §5: reduced motion drops to opacity-only at ≤ 80ms. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-instant: 80ms;
+    --dur-enter: 80ms;
+    --dur-exit: 80ms;
+    --dur-scrim: 80ms;
+    --ease-enter: ease-out;
+  }
+}

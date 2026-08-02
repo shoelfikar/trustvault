@@ -6,23 +6,18 @@ A local-first desktop password manager for Linux, macOS, and Windows. Every secr
 single portable encrypted `.tvault` file that you own — no account, no server, no sync.
 
 > **Status: Phase 0 passed, Phase 1 not yet open.** Nothing is usable yet — there is no
-> cryptography in this repository at all. The vault format lands in Phase 1. See
-> `trustvault-state.md` for where the project actually is; the checkboxes in `phases/` are the
-> authoritative record of what is done.
+> cryptography in this repository at all. The vault format lands in Phase 1.
 
-## Documents
+## Planning documents
 
-Read these in order. They do not duplicate each other — each one is the single source of truth for
-what it covers.
+The project's process record — scope, requirements, roadmap, per-phase task lists, the decision
+log, and the design system — is kept privately by the author and is not published here. Where the
+code refers to a requirement by ID (`R-10`, `N-02`, `S-04`) or to a phase gate, that identifier
+points into those documents.
 
-| File | What it holds |
-|------|---------------|
-| `trustvault-project.md` | End result, scope, out of scope, constraints, vocabulary |
-| `trustvault-requirements.md` | Requirements with IDs, success criteria, the interface contract |
-| `trustvault-roadmap.md` | The six phases and their exit gates |
-| `trustvault-state.md` | **Read first when resuming.** Current phase, decision log, open questions, next actions |
-| `phases/phase-N-*.md` | Tasks, as checkboxes. The only record of task completion |
-| `design-system/password-manager/MASTER.md` | Binding for all UI work: colour, type, space, motion, components |
+What the repository does carry, and what a reader actually needs, is below: the security posture
+this codebase is built around, and — from Phase 1 — `docs/vault-format.md`, which specifies the
+`.tvault` byte layout well enough to write a second implementation from.
 
 ## Build
 
@@ -55,11 +50,10 @@ Other commands:
 crates/trustvault-core/   Vault format and cryptography. No Tauri, no UI, no network (N-02)
 src-tauri/                Host process. The only place that touches both the core and the webview
 src/                      Svelte 5 frontend
-  lib/styles/tokens.css   Design tokens, generated from MASTER.md
+  lib/styles/tokens.css   Design tokens — the only place a colour, size, or duration is defined
   lib/fonts/              Geist Sans + Mono, vendored as woff2 (OFL)
   lib/screens/            Screens
-phases/                   One document per roadmap phase
-design-system/            The design system this app is built against
+scripts/                  Icon generation, and a launcher that survives a snap-packaged editor
 ```
 
 ## Security posture
@@ -72,7 +66,10 @@ The webview's heap cannot be wiped, so the architecture assumes it is hostile:
 - Copying a secret never returns it to JavaScript — the Rust side writes to the clipboard itself.
 - Locking is authoritative in the core. Reloading the webview does not unlock anything.
 
-The full contract is the *Interface contract* section of `trustvault-requirements.md`.
+These are not conventions to be tidied away later. They exist because the webview's heap cannot be
+wiped — JavaScript strings are immutable and garbage-collected — so a secret that reaches the
+frontend cannot be taken back. A change that makes any of the above easier to violate is the wrong
+change.
 
 ## Licence
 

@@ -12,6 +12,24 @@
 # Editor and OS artifacts are deliberately absent. They belong in ~/.config/git/ignore —
 # this file is a statement about the project, not about anyone's editor.
 
+# --- Internal planning documents: kept locally, deliberately not published ---
+#
+# These are source by the standard's single test — nothing regenerates them — so this is not
+# a derivative-vs-source call. It is a publication decision: the process record stays on the
+# author's machine while the code is public. Paths are anchored with a leading slash so a
+# future docs/phases/ or a vendored design-system/ elsewhere in the tree is unaffected.
+#
+# Two consequences worth knowing. These files now have no remote copy, so they live and die
+# with this disk unless they are backed up somewhere else. And ignoring them does nothing
+# about the three commits that already published them — see the note at the end of this file.
+/CLAUDE.md
+/trustvault-project.md
+/trustvault-requirements.md
+/trustvault-roadmap.md
+/trustvault-state.md
+/phases/
+/design-system/
+
 # --- Rust build output ---
 /target/
 /src-tauri/target/
@@ -71,3 +89,12 @@
 # icon-source.png itself is reproducible — scripts/make-icon.py regenerates it byte-for-byte —
 # so the source-to-artifact chain is documented rather than being a binary nobody can recreate.
 # The standard's tiebreaker applies: unsure -> commit.
+
+# --- Note on the planning documents above ---
+#
+# Untracking them removes them from the branch tip, not from history. Commits 59811ba,
+# f332978, 3eb23b8 and d4a5e92 still contain them and are readable on a public repository at
+# github.com/shoelfikar/trustvault/blob/59811ba/… by anyone who knows the path. Making them
+# genuinely unreachable needs a history rewrite (git filter-repo) and a force push, which is
+# cheap right now — the repo is hours old and has no other clones — and expensive later.
+# The standard puts it plainly: .gitignore prevents carelessness, not disclosure.

@@ -1,11 +1,14 @@
 # TrustVault
 
+[![CI](https://github.com/shoelfikar/trustvault/actions/workflows/ci.yml/badge.svg)](https://github.com/shoelfikar/trustvault/actions/workflows/ci.yml)
+
 A local-first desktop password manager for Linux, macOS, and Windows. Every secret lives in a
 single portable encrypted `.tvault` file that you own — no account, no server, no sync.
 
-> **Status: Phase 0 — Workbench.** Nothing is usable yet. The vault format and cryptography land
-> in Phase 1. See `trustvault-state.md` for where the project actually is; the checkboxes in
-> `phases/` are the authoritative record of what is done.
+> **Status: Phase 0 passed, Phase 1 not yet open.** Nothing is usable yet — there is no
+> cryptography in this repository at all. The vault format lands in Phase 1. See
+> `trustvault-state.md` for where the project actually is; the checkboxes in `phases/` are the
+> authoritative record of what is done.
 
 ## Documents
 

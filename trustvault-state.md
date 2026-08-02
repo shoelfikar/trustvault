@@ -10,11 +10,11 @@ Last updated: 2026-08-02
 
 | | |
 |---|---|
-| Current phase | 0 — Workbench |
+| Current phase | 0 — Workbench, **gate passed**. Phase 1 is not open yet |
 | Phase document | `phases/phase-0-workbench.md` |
-| Phases passed | 0 of 6 |
-| Last gate passed | none |
-| Next gate | Phase 0 — CI ran; all three platform builds passed, audit job fixed and re-running |
+| Phases passed | 1 of 6 |
+| Last gate passed | Phase 0, on 2026-08-02 |
+| Next gate | Phase 1 — opens once its entry check has been run |
 | Status | on track |
 
 ## Current phase
@@ -23,20 +23,19 @@ Last updated: 2026-08-02
 can be about cryptography and nothing else.
 
 - Entry check: not applicable — this is the first phase and it opened at kickoff
-- Tasks: **21 of 23 done**, as of 2026-08-02. Snapshot only — the checkboxes in the phase document
+- Tasks: **23 of 23 done**, as of 2026-08-02. Snapshot only — the checkboxes in the phase document
   are authoritative.
-- In progress right now: closing the Phase 0 gate
-- Blocked: nothing. The specimen was confirmed visually on 2026-08-02, the bundle identifier is
-  fixed at `id.sulfikardi.trustvault`, and CI has run — all three platform builds passed first try.
-  The audit job failed on three transitive DoS advisories and a token-permission problem; both are
-  fixed (D-18, D-19) and awaiting a green re-run
+- In progress right now: nothing. Phase 1 does not open until its entry check has been run
+- Blocked: nothing. Every Phase 0 criterion has evidence behind it — the specimen was confirmed on
+  screen, the bundle identifier is fixed at `id.sulfikardi.trustvault`, and CI is green across all
+  seven jobs including the three platform builds
 
 ## Gates
 
 Three states only, and a gate the project passed through without actually running is **not ticked** —
 it is marked `not run — retrofitted` with the risk carried written next to it.
 
-- [ ] **Phase 0** — window opens with the token specimen in both themes; all CI quality gates green
+- [x] **Phase 0** — window opens with the token specimen in both themes; all CI quality gates green. Passed 2026-08-02, run 30747639101
 - [ ] **Phase 1** — format spec + KAT vectors committed; fail-closed proven; ≥ 90 % coverage; zero unsafe
 - [ ] **G-B′** — IPC security boundary holds: no secret crosses IPC outside the sanctioned path
 - [ ] **Phase 3** — all 15 surfaces reachable by keyboard alone; `MASTER.md` §10 ticked; 7 days daily-driven
@@ -94,11 +93,13 @@ the choice, not the choice.
 
 ## Next actions
 
-1. **Confirm the second CI run is fully green.** The first run built cleanly on all three platforms
-   but the audit job failed; the fixes are pushed and unverified.
-2. **Confirm zero network font requests** with devtools offline, closing the last Phase 0 task.
-3. Then close the Phase 0 gate, run the Phase 1 entry check, and settle the Argon2id parameters by
-   measuring them rather than guessing.
+1. **Run the Phase 1 entry check** in `phases/phase-1-vault-core.md` and record the result in this
+   session log. Phase 1 does not open until that is done — Phase 0's gate passing is not the same
+   event as Phase 1 opening.
+2. **Settle the Argon2id parameters by measuring them**, per open question 3. This blocks the Phase 1
+   gate and is the first thing in that phase that cannot be guessed.
+3. **Write `docs/vault-format.md` before any crypto code.** A format extracted from an
+   implementation afterwards is a description of whatever the implementation happened to do.
 
 ## Session log
 
@@ -181,3 +182,13 @@ The remaining 17 findings — 16 unmaintained gtk-rs GTK3 crates plus `glib`'s `
 unsoundness — arrive through Tauri's Linux backend and cannot be fixed here. They are now ignored
 individually in `.cargo/audit.toml` with a reason and a retirement condition each (D-19), rather
 than left to make the audit job permanently red.
+
+Phase 0 gate passed later the same day. The audit fixes went green on run 30747639101 — all seven
+jobs, including the three platform builds. The last open task, "no network font requests", was
+closed by checking the built bundle rather than a devtools session: every `@font-face` source
+resolves to a local `/assets/*.woff2`, there is no `@import` or font-CDN reference anywhere in
+`dist/`, and the CSP pins `font-src 'self'`. That is reproducible in CI later, which an eyeballed
+network tab is not.
+
+Phase 0 is closed at 23/23. **Phase 1 is not open** — its entry check has not been run, and running
+it is the first next action.

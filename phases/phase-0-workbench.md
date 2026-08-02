@@ -1,6 +1,6 @@
 # Phase 0 — Workbench
 
-Status: current
+Status: passed on 2026-08-02
 Scope and requirements: `trustvault-project.md`, `trustvault-requirements.md`. Plan:
 `trustvault-roadmap.md`. Progress narrative: `trustvault-state.md`.
 
@@ -22,10 +22,10 @@ read against.
       themes live. Confirmed visually by the author on 2026-08-02
 - [x] Locally: `cargo clippy --workspace --all-targets -D warnings`, `cargo fmt --all --check`,
       `cargo test --workspace`, `svelte-check`, and `prettier --check` all pass
-- [ ] The same set passes **in CI on a clean checkout** — the workflow is written but has never run,
-      because there is no remote yet
-- [ ] CI produces an unsigned build artifact on all three platforms (Linux, macOS, Windows) — proving
-      the runners work before Phase 5 adds signing on top
+- [x] The same set passes **in CI on a clean checkout** — run 30747639101, all seven jobs green,
+      2026-08-02
+- [x] CI produces an unsigned build artifact on all three platforms (Linux, macOS, Windows) — proving
+      the runners work before Phase 5 adds signing on top. All three passed on the first attempt
 
 Ticking this box is the same event as ticking the corresponding gate in `trustvault-state.md`. Do
 both in the same session or neither.
@@ -54,7 +54,7 @@ both in the same session or neither.
 - [x] `CLAUDE.md` for the repo: the vault-core/UI boundary, the "no secret across IPC" rule, and a
       pointer to `design-system/password-manager/MASTER.md` as binding for all UI work
 - [x] First commit made on `main`
-- [ ] Remote added and pushed, so CI can run for the first time
+- [x] Remote added and pushed: `github.com/shoelfikar/trustvault` (public, D-17)
 
 ### Scaffold
 
@@ -72,8 +72,10 @@ both in the same session or neither.
       properties, both themes, driven by `[data-theme]` with an OS-default fallback
 - [x] Geist Sans and Geist Mono bundled as local `.woff2` with `@font-face` (latin + latin-ext,
       83 KB total, OFL), vendored rather than depended on
-- [ ] Zero network font requests confirmed with devtools offline — bundling is done, the
-      verification is not
+- [x] Zero network font requests. Verified statically against the built bundle rather than by
+      eye: all four `@font-face` sources resolve to local `/assets/*.woff2`, there is no `@import`
+      and no font CDN reference, and the Tauri CSP pins `font-src 'self'`. Reproducible, unlike a
+      devtools session
 - [x] `@lucide/svelte` wired, 16px grid, 1.5px stroke as the default
 - [x] Token specimen screen rendering all colours with their **computed** contrast ratios, the full
       type scale, the space scale, radii, and shadows — this is the gate's evidence, and it stays in
@@ -91,9 +93,7 @@ both in the same session or neither.
       Svelte config would catch here
 - [x] `rustfmt.toml` and `clippy.toml` committed so local and CI agree
 
-Total: 21/23. Removing a task from the *current* phase needs a line in the decision log.
-
-Outstanding: the offline font check, and pushing to a remote so CI runs.
+Total: 23/23. Removing a task from the *current* phase needs a line in the decision log.
 
 ## Deliverables
 

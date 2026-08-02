@@ -14,7 +14,7 @@ Last updated: 2026-08-02
 | Phase document | `phases/phase-0-workbench.md` |
 | Phases passed | 0 of 6 |
 | Last gate passed | none |
-| Next gate | Phase 0 — blocked by three things: a human confirming the specimen renders, a git remote so CI can actually run, and the bundle identifier |
+| Next gate | Phase 0 — blocked only by CI: the workflow has never run on a clean checkout |
 | Status | on track |
 
 ## Current phase
@@ -23,12 +23,12 @@ Last updated: 2026-08-02
 can be about cryptography and nothing else.
 
 - Entry check: not applicable — this is the first phase and it opened at kickoff
-- Tasks: **20 of 23 done**, as of 2026-08-02. Snapshot only — the checkboxes in the phase document
+- Tasks: **21 of 23 done**, as of 2026-08-02. Snapshot only — the checkboxes in the phase document
   are authoritative.
 - In progress right now: closing the Phase 0 gate
-- Blocked: the gate's visual half. The app builds, launches, and serves the specimen, but nobody has
-  looked at the window yet — there is no screenshot tool on this machine, so it needs human eyes.
-  CI has also never run, because the repository has no remote
+- Blocked: nothing under the author's control. The specimen was confirmed visually on 2026-08-02
+  and the bundle identifier is fixed at `id.sulfikardi.trustvault`. What remains is CI running for
+  the first time on a clean checkout, including the macOS and Windows legs that have never executed
 
 ## Gates
 
@@ -67,6 +67,7 @@ the choice, not the choice.
 | 2026-08-02 | **D-11** `arboard` (1Password's fork) for clipboard | Needs the platform MIME hints (`x-kde-passwordManagerHint`) that thinner wrappers do not expose, and the crate documents the Wayland ownership caveat that bites password managers | `tauri-plugin-clipboard-manager` — simpler but no MIME hint control; `copypasta` — less maintained |
 | 2026-08-02 | **D-12** `zxcvbn` crate for strength scoring | The design's crack-time strings ("takes ~8 centuries to crack") are zxcvbn's own output format, so using anything else means reimplementing its phrasing | Entropy-only scoring — cheap but reports `Jakarta2019!` as strong, which is exactly the case Watchtower exists to catch |
 | 2026-08-02 | **D-13** Six phases, none merged | The 'no plaintext across IPC' rule needs its own gate; folding it into a larger phase is how it becomes an aspiration | Merging 0 into 1; compressing to three phases |
+| 2026-08-02 | **D-17** The repository is public: `github.com/shoelfikar/trustvault` | Two reasons. A password manager asking for trust should be auditable, and a public repository gets unlimited GitHub Actions minutes — which matters because CI builds Linux, macOS, and Windows on every push, and the macOS runner bills at a 10× multiplier on private repositories. Consequence carried: every commit message, the design system, and anything pushed by mistake are permanently public, so the pre-push secret scan becomes a habit rather than a one-off | Private — safer default and trivially flipped to public later, rejected for the Actions cost and because the audit argument only works if the code is actually visible |
 | 2026-08-02 | **D-15** `@lucide/svelte`, not `lucide-svelte` | The package installed first emitted a deprecation notice on install: `lucide-svelte` is superseded by the scoped package. Swapped before the first commit rather than carrying a deprecated dependency into the history | Staying on `lucide-svelte`; Phosphor (the approved alternate in `MASTER.md` §8) — no reason to switch icon families, only packages |
 | 2026-08-02 | **D-16** `scripts/dev.sh` strips the snap environment before launching | The editor on this machine is a snap, and its integrated terminal exports `SNAP_LIBRARY_PATH`, `LOCPATH`, `GTK_PATH`, and `GIO_MODULE_DIR` pointing into `/snap/core20/`. A natively-built binary started from that terminal loads the snap's libc and dies before `main()` with `undefined symbol: __libc_pthread_init`. The binary is fine; the environment is not | Telling the developer to always use an external terminal (works, but is a trap that will be rediscovered every few months); patching `LD_LIBRARY_PATH` only (insufficient — the GTK and GIO module paths poison it too) |
 | 2026-08-02 | **D-14** G-A dropped, G-B replaced by G-B′ | Software-only project: there is no pin mapping and no board bring-up. The IPC security boundary is the structural equivalent of "the physical thing behaves as drawn" | Keeping the hardware gates as empty ticks — which would make "already checked" indistinguishable from "never considered" |
@@ -90,17 +91,11 @@ the choice, not the choice.
 
 ## Next actions
 
-1. **Look at the running window.** `npm run dev:app` launches it. Confirm the specimen renders, the
-   theme toggle switches both themes, the UI-scale segmented control resizes everything, and the
-   contrast table reports no failures. That is the visual half of the Phase 0 gate and it needs a
-   human — there is no screenshot tool on this machine.
-2. **Decide the bundle identifier.** `id.sulfikardi.trustvault` is a guess. It is baked into
-   installed copies and cannot be changed later without orphaning them.
-3. **Add a remote and push.** The first commit exists on `main`; `.github/workflows/ci.yml` has been
-   verified locally but has never executed on a clean checkout, and the macOS and Windows build legs
-   have never run at all.
-4. Then run the Phase 1 entry check and close the Argon2id parameter question by measuring, not
-   guessing.
+1. **Watch the first CI run** on `github.com/shoelfikar/trustvault` and fix whatever the macOS and
+   Windows legs surface — they have never executed, so treat a green Linux leg as no evidence.
+2. **Confirm zero network font requests** with devtools offline, closing the last Phase 0 task.
+3. Then close the Phase 0 gate, run the Phase 1 entry check, and settle the Argon2id parameters by
+   measuring them rather than guessing.
 
 ## Session log
 

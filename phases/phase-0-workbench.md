@@ -17,11 +17,9 @@ read against.
 
 ## Exit gate
 
-- [ ] `npm run tauri dev` opens a window on Linux rendering the token-specimen page — every colour,
+- [x] `npm run tauri dev` opens a window on Linux rendering the token-specimen page — every colour,
       type, space, radius, and shadow token from `MASTER.md` — with the theme toggle switching both
-      themes live
-      *(App builds, launches, and stays alive; the dev server serves the specimen. The visual half —
-      that it renders correctly and both themes switch — has not been confirmed by a human yet.)*
+      themes live. Confirmed visually by the author on 2026-08-02
 - [x] Locally: `cargo clippy --workspace --all-targets -D warnings`, `cargo fmt --all --check`,
       `cargo test --workspace`, `svelte-check`, and `prettier --check` all pass
 - [ ] The same set passes **in CI on a clean checkout** — the workflow is written but has never run,
@@ -80,8 +78,8 @@ both in the same session or neither.
 - [x] Token specimen screen rendering all colours with their **computed** contrast ratios, the full
       type scale, the space scale, radii, and shadows — this is the gate's evidence, and it stays in
       the repo as a regression surface
-- [ ] Bundle identifier confirmed before it ships — currently `id.sulfikardi.trustvault`, a guess,
-      and it cannot change after the first release without orphaning installed copies
+- [x] Bundle identifier confirmed as `id.sulfikardi.trustvault` by the author on 2026-08-02. It is
+      now fixed: changing it after the first release orphans installed copies
 
 ### Quality gates
 
@@ -93,9 +91,9 @@ both in the same session or neither.
       Svelte config would catch here
 - [x] `rustfmt.toml` and `clippy.toml` committed so local and CI agree
 
-Total: 20/23. Removing a task from the *current* phase needs a line in the decision log.
+Total: 21/23. Removing a task from the *current* phase needs a line in the decision log.
 
-Outstanding: the offline font check, the bundle identifier, and pushing to a remote so CI runs.
+Outstanding: the offline font check, and pushing to a remote so CI runs.
 
 ## Deliverables
 

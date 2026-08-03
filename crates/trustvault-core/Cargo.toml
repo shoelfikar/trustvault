@@ -8,17 +8,33 @@ license.workspace = true
 authors.workspace = true
 
 # N-02: this crate must not depend on Tauri, on any UI crate, or on a network stack.
-# Enforced by a CI check, not by good intentions. Crypto dependencies arrive in Phase 1
-# (see phases/phase-1-vault-core.md) — Phase 0 deliberately ships no cryptography.
+# Enforced by a CI check, not by good intentions.
 [dependencies]
+argon2.workspace = true
+chacha20poly1305.workspace = true
+ciborium.workspace = true
+data-encoding.workspace = true
+getrandom.workspace = true
 serde.workspace = true
+subtle.workspace = true
 thiserror.workspace = true
+uuid.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
 # Tests only. The vault body itself is CBOR (decision D-10) — JSON is used here purely to
 # assert that the serde field names, which are part of the on-disk format, stay stable.
 serde_json = "1"
+# R-01 asks for a round-trip over 10 000 generated vaults; generating them by hand is how
+# the interesting shapes get missed.
+proptest = "1.11"
+tempfile = "3"
+
+# S-03 is measured, not asserted: `cargo bench --bench kdf`. No criterion — the measurement
+# is one wall-clock number and a harness would be more code than the thing it measures.
+[[bench]]
+name = "kdf"
+harness = false
 
 [lints.rust]
 missing_docs = "warn"

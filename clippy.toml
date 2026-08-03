@@ -4,3 +4,6 @@
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
+# Same reasoning for slicing: a test that walks a byte layout is clearer written as
+# `bytes[4..6]` than as a chain of `split_at_checked`. Library code still has to earn it.
+allow-indexing-slicing-in-tests = true

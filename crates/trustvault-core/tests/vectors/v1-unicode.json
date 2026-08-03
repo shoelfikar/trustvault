@@ -1,0 +1,48 @@
+{
+  "description": "Emoji, combining marks, right-to-left text, and an embedded NUL. Pins that the format stores text as given and normalizes nothing.",
+  "format_version": 1,
+  "password": "pässwörd — 🔐",
+  "recovery_code": "LRIO-YHFP-YDZC-4BZT-223W-GH4I",
+  "kdf": {
+    "m_cost": 8,
+    "t_cost": 1,
+    "p_cost": 1
+  },
+  "body": {
+    "vault_id": "ac89646c-db85-4fc1-9713-91127452a09c",
+    "name": "v1-unicode",
+    "created_at": 1785678655783,
+    "updated_at": 1785678655783,
+    "items": [
+      {
+        "id": "1cf1ae4f-3f22-4e50-b0ac-4260864da152",
+        "kind": "note",
+        "title": "🔐 Café الرقم",
+        "fields": [
+          {
+            "id": "fc6b2ae1-d105-48ef-b379-32032c3105e7",
+            "label": "Value",
+            "value": "áb\u0000c 🇮🇩",
+            "kind": "password",
+            "secret": true
+          },
+          {
+            "id": "ba604931-ebe0-4541-b995-e5dc0098fb4a",
+            "label": "Empty",
+            "value": "",
+            "kind": "text",
+            "secret": false
+          }
+        ],
+        "tags": [
+          "العربية"
+        ],
+        "status": "unknown",
+        "favourite": false,
+        "created_at": 1785678655783,
+        "updated_at": 1785678655783,
+        "history": []
+      }
+    ]
+  }
+}

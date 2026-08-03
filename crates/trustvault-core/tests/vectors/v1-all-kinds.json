@@ -1,0 +1,222 @@
+{
+  "description": "One item of each of the seven kinds, with a secret and a non-secret field. Pins the serialized discriminants, which are part of the format.",
+  "format_version": 1,
+  "password": "a different password",
+  "recovery_code": "ST5B-MS4F-AY7K-BTXZ-7KCF-CXJ7",
+  "kdf": {
+    "m_cost": 1024,
+    "t_cost": 2,
+    "p_cost": 1
+  },
+  "body": {
+    "vault_id": "8701c4e9-d0da-4fda-ba1a-9d18bc3a2a54",
+    "name": "v1-all-kinds",
+    "created_at": 1785678655780,
+    "updated_at": 1785678655782,
+    "items": [
+      {
+        "id": "b511c64d-7de6-4455-acd0-81a837ccdb03",
+        "kind": "login",
+        "title": "Item 0",
+        "fields": [
+          {
+            "id": "8b026c5b-aa0b-4899-bdf5-9e4a3e210158",
+            "label": "Username",
+            "value": "user0",
+            "kind": "username",
+            "secret": false
+          },
+          {
+            "id": "b716029b-3342-4766-bef2-f2c797056eba",
+            "label": "Password",
+            "value": "secret-0",
+            "kind": "password",
+            "secret": true
+          }
+        ],
+        "tags": [
+          "pinned"
+        ],
+        "status": "strong",
+        "favourite": false,
+        "created_at": 1785678655782,
+        "updated_at": 1785678655782,
+        "history": []
+      },
+      {
+        "id": "d47ed371-b269-472c-bdcd-550427e3d5e3",
+        "kind": "api_key",
+        "title": "Item 1",
+        "fields": [
+          {
+            "id": "e906987c-fc47-42cb-badf-3af253882f26",
+            "label": "Username",
+            "value": "user1",
+            "kind": "username",
+            "secret": false
+          },
+          {
+            "id": "a4d41326-8b15-4e7e-b410-231a883f910e",
+            "label": "Password",
+            "value": "secret-1",
+            "kind": "password",
+            "secret": true
+          }
+        ],
+        "tags": [
+          "pinned"
+        ],
+        "status": "strong",
+        "favourite": false,
+        "created_at": 1785678655782,
+        "updated_at": 1785678655782,
+        "history": []
+      },
+      {
+        "id": "9cab09a5-6d75-4c7f-95ca-57c19b1d8d8f",
+        "kind": "card",
+        "title": "Item 2",
+        "fields": [
+          {
+            "id": "49d2c246-9aaf-4e70-9efd-efd3268908e9",
+            "label": "Username",
+            "value": "user2",
+            "kind": "username",
+            "secret": false
+          },
+          {
+            "id": "6f6687e5-dce4-429c-ad91-c62476bd7bee",
+            "label": "Password",
+            "value": "secret-2",
+            "kind": "password",
+            "secret": true
+          }
+        ],
+        "tags": [
+          "pinned"
+        ],
+        "status": "strong",
+        "favourite": false,
+        "created_at": 1785678655782,
+        "updated_at": 1785678655782,
+        "history": []
+      },
+      {
+        "id": "a693c8ae-5a0d-49f6-a5f2-01751be00e97",
+        "kind": "note",
+        "title": "Item 3",
+        "fields": [
+          {
+            "id": "899ed29d-b28a-4f1d-adbc-c2d698060e20",
+            "label": "Username",
+            "value": "user3",
+            "kind": "username",
+            "secret": false
+          },
+          {
+            "id": "ed7ced62-791e-4c16-a7a5-bfbb387b0bd5",
+            "label": "Password",
+            "value": "secret-3",
+            "kind": "password",
+            "secret": true
+          }
+        ],
+        "tags": [
+          "pinned"
+        ],
+        "status": "strong",
+        "favourite": false,
+        "created_at": 1785678655782,
+        "updated_at": 1785678655782,
+        "history": []
+      },
+      {
+        "id": "b2872042-91de-46fe-a229-d8671dbea080",
+        "kind": "wifi",
+        "title": "Item 4",
+        "fields": [
+          {
+            "id": "74c5b1e5-0092-4b13-94ba-6bfe2646ef52",
+            "label": "Username",
+            "value": "user4",
+            "kind": "username",
+            "secret": false
+          },
+          {
+            "id": "d199fb97-39d8-4502-85a5-40058da566bb",
+            "label": "Password",
+            "value": "secret-4",
+            "kind": "password",
+            "secret": true
+          }
+        ],
+        "tags": [
+          "pinned"
+        ],
+        "status": "strong",
+        "favourite": false,
+        "created_at": 1785678655782,
+        "updated_at": 1785678655782,
+        "history": []
+      },
+      {
+        "id": "a7a2e781-c6b7-4e49-a4a0-92a5bcbef2f1",
+        "kind": "ssh_key",
+        "title": "Item 5",
+        "fields": [
+          {
+            "id": "15f9c0f1-609a-4533-b027-8b3601932750",
+            "label": "Username",
+            "value": "user5",
+            "kind": "username",
+            "secret": false
+          },
+          {
+            "id": "0c919606-a907-4017-875f-5d46b56db025",
+            "label": "Password",
+            "value": "secret-5",
+            "kind": "password",
+            "secret": true
+          }
+        ],
+        "tags": [
+          "pinned"
+        ],
+        "status": "strong",
+        "favourite": false,
+        "created_at": 1785678655782,
+        "updated_at": 1785678655782,
+        "history": []
+      },
+      {
+        "id": "3a8d5efb-e7fa-4f50-bddc-a69e25a9cdc6",
+        "kind": "identity",
+        "title": "Item 6",
+        "fields": [
+          {
+            "id": "370f20de-dad4-4cc3-a101-059cd590dbe8",
+            "label": "Username",
+            "value": "user6",
+            "kind": "username",
+            "secret": false
+          },
+          {
+            "id": "c795f797-9873-4204-bb5e-97732644ee84",
+            "label": "Password",
+            "value": "secret-6",
+            "kind": "password",
+            "secret": true
+          }
+        ],
+        "tags": [
+          "pinned"
+        ],
+        "status": "strong",
+        "favourite": false,
+        "created_at": 1785678655782,
+        "updated_at": 1785678655782,
+        "history": []
+      }
+    ]
+  }
+}

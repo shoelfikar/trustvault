@@ -1,0 +1,18 @@
+{
+  "description": "A vault with no items. Pins the smallest possible body and the header layout.",
+  "format_version": 1,
+  "password": "correct horse battery staple",
+  "recovery_code": "OD3E-UXYE-T3HO-NMTV-4WKW-KEIQ",
+  "kdf": {
+    "m_cost": 8,
+    "t_cost": 1,
+    "p_cost": 1
+  },
+  "body": {
+    "vault_id": "a96714ce-04ae-4744-a1cd-fd77c39571dc",
+    "name": "v1-empty",
+    "created_at": 1785678655779,
+    "updated_at": 1785678655779,
+    "items": []
+  }
+}

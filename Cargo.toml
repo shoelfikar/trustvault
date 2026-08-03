@@ -18,6 +18,24 @@ serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 zeroize = { version = "1.9", features = ["derive"] }
 
+# Phase 1 cryptography. Every one of these is justified in the decision log (D-21…D-24);
+# the short version is that they are the RustCrypto implementations, they are pure Rust so
+# they cross-compile to all three targets without a C toolchain, and the AEAD has an NCC
+# Group audit behind it. Versions are pinned to a minor because a silent algorithm change
+# in any of them is a format break.
+# "alloc" is required: `hash_password_into` lives behind it. It also pulls `password-hash`
+# (and base64ct and rand_core with it), which this crate never calls — argon2 0.5 offers no
+# way to take the raw KDF without the PHC-string layer. Revisit at argon2 0.6, whose `kdf`
+# feature separates the two; it is a release candidate as of 2026-08-02 and a Tier-1 crate
+# does not ship an RC of its key derivation.
+argon2 = { version = "0.5.3", default-features = false, features = ["alloc", "zeroize"] }
+chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc"] }
+ciborium = "0.2.2"
+data-encoding = "2.11"
+getrandom = "0.4"
+subtle = "2.6"
+uuid = { version = "1", features = ["v4", "serde"] }
+
 # Release profile. A password manager spends its life idle in the dock, so size and
 # startup (S-01, S-06) matter more than throughput.
 [profile.release]
@@ -29,4 +47,25 @@ strip = true
 
 # Debug assertions stay on in the dev profile for the core crate's invariants.
 [profile.dev]
+debug = true
+
+# Dependencies are compiled with optimization even in dev and test builds. Unoptimized
+# Argon2 and XChaCha20 are roughly two orders of magnitude slower, which turns the
+# byte-mutation test (R-04, several thousand decryptions) from seconds into an hour and makes
+# the whole suite something people skip. Our own crates stay unoptimized and debuggable.
+[profile.dev.package."*"]
+opt-level = 2
+
+# Coverage runs (N-03, >= 90 % on trustvault-core) need three things at once: optimized
+# cryptography, or the byte-mutation test's thousands of decryptions take hours under
+# instrumentation; unwinding, because proptest catches panics to shrink a failing case and
+# `panic = "abort"` would turn a shrinkable failure into a bare abort; and no LTO, because
+# instrumented LTO builds are slow to link and gain nothing here.
+[profile.coverage]
+inherits = "release"
+opt-level = 2
+lto = false
+codegen-units = 16
+panic = "unwind"
+strip = false
 debug = true

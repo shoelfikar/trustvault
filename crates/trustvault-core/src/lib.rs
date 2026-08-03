@@ -16,12 +16,51 @@
 //! * Item lists cross the boundary with secrets elided.
 //! * Copying a secret never returns it; this crate's caller writes to the clipboard directly.
 //!
-//! # Status
+//! # The format
 //!
-//! Phase 0 stub. The format, the KDF, and the AEAD land in Phase 1 — see
-//! `phases/phase-1-vault-core.md`. Nothing here is stable yet.
+//! `docs/vault-format.md` is the specification and was written before this code. It is not a
+//! description of what the implementation happens to do, and where the two disagree the document
+//! is authoritative — with the known-answer vectors in `tests/vectors/` as the tie-breaker.
+//!
+//! # Example
+//!
+//! ```
+//! use trustvault_core::{ItemKind, KdfParams, Vault};
+//!
+//! // Test parameters. Real vaults calibrate — see `KdfParams::calibrate`.
+//! let (mut vault, recovery) = Vault::create("Personal", "correct horse", KdfParams::TESTING)?;
+//! let id = vault.add_item(ItemKind::Login, "GitHub");
+//! vault.item_mut(id).map(|item| item.set_field("Password", "hunter2", true));
+//!
+//! let bytes = vault.to_bytes()?;
+//! drop(vault);
+//!
+//! // The password opens it, and so does the recovery kit, independently.
+//! let reopened = Vault::open(&bytes, "correct horse")?;
+//! assert_eq!(reopened.items().count(), 1);
+//! assert!(Vault::open_with_recovery(&bytes, &recovery).is_ok());
+//! assert!(Vault::open(&bytes, "wrong").is_err());
+//! # Ok::<(), trustvault_core::Error>(())
+//! ```
 
 #![forbid(unsafe_code)]
+
+mod aead;
+mod format;
+mod kdf;
+mod model;
+mod recovery;
+mod secret;
+mod vault;
+
+pub use format::{HEADER_LEN, Header, WRAP_AAD_LEN};
+pub use kdf::KdfParams;
+pub use model::{
+    Field, FieldId, FieldKind, HistoryEntry, Item, ItemId, ItemKind, ItemStatus, VaultBody,
+};
+pub use recovery::RecoveryCode;
+pub use secret::{SecretBytes, SecretString};
+pub use vault::Vault;
 
 use thiserror::Error;
 
@@ -34,11 +73,17 @@ pub const MAGIC: &[u8; 4] = b"TVLT";
 /// On-disk format version.
 ///
 /// Bumped whenever the byte layout changes in a way an older reader cannot handle. The layout
-/// itself is specified in `docs/vault-format.md`, which is written before the implementation.
+/// itself is specified in `docs/vault-format.md`, which was written before the implementation.
 pub const FORMAT_VERSION: u16 = 1;
 
 /// The file extension used for vault files.
 pub const EXTENSION: &str = "tvault";
+
+/// Algorithm identifier for Argon2id v0x13, stored at header offset 6.
+pub const KDF_ID_ARGON2ID: u8 = 1;
+
+/// Algorithm identifier for XChaCha20-Poly1305, stored at header offset 7.
+pub const AEAD_ID_XCHACHA20POLY1305: u8 = 1;
 
 /// Errors surfaced by the vault core.
 ///
@@ -67,6 +112,29 @@ pub enum Error {
     #[error("vault could not be read")]
     Unreadable,
 
+    /// The recovery code is not 24 characters of the RFC 4648 base32 alphabet.
+    ///
+    /// Distinct from [`Error::Unreadable`] on purpose: this is a transcription mistake found
+    /// before any key material exists, so reporting it leaks nothing about the vault. A
+    /// *correctly formed* code that does not open the vault still returns `Unreadable`.
+    #[error("recovery code is malformed")]
+    MalformedRecoveryCode,
+
+    /// The vault body could not be serialized. A bug in this crate, not a user error.
+    #[error("vault body could not be encoded")]
+    Encode,
+
+    /// The operating system's random number generator refused to produce entropy.
+    ///
+    /// There is no fallback and there must not be one: a PRNG standing in for the OS CSPRNG is
+    /// exactly the failure R-06 exists to prevent.
+    #[error("the operating system's random number generator is unavailable")]
+    Entropy,
+
+    /// The KDF parameters are outside the bounds in `docs/vault-format.md` §3.3.
+    #[error("Argon2id parameters are out of range")]
+    KdfParams,
+
     /// An I/O failure while reading or writing the vault file.
     #[error("vault file I/O failed")]
     Io(#[from] std::io::Error),
@@ -74,71 +142,3 @@ pub enum Error {
 
 /// Result alias for vault operations.
 pub type Result<T> = core::result::Result<T, Error>;
-
-/// The kinds of item a vault can hold.
-///
-/// Fixed at seven by the design; adding an eighth is a format change and therefore a decision
-/// log entry, not a patch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ItemKind {
-    /// Username and password for a site or service.
-    Login,
-    /// An API key or token.
-    ApiKey,
-    /// A payment card.
-    Card,
-    /// Free-form encrypted text.
-    Note,
-    /// A Wi-Fi network and its passphrase.
-    WiFi,
-    /// An SSH key and its passphrase.
-    SshKey,
-    /// Identity documents.
-    Identity,
-}
-
-impl ItemKind {
-    /// Every variant, in the order the design's "New item" dialog presents them.
-    pub const ALL: [ItemKind; 7] = [
-        ItemKind::Login,
-        ItemKind::ApiKey,
-        ItemKind::Card,
-        ItemKind::Note,
-        ItemKind::WiFi,
-        ItemKind::SshKey,
-        ItemKind::Identity,
-    ];
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn magic_is_four_bytes_and_stable() {
-        // If this test is ever "fixed" by changing the expected value, that is a format
-        // break: every existing vault stops being recognised. Bump FORMAT_VERSION instead.
-        assert_eq!(MAGIC, b"TVLT");
-    }
-
-    #[test]
-    fn all_item_kinds_are_listed() {
-        // Guards against adding a variant to ItemKind and forgetting ALL, which would make
-        // the new type invisible to the New-item dialog while still being storable.
-        assert_eq!(ItemKind::ALL.len(), 7);
-        for kind in ItemKind::ALL {
-            assert!(ItemKind::ALL.contains(&kind));
-        }
-    }
-
-    #[test]
-    fn item_kind_serialises_to_stable_snake_case() {
-        // These strings go into the vault file, so they are part of the format.
-        // `.ok()` rather than `?` or unwrap: serde_json::Error is not PartialEq, and a
-        // serialisation failure here should read as "wrong output", not as a panic.
-        let json = serde_json::to_string(&ItemKind::SshKey).ok();
-        assert_eq!(json.as_deref(), Some(r#""ssh_key""#));
-    }
-}

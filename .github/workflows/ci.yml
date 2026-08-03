@@ -71,6 +71,55 @@ jobs:
             exit 1
           fi
 
+  nonce:
+    name: Nonce discipline (R-06)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # R-06: every AEAD nonce comes from the OS CSPRNG, never a counter. The structural
+      # defence is that `aead::random` is the crate's only source of randomness and there is
+      # no seeded generator to reach for; this job fails the build if one appears. A reviewer
+      # can miss a `rand::thread_rng()` added in a hurry — grep cannot.
+      - name: Assert the core has no seeded random number generator
+        run: |
+          if grep -REn 'rand::|thread_rng|StdRng|ChaChaRng|SmallRng|from_seed|seed_from_u64' \
+              crates/trustvault-core/src; then
+            echo "::error::trustvault-core reached for a seedable RNG — nonces must come from the OS CSPRNG (R-06)"
+            exit 1
+          fi
+      - name: Assert the CSPRNG is called from exactly one place
+        run: |
+          calls=$(grep -REc 'getrandom::' crates/trustvault-core/src | grep -v ':0$' || true)
+          echo "$calls"
+          files=$(echo "$calls" | grep -c . || true)
+          if [ "$files" != "1" ]; then
+            echo "::error::getrandom is called from $files files; it must be confined to src/aead.rs (R-06)"
+            exit 1
+          fi
+          echo "$calls" | grep -q '^crates/trustvault-core/src/aead.rs:' || {
+            echo "::error::the CSPRNG call moved out of src/aead.rs (R-06)"
+            exit 1
+          }
+
+  coverage:
+    name: Vault core coverage (N-03)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      # N-03 is >= 90 % on the core crate, and the threshold is enforced here rather than
+      # reported: a coverage number nobody fails on is a number nobody reads. The dedicated
+      # `coverage` profile in Cargo.toml exists because instrumented *unoptimized* Argon2 turns
+      # the byte-mutation test from seconds into hours.
+      - name: Coverage
+        run: |
+          cargo llvm-cov --profile coverage -p trustvault-core \
+            --fail-under-lines 90 --summary-only
+
   audit:
     name: Dependency audit (N-04)
     runs-on: ubuntu-latest

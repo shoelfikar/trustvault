@@ -7,6 +7,12 @@ src/lib/fonts/
 design-system/
 LICENSE
 
+# Known-answer vectors and their manifests. These are evidence, not source: the whole
+# point is that nothing but a deliberate regeneration ever touches them, so a formatter
+# reflowing a manifest is exactly the diff that must never appear. `npm run fmt` did
+# rewrite two of them once, which is why this line exists.
+crates/trustvault-core/tests/vectors/
+
 # The design documents are hand-formatted for reading in a 100-column terminal;
 # Prettier reflows the tables and makes the diffs unreadable.
 *.md

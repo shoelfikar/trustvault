@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "vite",
     "dev:app": "bash scripts/dev.sh",
-    "icons": "python3 scripts/make-icon.py && tauri icon src-tauri/icon-source.png && rm -rf src-tauri/icons/android src-tauri/icons/ios",
+    "icons": "tauri icon src/lib/icons/brand/app-icon-macos-1024.svg && rm -rf src-tauri/icons/android src-tauri/icons/ios",
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
@@ -29,7 +29,6 @@
     "vite": "^8.2.0"
   },
   "dependencies": {
-    "@lucide/svelte": "^1.28.0",
     "@tauri-apps/api": "^2.11.1"
   }
 }

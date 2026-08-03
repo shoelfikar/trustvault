@@ -3,6 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      The brand mark from src/lib/icons/brand/, the same artwork the packaged app icon is
+      generated from (D-29). Vite rewrites the path and fingerprints the file on build, so
+      it stays a local asset and font-src/img-src never has to reach off-device.
+    -->
+    <link rel="icon" type="image/svg+xml" href="/src/lib/icons/brand/favicon-16.svg" />
     <title>TrustVault</title>
   </head>
   <body>

@@ -1,6 +1,6 @@
 <script lang="ts">
   import Specimen from './lib/screens/Specimen.svelte';
-  import { Lock, Palette } from '@lucide/svelte';
+  import Icon from './lib/icons/Icon.svelte';
 
   /**
    * Phase 0 shell. This is scaffolding, not the app — the real three-pane shell arrives
@@ -26,7 +26,7 @@
 
 <div class="chrome">
   <div class="brand">
-    <Lock size={15} strokeWidth={1.6} color="var(--accent)" />
+    <span class="mark"><Icon name="lock" size={15} /></span>
     <span class="wordmark">TrustVault</span>
     <span class="phase">Phase 0 · Workbench</span>
   </div>
@@ -50,7 +50,12 @@
     onclick={() => (theme = theme === 'dark' ? 'light' : 'dark')}
     aria-label="Switch to {theme === 'dark' ? 'light' : 'dark'} theme"
   >
-    <Palette size={14} strokeWidth={1.6} />
+    <!--
+      `refresh`, not a palette glyph: the set shipped with the design has no palette, and
+      §8's "one set, no mixing" makes borrowing one from elsewhere the wrong fix. Cycling is
+      what the control does anyway, so the glyph names the action rather than the subject.
+    -->
+    <Icon name="refresh" size={14} />
     {theme}
   </button>
 </div>
@@ -74,6 +79,11 @@
     display: flex;
     align-items: center;
     gap: var(--space-3);
+  }
+  .mark {
+    display: flex;
+    /* The glyph inherits `currentColor`, so the brass lives on the wrapper. */
+    color: var(--accent);
   }
   .wordmark {
     font-size: var(--text-sm);

@@ -13,6 +13,11 @@ LICENSE
 # rewrite two of them once, which is why this line exists.
 crates/trustvault-core/tests/vectors/
 
+# The icon set as shipped by the design. Prettier reflows the single-line path data into
+# something no longer diffable against the source artwork.
+src/lib/icons/ui/
+src/lib/icons/brand/
+
 # The design documents are hand-formatted for reading in a 100-column terminal;
 # Prettier reflows the tables and makes the diffs unreadable.
 *.md

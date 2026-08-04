@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * One field row: label, value, reveal, copy — R-12, R-14.
+   * One field row inside the detail pane's bordered box: label, value, reveal, copy — R-12, R-14.
    *
    * This is the component the entire IPC contract was shaped around, so the rules it obeys are
    * worth stating where someone editing it will read them:
@@ -11,31 +11,37 @@
    *   extend a reveal.
    * * **Copy never receives the value.** `copy_field` returns only when the clipboard will be
    *   cleared. There is no code path in this file that could put a copied secret into a
-   *   variable, because none is offered one.
+   *   variable, because none is offered one. The countdown it hands to `oncopied` is a
+   *   timestamp, and the parent draws the chip §5 asks for.
    * * **The mask is not the secret's length** (D-32). Nothing here derives anything from it.
    */
   import Icon from '../icons/Icon.svelte';
+  import IconButton from './IconButton.svelte';
   import { asIpcError, copyField, revealField, type FieldSummary } from '../ipc';
 
   interface Props {
     itemId: string;
     field: FieldSummary;
+    /** Draws the 1px separator; the first row in the box has none. */
+    first?: boolean;
     /** Set by the parent when the host says this field was remasked. */
     remaskSignal: number;
+    /** Fires with the epoch-ms the clipboard clears at, so the parent can draw the chip. */
+    oncopied?: (clearsAt: number) => void;
   }
 
-  const { itemId, field, remaskSignal }: Props = $props();
+  const { itemId, field, first = false, remaskSignal, oncopied }: Props = $props();
 
   /** The revealed plaintext, held only while it is on screen. */
   let revealed = $state<string | null>(null);
   /** Seconds left on the cosmetic countdown. */
   let secondsLeft = $state(0);
-  /** Seconds until the clipboard clears, after a copy. */
-  let clipboardLeft = $state(0);
+  /** Drives the check-mark swap §5 asks for, 1.2s. */
+  let justCopied = $state(false);
   let error = $state('');
 
   let countdown: ReturnType<typeof setInterval> | undefined;
-  let clipboardTimer: ReturnType<typeof setInterval> | undefined;
+  let copiedTimer: ReturnType<typeof setTimeout> | undefined;
 
   /**
    * The host said this field is remasked. Drop the copy immediately.
@@ -53,7 +59,7 @@
 
   $effect(() => () => {
     clearInterval(countdown);
-    clearInterval(clipboardTimer);
+    clearTimeout(copiedTimer);
   });
 
   async function reveal() {
@@ -69,12 +75,13 @@
     try {
       const result = await revealField(itemId, field.id);
       revealed = result.value;
-      clearInterval(countdown);
-      countdown = setInterval(() => {
+      const tick = () => {
         secondsLeft = Math.max(0, Math.ceil((result.remaskAt - Date.now()) / 1000));
         if (secondsLeft === 0) clearInterval(countdown);
-      }, 250);
-      secondsLeft = Math.max(0, Math.ceil((result.remaskAt - Date.now()) / 1000));
+      };
+      clearInterval(countdown);
+      countdown = setInterval(tick, 250);
+      tick();
     } catch (thrown) {
       error = asIpcError(thrown).message;
     }
@@ -85,55 +92,47 @@
     try {
       // Note what is *not* assigned here. The response has no value in it to assign.
       const { clearsAt } = await copyField(itemId, field.id);
-      clearInterval(clipboardTimer);
-      clipboardTimer = setInterval(() => {
-        clipboardLeft = Math.max(0, Math.ceil((clearsAt - Date.now()) / 1000));
-        if (clipboardLeft === 0) clearInterval(clipboardTimer);
-      }, 250);
-      clipboardLeft = Math.max(0, Math.ceil((clearsAt - Date.now()) / 1000));
+      oncopied?.(clearsAt);
+      justCopied = true;
+      clearTimeout(copiedTimer);
+      copiedTimer = setTimeout(() => (justCopied = false), 1200);
     } catch (thrown) {
       error = asIpcError(thrown).message;
     }
   }
 
   const shown = $derived(field.secret ? (revealed ?? field.mask ?? '') : (field.value ?? ''));
+  const isLink = $derived(field.kind === 'url');
+  const isMono = $derived(field.secret || field.kind === 'otp' || isLink);
 </script>
 
-<div class="row">
+<div class="row" class:first>
   <span class="label">{field.label}</span>
 
-  <span class="value" class:mono={field.secret || field.kind === 'otp'}>{shown}</span>
+  <span class="value" class:mono={isMono} class:link={isLink}>{shown}</span>
 
-  <div class="actions">
-    {#if secondsLeft > 0}
-      <!-- Cosmetic. The host owns the real timer; this only says what it is doing. -->
-      <span class="chip" aria-live="off">{secondsLeft}s</span>
-    {/if}
-    {#if clipboardLeft > 0}
-      <!--
-        Whether this may promise a clear at all is the open question against the Phase 2 gate:
-        clipboard managers keep their own copy and the platform hints are advisory. The wording
-        is "clears in", not "cleared" -- but it still claims more than the platform guarantees,
-        and must be revisited once GPaste and Klipper have actually been tested.
-      -->
-      <span class="chip">Clears in {clipboardLeft}s</span>
-    {/if}
+  {#if secondsLeft > 0}
+    <!-- Cosmetic. The host owns the real timer; this only says what it is doing. -->
+    <span class="countdown" aria-live="off">{secondsLeft}s</span>
+  {/if}
 
-    {#if field.secret}
-      <button
-        type="button"
-        onclick={reveal}
-        aria-pressed={revealed !== null}
-        aria-label={revealed !== null ? `Hide ${field.label}` : `Reveal ${field.label}`}
-      >
-        <Icon name={revealed !== null ? 'eye-off' : 'eye'} size={15} />
-      </button>
-    {/if}
+  {#if field.secret}
+    <IconButton
+      icon={revealed !== null ? 'eye-off' : 'eye'}
+      label={revealed !== null ? `Hide ${field.label}` : `Reveal ${field.label}`}
+      title="Reveal · hides again automatically"
+      active={revealed !== null}
+      onclick={reveal}
+    />
+  {/if}
 
-    <button type="button" onclick={copy} aria-label="Copy {field.label}">
-      <Icon name="copy" size={15} />
-    </button>
-  </div>
+  <IconButton
+    icon={justCopied ? 'check' : 'copy'}
+    tone={justCopied ? 'ok' : 'default'}
+    label="Copy {field.label}"
+    title="Copy"
+    onclick={copy}
+  />
 </div>
 
 {#if error}
@@ -142,28 +141,39 @@
 
 <style>
   .row {
-    display: grid;
-    grid-template-columns: 96px 1fr auto;
+    display: flex;
     align-items: center;
     gap: var(--space-4);
-    min-height: var(--field-row-h);
-    padding: var(--space-2) 0;
-    border-bottom: 1px solid var(--border);
+    min-height: 34px;
+    padding: 6px var(--space-3) 6px 14px;
+    border-top: 1px solid var(--border);
+  }
+  .row.first {
+    border-top: none;
   }
 
   .label {
+    width: 124px;
+    flex: none;
     font-size: var(--text-micro);
-    line-height: var(--text-micro-lh);
+    font-weight: var(--weight-medium);
     letter-spacing: var(--tracking-micro);
     text-transform: uppercase;
-    color: var(--fg-muted);
+    color: var(--fg-subtle);
   }
 
   .value {
+    flex: 1;
+    min-width: 0;
     font-size: var(--text-base);
-    line-height: var(--text-base-lh);
+    font-variant-numeric: tabular-nums;
     color: var(--fg);
-    overflow-wrap: anywhere;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .value.link {
+    color: var(--accent);
   }
 
   /*
@@ -178,45 +188,23 @@
     font-feature-settings:
       'ss01' 1,
       'ss02' 1;
-    letter-spacing: var(--tracking-lg);
+    user-select: text;
   }
 
-  .actions {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-  }
-
-  .actions button {
-    display: flex;
-    padding: var(--space-1);
-    border-radius: var(--radius-sm);
-    color: var(--fg-subtle);
-    transition: color var(--dur-instant) var(--ease-out);
-  }
-  .actions button:hover {
-    color: var(--fg);
-  }
-  .actions button:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
-  }
-
-  .chip {
-    padding: 1px var(--space-2);
-    border-radius: var(--radius-sm);
-    background: var(--bg-hover);
+  .countdown {
+    flex: none;
     font-size: var(--text-micro);
+    font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
-    color: var(--fg-muted);
-    white-space: nowrap;
+    color: var(--fg-subtle);
   }
 
   .error {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding: var(--space-2) 0;
+    padding: var(--space-2) 14px;
+    border-top: 1px solid var(--border);
     font-size: var(--text-sm);
     color: var(--danger);
   }

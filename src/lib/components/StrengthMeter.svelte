@@ -1,20 +1,28 @@
 <script lang="ts">
   /**
-   * MASTER.md §2: **four discrete segments, not a rainbow gradient.**
-   * `--fg-subtle` (empty) → `--danger` → `--warn` → `--ok`, always paired with the word and
-   * the crack-time estimate in text.
+   * MASTER.md §2: **four discrete segments, not a rainbow gradient**, always paired with the
+   * word and the crack-time estimate in text.
    *
-   * The brass accent is deliberately absent from this component. §2 reserves it for brand and
-   * interaction — it never means "good", and a strength meter is the single most tempting
-   * place to break that rule.
+   * Two details are the prototype's and not this file's invention. The filled segments all take
+   * one colour chosen by how many there are — 1–2 danger, 3 warn, 4 ok — rather than a per-index
+   * ramp, so a two-segment bar is not half-reassuring. And an empty segment is
+   * `--border-strong`, where §2's prose says `--fg-subtle`: at 4px tall, `--fg-subtle` reads as
+   * a *filled* segment and the meter stops being countable. Logged as D-34.
+   *
+   * The brass accent is deliberately absent. §2 reserves it for brand and interaction — it never
+   * means "good", and a strength meter is the single most tempting place to break that rule.
    */
   import type { Strength } from '../ipc';
 
   interface Props {
     strength: Strength | null;
+    /** Fixed segment-block width. The prototype uses 180px in the detail pane, 150px in dialogs. */
+    width?: string;
+    /** Replaces the crack-time text, for the kinds that are not scored at all. */
+    note?: string;
   }
 
-  const { strength }: Props = $props();
+  const { strength, width = '', note = '' }: Props = $props();
 
   /**
    * zxcvbn scores 0–4; the meter has four segments. 0 and 1 both fill one segment, which is
@@ -24,13 +32,14 @@
   const filled = $derived(strength && strength.label ? Math.max(1, strength.score) : 0);
 
   const tone = $derived(
-    filled === 0 ? 'empty' : filled <= 1 ? 'danger' : filled === 2 ? 'warn' : 'ok',
+    filled === 0 ? 'empty' : filled <= 2 ? 'danger' : filled === 3 ? 'warn' : 'ok',
   );
 </script>
 
 <div class="meter">
   <div
     class="segments"
+    style={width ? `width:${width};flex:none` : ''}
     role="meter"
     aria-valuemin={0}
     aria-valuemax={4}
@@ -43,38 +52,32 @@
     {/each}
   </div>
 
-  <p class="readout">
-    {#if strength?.label}
-      <!-- Word first, colour second. Status is never colour alone. -->
-      <span class="label {tone}">{strength.label}</span>
-      <span class="time">· {strength.crackTime} to crack offline</span>
-    {:else}
-      <span class="time">Choose something you can remember and nobody can guess.</span>
-    {/if}
-  </p>
+  {#if strength?.label}
+    <!-- Word first, colour second. Status is never colour alone. -->
+    <span class="label {tone}">{strength.label}</span>
+  {/if}
+  <span class="time">{note || strength?.crackTime || ''}</span>
 </div>
 
 <style>
   .meter {
     display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
+    align-items: center;
+    gap: 10px;
   }
 
   .segments {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    display: flex;
+    flex: 1;
     gap: 3px;
   }
 
   .segment {
-    height: 3px;
-    border-radius: 1px;
-    background: var(--bg-hover);
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border-strong);
     transition: background var(--dur-instant) var(--ease-out);
-  }
-  .segment.empty {
-    background: var(--bg-hover);
   }
   .segment.danger {
     background: var(--danger);
@@ -86,14 +89,9 @@
     background: var(--ok);
   }
 
-  .readout {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-    font-size: var(--text-sm);
-    line-height: var(--text-sm-lh);
-  }
   .label {
+    flex: none;
+    font-size: var(--text-base);
     font-weight: var(--weight-medium);
   }
   .label.danger {
@@ -105,7 +103,10 @@
   .label.ok {
     color: var(--ok);
   }
+
   .time {
-    color: var(--fg-subtle);
+    font-size: var(--text-sm);
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-muted);
   }
 </style>

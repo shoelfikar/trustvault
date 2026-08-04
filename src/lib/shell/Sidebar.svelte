@@ -1,89 +1,83 @@
 <script lang="ts">
   /**
-   * Vault navigation with counts, tags, and the Watchtower entry — `MASTER.md` §6.
+   * Vault navigation with counts, tags, Watchtower and the vault footer — `MASTER.md` §6.
    *
    * The counts come from the item list the shell already holds, not from a second command.
    * Asking the host again would be a second source of truth for the same number, and the two
    * would disagree the first time a filter changed.
+   *
+   * The footer is the prototype's profile row with honest content. There is no account and no
+   * sync (D-03), so an avatar and an email would be invented; it carries the *vault* instead —
+   * initials, name, file and item count — and opens the vault switcher, which is what a footer
+   * in that position is for.
    */
   import Icon, { type IconName } from '../icons/Icon.svelte';
   import type { ItemKind, ItemSummary } from '../ipc';
-
-  export type Filter =
-    | { kind: 'all' }
-    | { kind: 'favourites' }
-    | { kind: 'type'; type: ItemKind }
-    | { kind: 'tag'; tag: string }
-    | { kind: 'watchtower' };
+  import { isFlagged, sameView, tagColour, type View } from './views';
 
   interface Props {
     items: ItemSummary[];
-    filter: Filter;
-    onfilter: (next: Filter) => void;
+    view: View;
+    vaultName: string;
+    vaultFile: string;
+    onview: (next: View) => void;
+    onvaults: () => void;
   }
 
-  const { items, filter, onfilter }: Props = $props();
+  const { items, view, vaultName, vaultFile, onview, onvaults }: Props = $props();
 
-  /** The four types the design's sidebar names. The other three live under All. */
+  /** The three types the design's sidebar names. The other four live under All Items. */
   const types: { type: ItemKind; label: string; icon: IconName }[] = [
-    { type: 'login', label: 'Logins', icon: 'key' },
+    { type: 'login', label: 'Login', icon: 'key' },
     { type: 'card', label: 'Cards', icon: 'card' },
     { type: 'note', label: 'Notes', icon: 'note' },
-    { type: 'wifi', label: 'Wi-Fi', icon: 'wifi' },
   ];
 
   const favourites = $derived(items.filter((item) => item.favourite).length);
   const tags = $derived(
     [...new Set(items.flatMap((item) => item.tags))].sort((a, b) => a.localeCompare(b)),
   );
-
-  /**
-   * Items Watchtower has something to say about.
-   *
-   * `unknown` and `strong` are not findings — a badge counting them would show a number on a
-   * vault where nothing is wrong, which is how a badge stops meaning anything.
-   */
-  const flagged = $derived(
-    items.filter((item) => ['weak', 'reused', 'breached', 'expired'].includes(item.status)).length,
-  );
+  const flagged = $derived(items.filter(isFlagged).length);
 
   const countOf = (type: ItemKind) => items.filter((item) => item.kind === type).length;
+  const countTag = (tag: string) => items.filter((item) => item.tags.includes(tag)).length;
 
-  const isActive = (candidate: Filter) =>
-    filter.kind === candidate.kind &&
-    (candidate.kind !== 'type' || (filter.kind === 'type' && filter.type === candidate.type)) &&
-    (candidate.kind !== 'tag' || (filter.kind === 'tag' && filter.tag === candidate.tag));
+  const initials = $derived(
+    vaultName
+      .trim()
+      .split(/\s+/)
+      .map((word) => word[0] ?? '')
+      .slice(0, 2)
+      .join('')
+      .toUpperCase() || 'TV',
+  );
 </script>
 
-<nav class="sidebar" aria-label="Vault">
+<nav class="sidebar sb" aria-label="Vault">
+  <p class="heading">Vault</p>
   <ul>
     <li>
-      <button class:on={isActive({ kind: 'all' })} onclick={() => onfilter({ kind: 'all' })}>
+      <button class:on={sameView(view, { kind: 'all' })} onclick={() => onview({ kind: 'all' })}>
         <Icon name="list" size={16} />
-        <span class="text">All items</span>
+        <span class="text">All Items</span>
         <span class="count">{items.length}</span>
       </button>
     </li>
     <li>
       <button
-        class:on={isActive({ kind: 'favourites' })}
-        onclick={() => onfilter({ kind: 'favourites' })}
+        class:on={sameView(view, { kind: 'favourites' })}
+        onclick={() => onview({ kind: 'favourites' })}
       >
         <Icon name="star" size={16} />
-        <span class="text">Favourites</span>
+        <span class="text">Favorites</span>
         <span class="count">{favourites}</span>
       </button>
     </li>
-  </ul>
-
-  <hr />
-
-  <ul>
     {#each types as entry (entry.type)}
       <li>
         <button
-          class:on={isActive({ kind: 'type', type: entry.type })}
-          onclick={() => onfilter({ kind: 'type', type: entry.type })}
+          class:on={sameView(view, { kind: 'type', type: entry.type })}
+          onclick={() => onview({ kind: 'type', type: entry.type })}
         >
           <Icon name={entry.icon} size={16} />
           <span class="text">{entry.label}</span>
@@ -100,11 +94,14 @@
       {#each tags as tag (tag)}
         <li>
           <button
-            class:on={isActive({ kind: 'tag', tag })}
-            onclick={() => onfilter({ kind: 'tag', tag })}
+            class:on={sameView(view, { kind: 'tag', tag })}
+            onclick={() => onview({ kind: 'tag', tag })}
           >
-            <Icon name="tag" size={16} />
+            <span class="dot-slot"
+              ><span class="dot" style="background:{tagColour(tag)}"></span></span
+            >
             <span class="text">{tag}</span>
+            <span class="count">{countTag(tag)}</span>
           </button>
         </li>
       {/each}
@@ -116,8 +113,8 @@
   <ul>
     <li>
       <button
-        class:on={isActive({ kind: 'watchtower' })}
-        onclick={() => onfilter({ kind: 'watchtower' })}
+        class:on={sameView(view, { kind: 'watchtower' })}
+        onclick={() => onview({ kind: 'watchtower' })}
       >
         <Icon name="shield" size={16} />
         <span class="text">Watchtower</span>
@@ -126,53 +123,76 @@
         {/if}
       </button>
     </li>
+    <li>
+      <button
+        class:on={sameView(view, { kind: 'trash' })}
+        onclick={() => onview({ kind: 'trash' })}
+      >
+        <Icon name="trash" size={16} />
+        <span class="text">Trash</span>
+      </button>
+    </li>
   </ul>
+
+  <div class="spacer"></div>
+
+  <div class="footer">
+    <button class="vault" onclick={onvaults} title="Switch vault">
+      <span class="avatar">{initials}</span>
+      <span class="lines">
+        <span class="vault-name">{vaultName}</span>
+        <span class="vault-meta">{vaultFile} · {items.length} items</span>
+      </span>
+      <span class="chev"><Icon name="chev" size={13} /></span>
+    </button>
+  </div>
 </nav>
 
 <style>
   .sidebar {
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
     height: 100%;
-    padding: var(--space-3) var(--space-2);
+    padding: var(--space-3) 0;
     background: var(--bg-base);
     /* §4: hairlines do the work. No shadow on the sidebar. */
     border-right: 1px solid var(--border);
     overflow-y: auto;
   }
 
-  ul {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-  }
-
-  hr {
-    height: 1px;
-    margin: var(--space-2) var(--space-2);
-    border: none;
-    background: var(--border);
-  }
-
   .heading {
-    padding: 0 var(--space-3);
+    padding: 6px var(--space-5) var(--space-2);
     font-size: var(--text-micro);
+    font-weight: var(--weight-medium);
     letter-spacing: var(--tracking-micro);
     text-transform: uppercase;
     color: var(--fg-subtle);
   }
 
+  ul {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 0 var(--space-3);
+  }
+
+  hr {
+    height: 1px;
+    margin: 10px var(--space-5);
+    border: none;
+    background: var(--border);
+  }
+
   button {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
+    gap: 9px;
     width: 100%;
-    min-height: var(--target-min);
+    height: var(--control-h);
     padding: 0 var(--space-3);
     border-radius: var(--radius-sm);
     font-size: var(--text-base);
-    color: var(--fg-muted);
+    color: var(--fg);
     text-align: left;
     transition:
       background var(--dur-instant) var(--ease-out),
@@ -180,11 +200,11 @@
   }
   button:hover {
     background: var(--bg-hover);
-    color: var(--fg);
   }
   /* §8: the glyph is --accent when active. Brass here is *interaction*, not status. */
-  button.on {
-    background: var(--bg-selected);
+  button.on,
+  button.on:hover {
+    background: var(--accent-wash);
     color: var(--accent);
   }
   button:focus-visible {
@@ -200,9 +220,22 @@
   }
 
   .count {
-    font-size: var(--text-sm);
+    font-size: var(--text-micro);
+    font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
     color: var(--fg-subtle);
+  }
+
+  .dot-slot {
+    display: grid;
+    place-items: center;
+    width: 16px;
+    flex: none;
+  }
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 2px;
   }
 
   /*
@@ -210,14 +243,66 @@
    * meaning "attention". It carries a number, which is the second channel beside the colour.
    */
   .badge {
-    min-width: 18px;
     padding: 0 var(--space-2);
-    border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--warn) 18%, transparent);
+    border: 1px solid var(--warn);
+    border-radius: 3px;
     font-size: var(--text-micro);
-    font-variant-numeric: tabular-nums;
+    line-height: 15px;
+    font-family: var(--font-mono);
     font-weight: var(--weight-medium);
+    font-variant-numeric: tabular-nums;
     color: var(--warn);
-    text-align: center;
+  }
+
+  .spacer {
+    flex: 1;
+    min-height: var(--space-4);
+  }
+
+  .footer {
+    border-top: 1px solid var(--border);
+  }
+  .vault {
+    height: auto;
+    padding: var(--space-3) var(--space-5);
+    border-radius: 0;
+    gap: var(--space-3);
+  }
+  .avatar {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    flex: none;
+    /* §4: --radius-full is for avatars only, and this is the one. */
+    border-radius: var(--radius-full);
+    background: var(--accent-wash);
+    font-size: var(--text-micro);
+    font-weight: var(--weight-semibold);
+    color: var(--accent);
+  }
+  .lines {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+  }
+  .vault-name {
+    font-size: var(--text-sm);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .vault-meta {
+    font-size: var(--text-micro);
+    color: var(--fg-subtle);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chev {
+    display: flex;
+    flex: none;
+    color: var(--fg-subtle);
   }
 </style>

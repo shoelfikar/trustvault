@@ -70,6 +70,7 @@
     path={status.path ?? ''}
     displayName={status.displayName}
     reason={lockReason}
+    autoLockSeconds={settings?.autoLockSeconds ?? 300}
     onunlocked={() => {
       lockReason = null;
       void refresh();

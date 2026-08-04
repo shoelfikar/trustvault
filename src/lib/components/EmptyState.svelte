@@ -3,9 +3,9 @@
    * MASTER.md §7: **every list has one.** Line-art icon, one sentence, one primary action.
    * "Never a blank pane."
    *
-   * The action is optional here for one honest reason: some empty states in Phase 2 have no
-   * action yet, because the thing that would fill them arrives in Phase 3. An empty state with
-   * a button that does nothing is worse than one that explains and waits.
+   * The action is optional here for one honest reason: some empty states have no action yet,
+   * because the thing that would fill them arrives in a later phase. An empty state with a
+   * button that does nothing is worse than one that explains and waits.
    */
   import Icon, { type IconName } from '../icons/Icon.svelte';
   import Button from './Button.svelte';
@@ -15,17 +15,37 @@
     /** One sentence. Not a paragraph — the pane is not a place to explain the product. */
     message: string;
     actionLabel?: string;
+    actionDisabled?: boolean;
+    actionTitle?: string;
     onaction?: () => void;
+    /** The detail pane's variant: smaller glyph, no action, no padding block. */
+    quiet?: boolean;
   }
 
-  const { icon, message, actionLabel, onaction }: Props = $props();
+  const {
+    icon,
+    message,
+    actionLabel,
+    actionDisabled = false,
+    actionTitle,
+    onaction,
+    quiet = false,
+  }: Props = $props();
 </script>
 
-<div class="empty">
-  <span class="glyph"><Icon name={icon} size={28} /></span>
+<div class="empty" class:quiet>
+  <span class="glyph"><Icon name={icon} size={quiet ? 30 : 34} /></span>
   <p>{message}</p>
-  {#if actionLabel && onaction}
-    <Button variant="primary" onclick={onaction}>{actionLabel}</Button>
+  {#if actionLabel}
+    <Button
+      variant="primary"
+      tall={false}
+      disabled={actionDisabled}
+      title={actionTitle}
+      onclick={onaction}
+    >
+      {actionLabel}
+    </Button>
   {/if}
 </div>
 
@@ -46,9 +66,16 @@
     color: var(--fg-subtle);
   }
   p {
-    max-width: 26ch;
+    max-width: 200px;
     font-size: var(--text-base);
     line-height: var(--text-base-lh);
+    color: var(--fg-muted);
+    text-wrap: pretty;
+  }
+  .quiet {
+    gap: 10px;
+  }
+  .quiet p {
     color: var(--fg-subtle);
   }
 </style>

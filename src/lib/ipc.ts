@@ -66,6 +66,10 @@ export interface Settings {
   clipboardClearSeconds: number;
   /** Off by default — D-31. */
   auditLogEnabled: boolean;
+  /** Sidebar width in px, clamped to MASTER.md §4's 180–320. */
+  sidebarWidth: number;
+  /** Item-list width in px, clamped to §4's 240–460. */
+  listWidth: number;
 }
 
 export interface KdfSummary {

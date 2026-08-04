@@ -38,6 +38,14 @@ pub struct Settings {
     pub clipboard_clear_seconds: u64,
     /// Whether reveals are recorded — R-13. **Off by default** (D-31).
     pub audit_log_enabled: bool,
+    /// Sidebar width in px, clamped to `MASTER.md` §4's 180–320 by the frontend.
+    pub sidebar_width: u32,
+    /// Item-list width in px, clamped to §4's 240–460.
+    ///
+    /// Pane widths live with the settings rather than in a separate window-state file because
+    /// `MASTER.md` §10 asks for them to be persisted and they are no more secret than the
+    /// theme. One file, one format — D-33's argument, applied again.
+    pub list_width: u32,
 }
 
 impl Default for Settings {
@@ -47,6 +55,8 @@ impl Default for Settings {
             auto_lock_seconds: 300,
             clipboard_clear_seconds: 12,
             audit_log_enabled: false,
+            sidebar_width: 232,
+            list_width: 300,
         }
     }
 }

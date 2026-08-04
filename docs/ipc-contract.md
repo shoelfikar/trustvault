@@ -261,6 +261,8 @@ type Settings = {
   auto_lock_seconds: number;              // R-09
   clipboard_clear_seconds: number;        // R-14
   audit_log_enabled: boolean;             // R-13, default false — D-31
+  sidebar_width: number;                  // px, clamped 180–320 — MASTER.md §4
+  list_width: number;                     // px, clamped 240–460
 };
 ```
 

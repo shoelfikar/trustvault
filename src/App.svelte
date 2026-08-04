@@ -10,6 +10,7 @@
    */
   import LockScreen from './lib/screens/LockScreen.svelte';
   import Onboarding from './lib/screens/Onboarding.svelte';
+  import Shell from './lib/shell/Shell.svelte';
   import {
     getSettings,
     onVaultLocked,
@@ -74,18 +75,12 @@
       void refresh();
     }}
   />
-{:else}
-  <!-- The three-pane shell is the next task in phases/phase-2-shell-unlock.md. Until it
-       exists this states plainly what is open, rather than pretending to be the app. -->
-  <div class="placeholder">
-    <p>{status.displayName} is unlocked — {status.itemCount} items.</p>
-    <p class="muted">The three-pane shell is the next task in Phase 2.</p>
-  </div>
+{:else if settings}
+  <Shell {status} {settings} onsettings={(next) => (settings = next)} />
 {/if}
 
 <style>
-  .boot,
-  .placeholder {
+  .boot {
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
@@ -95,8 +90,5 @@
     background: var(--bg-surface);
     font-size: var(--text-base);
     color: var(--fg);
-  }
-  .muted {
-    color: var(--fg-subtle);
   }
 </style>

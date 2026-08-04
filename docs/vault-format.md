@@ -215,6 +215,7 @@ VaultBody {
   created_at: int,           // Unix milliseconds, UTC
   updated_at: int,           // Unix milliseconds, UTC
   items:      [Item],
+  audit:      [AuditEntry],  // §6.4; absent entirely when empty
   ...unknown                 // §6.2
 }
 
@@ -246,6 +247,12 @@ HistoryEntry {
   field_id:   text,
   value:      text,          // the *previous* value
 }
+
+AuditEntry {
+  at:         int,           // Unix milliseconds, UTC
+  item_id:    text,          // UUID
+  field_id:   text,          // UUID
+}
 ```
 
 `status` is a **cache of the last Watchtower scan**, not a computed truth. It is stored so that the
@@ -273,6 +280,31 @@ Whether a field is secret is a property of the field, carried in the model. It i
 the label. Inference means a field called `Recovery e-mail` is masked because it contains "recovery",
 and a field called `PIN` is not because nobody thought of it. The UI masks exactly the fields whose
 `secret` is true.
+
+### 6.4 The audit log
+
+`audit` records reveals when the audit setting is on (R-13, D-31). Three rules, all of which a
+second implementation must follow to be compatible:
+
+1. **It holds no secret.** A timestamp and two identifiers per entry and nothing else: not the
+   value, not the field label, not the item title. An audit log that quotes what it audited is a
+   second copy of the vault with none of the ceremony around it.
+2. **An empty log writes no key at all.** A vault that has never recorded a reveal encodes exactly
+   as it did before this field existed, which is what keeps the vectors in §10 valid across the
+   change. A reader MUST treat an absent `audit` as an empty list, not as an error.
+3. **Capped at 1000 entries, oldest dropped first**, enforced when an entry is appended.
+
+Rule 3 has a cross-version consequence worth stating rather than discovering. A future version with
+a larger cap will write a longer log; this build does not reject it and does not prune it on read,
+but the **first reveal it records truncates the log to 1000**. A reader with a smaller cap than the
+writer therefore loses history the first time it is written to. This is a deliberate trade against
+the alternative — preserving whatever length was found — which would make the cap unenforceable in
+exactly the case it exists for.
+
+The log is inside the sealed body for the same reason `history` is: a record of *which* secret was
+read *when* is sensitive on its own, whatever it omits. It is **not tamper-evidence** and must never
+be argued as such — anyone who can read it holds the master key and can therefore rewrite it. Its
+reader is the vault's owner reviewing their own activity.
 
 ## 7. Reading a vault
 

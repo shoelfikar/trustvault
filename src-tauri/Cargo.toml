@@ -24,6 +24,16 @@ tauri = { version = "2.11", features = [] }
 trustvault-core = { path = "../crates/trustvault-core" }
 serde.workspace = true
 serde_json = "1"
+# 1Password's fork (D-11). Chosen over tauri-plugin-clipboard-manager for the platform MIME
+# hints a password manager needs -- x-kde-passwordManagerHint, which asks a clipboard manager
+# not to record the entry -- and because it documents the Wayland ownership caveat rather than
+# hiding it. The hint is advisory on every platform; see docs/ipc-contract.md §6.3.
+arboard = "3"
+# D-12, decided at kickoff: the design's crack-time strings ("takes ~8 centuries to crack") are
+# zxcvbn's own output format, so anything else means reimplementing its phrasing. Lives in the
+# host rather than the webview because the dictionaries are ~400 kB and the frontend budget
+# (S-01, cold start <= 800 ms) is the thing this app is judged on.
+zxcvbn = { version = "3.1", default-features = false }
 
 [lints.clippy]
 unwrap_used = "warn"

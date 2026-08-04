@@ -124,7 +124,32 @@ real name lives inside the sealed body**, so while the vault is locked it cannot
 typed at onboarding, because until they unlock, it isn't.
 
 ```ts
-calibrate_kdf(): { m_cost: number; t_cost: number; p_cost: number }
+default_vault_path({ name: string }): string
+```
+
+Where a vault called `name` would go if the user does not say otherwise — R-08.
+
+**Not a native file picker.** A picker means `tauri-plugin-dialog`, and a plugin is widened attack
+surface in a process holding decrypted secrets; the manifest's standing rule is that a plugin
+arrives when a requirement needs one and not before. A resolved default plus an editable path
+satisfies "name & location". Revisit with a decision log entry if the typed path turns out to be
+what users get wrong.
+
+```ts
+score_password({ password: string; inputs: string[] }): { score: 0|1|2|3|4; label: string; crack_time: string }
+```
+
+Scores a password with zxcvbn (D-12) for onboarding's strength meter — R-08. Ambient because it
+needs no vault: it scores a password that does not exist yet.
+
+The password crosses **inbound**, which deserves stating rather than glossing. That direction is not
+the one this contract defends: the user typed it into the webview, so it is already in a heap that
+cannot be wiped, and nothing here changes that. What matters is that it is never sent back, never
+stored, and never logged. The frontend debounces rather than scoring every keystroke — not for
+safety, which debouncing does not buy, but because the KDF-adjacent work is not free.
+
+```ts
+calibrate_kdf(): KdfSummary
 ```
 Wraps `KdfParams::calibrate`, for onboarding step 2 — R-02. Takes seconds and holds the thread; the
 UI shows progress. The result is written into the header of the vault about to be created, not into
@@ -236,6 +261,8 @@ type Settings = {
   auto_lock_seconds: number;              // R-09
   clipboard_clear_seconds: number;        // R-14
   audit_log_enabled: boolean;             // R-13, default false — D-31
+  sidebar_width: number;                  // px, clamped 180–320 — MASTER.md §4
+  list_width: number;                     // px, clamped 240–460
 };
 ```
 
@@ -251,9 +278,9 @@ type Settings = {
 The three commands that may carry plaintext. Each returns exactly one `Secret`.
 
 ```ts
-create_vault({ name: string; path: string; password: string;
-               kdf: { m_cost: number; t_cost: number; p_cost: number } }):
-  { recovery_code: Secret }
+type KdfSummary = { m_cost: number; t_cost: number; p_cost: number };
+
+create_vault({ name: string; path: string; password: string; kdf: KdfSummary }): { recovery_code: Secret }
 ```
 
 The recovery code is a secret and it crosses IPC, because R-07 requires it to be shown to the user
@@ -328,6 +355,22 @@ boundary in both directions:
 Check 6 is worth more than it looks. It is the regression test for a webview reload: reload leaves
 the frontend's stores empty and its lock state whatever the core says, and the bug it prevents is a
 command that reads a cached handle instead of re-checking.
+
+The harness calls the **real command bodies**, through the `_inner` function each command wraps. A
+harness that reimplemented the boundary would prove only that the reimplementation is safe.
+
+**What is automated and what is not**, stated here rather than implied, because a check that quietly
+does not run is worse than one documented as not running:
+
+| Check | Status |
+|-------|--------|
+| 1 — registered set == documented set | automated; parses `generate_handler!` and this document |
+| 2 — at most one `Secret` per response | automated for `list_items`, `get_item`, `reveal_field` |
+| 3 — only the three sanctioned commands | automated |
+| 4 — `copy_field` and events carry no value | **shape-level only.** `copy_field` writes to the real system clipboard, which a CI runner may not have, so the command body is not driven. `Copied` has one field and it is an integer |
+| 5 — scripted whole-shell session | **not automated.** It needs the shell, which does not exist yet. This is Phase 2 gate evidence and it is not yet produced |
+| 6 — every vault command refuses while locked | automated |
+| N-07 — no wildcard origin in the CSP | automated |
 
 > **Finding, not yet resolved.** R-10's acceptance criterion reads "enforced by a **core** test", but
 > `trustvault-core` must not depend on Tauri (N-02) and therefore cannot see a command at all. The

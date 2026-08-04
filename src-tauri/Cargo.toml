@@ -24,6 +24,11 @@ tauri = { version = "2.11", features = [] }
 trustvault-core = { path = "../crates/trustvault-core" }
 serde.workspace = true
 serde_json = "1"
+# 1Password's fork (D-11). Chosen over tauri-plugin-clipboard-manager for the platform MIME
+# hints a password manager needs -- x-kde-passwordManagerHint, which asks a clipboard manager
+# not to record the entry -- and because it documents the Wayland ownership caveat rather than
+# hiding it. The hint is advisory on every platform; see docs/ipc-contract.md §6.3.
+arboard = "3"
 
 [lints.clippy]
 unwrap_used = "warn"

@@ -124,7 +124,7 @@ real name lives inside the sealed body**, so while the vault is locked it cannot
 typed at onboarding, because until they unlock, it isn't.
 
 ```ts
-calibrate_kdf(): { m_cost: number; t_cost: number; p_cost: number }
+calibrate_kdf(): KdfSummary
 ```
 Wraps `KdfParams::calibrate`, for onboarding step 2 — R-02. Takes seconds and holds the thread; the
 UI shows progress. The result is written into the header of the vault about to be created, not into
@@ -251,9 +251,9 @@ type Settings = {
 The three commands that may carry plaintext. Each returns exactly one `Secret`.
 
 ```ts
-create_vault({ name: string; path: string; password: string;
-               kdf: { m_cost: number; t_cost: number; p_cost: number } }):
-  { recovery_code: Secret }
+type KdfSummary = { m_cost: number; t_cost: number; p_cost: number };
+
+create_vault({ name: string; path: string; password: string; kdf: KdfSummary }): { recovery_code: Secret }
 ```
 
 The recovery code is a secret and it crosses IPC, because R-07 requires it to be shown to the user
@@ -328,6 +328,22 @@ boundary in both directions:
 Check 6 is worth more than it looks. It is the regression test for a webview reload: reload leaves
 the frontend's stores empty and its lock state whatever the core says, and the bug it prevents is a
 command that reads a cached handle instead of re-checking.
+
+The harness calls the **real command bodies**, through the `_inner` function each command wraps. A
+harness that reimplemented the boundary would prove only that the reimplementation is safe.
+
+**What is automated and what is not**, stated here rather than implied, because a check that quietly
+does not run is worse than one documented as not running:
+
+| Check | Status |
+|-------|--------|
+| 1 — registered set == documented set | automated; parses `generate_handler!` and this document |
+| 2 — at most one `Secret` per response | automated for `list_items`, `get_item`, `reveal_field` |
+| 3 — only the three sanctioned commands | automated |
+| 4 — `copy_field` and events carry no value | **shape-level only.** `copy_field` writes to the real system clipboard, which a CI runner may not have, so the command body is not driven. `Copied` has one field and it is an integer |
+| 5 — scripted whole-shell session | **not automated.** It needs the shell, which does not exist yet. This is Phase 2 gate evidence and it is not yet produced |
+| 6 — every vault command refuses while locked | automated |
+| N-07 — no wildcard origin in the CSP | automated |
 
 > **Finding, not yet resolved.** R-10's acceptance criterion reads "enforced by a **core** test", but
 > `trustvault-core` must not depend on Tauri (N-02) and therefore cannot see a command at all. The

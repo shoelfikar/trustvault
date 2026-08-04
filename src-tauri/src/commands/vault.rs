@@ -1,0 +1,180 @@
+//! Vault lifecycle: status, creation, unlock, lock — `docs/ipc-contract.md` §5 and §7.
+
+use std::path::PathBuf;
+
+use tauri::{AppHandle, Emitter, State};
+use trustvault_core::{EXTENSION, FORMAT_VERSION, KdfParams, RecoveryCode, Vault};
+
+use crate::dto::{BuildInfo, KdfSummary, VaultStatus};
+use crate::error::{ErrorKind, IpcError, IpcResult};
+use crate::state::{AppState, LockReason, now_ms};
+
+/// **Ambient.** Build and format information, for the About surface and bug reports.
+#[tauri::command]
+pub fn build_info() -> BuildInfo {
+    BuildInfo {
+        version: env!("CARGO_PKG_VERSION"),
+        format_version: FORMAT_VERSION,
+        extension: EXTENSION,
+    }
+}
+
+/// **Ambient.** Open, locked, or nothing chosen — the shape the whole frontend routes on.
+#[tauri::command]
+pub fn vault_status(state: State<'_, AppState>) -> VaultStatus {
+    state.status()
+}
+
+/// **Ambient.** Measures this machine and returns Argon2id parameters for a new vault (R-02).
+///
+/// Takes seconds and holds the thread, which is why onboarding shows progress while it runs.
+/// The measured wall-clock time is not returned: `KdfParams::calibrate` does not expose it,
+/// and timing this command from JS would measure the IPC boundary rather than the KDF.
+#[tauri::command]
+pub fn calibrate_kdf() -> KdfSummary {
+    let params = KdfParams::calibrate();
+    KdfSummary {
+        m_cost: params.m_cost,
+        t_cost: params.t_cost,
+        p_cost: params.p_cost,
+    }
+}
+
+/// **Sanctioned.** Creates a vault and returns its recovery code, once (R-07, R-08).
+///
+/// The recovery code is the least avoidable secret in the product: it exists to be read by a
+/// human off a screen and written down, so it must cross. There is no command to fetch it
+/// again — the webview renders it on step 3 and drops it.
+#[tauri::command]
+pub fn create_vault(
+    state: State<'_, AppState>,
+    name: String,
+    path: String,
+    password: String,
+    kdf: KdfSummary,
+) -> IpcResult<RecoveryKit> {
+    let params = KdfParams {
+        m_cost: kdf.m_cost,
+        t_cost: kdf.t_cost,
+        p_cost: kdf.p_cost,
+    };
+    let path = PathBuf::from(path);
+    let (mut vault, recovery) = Vault::create(name, &password, params)?;
+    vault.save_to(&path)?;
+
+    let code = recovery.display().to_string();
+    state.with(|inner| {
+        inner.generation = inner.generation.wrapping_add(1);
+        inner.vault = Some(vault);
+        inner.path = Some(path);
+        inner.last_activity = now_ms();
+    });
+
+    Ok(RecoveryKit {
+        recovery_code: code,
+    })
+}
+
+/// The one-time recovery kit. The only field is the secret.
+#[derive(Debug, serde::Serialize)]
+pub struct RecoveryKit {
+    /// 24 characters in six groups of four. Shown once and never stored.
+    pub recovery_code: String,
+}
+
+/// **Vault-class inbound, returns nothing.** Opens a vault with the master password.
+///
+/// Deliberately returns `()`: the frontend learns the vault is open by calling `vault_status`,
+/// which keeps one source of truth for lock state instead of two that can disagree.
+///
+/// **No early return before the core is called.** Not a "does the file exist" check, not a
+/// length check on the password, not a cached-failure short-circuit. The core spends equal
+/// work on a wrong password and a corrupt file (R-03), and any check added here that fails
+/// faster than the KDF hands that property back.
+#[tauri::command]
+pub fn unlock(state: State<'_, AppState>, path: String, password: String) -> IpcResult<()> {
+    let path = PathBuf::from(path);
+    let vault = Vault::open_file(&path, &password)?;
+    state.with(|inner| {
+        inner.generation = inner.generation.wrapping_add(1);
+        inner.vault = Some(vault);
+        inner.path = Some(path);
+        inner.last_activity = now_ms();
+    });
+    Ok(())
+}
+
+/// **Sanctioned.** Opens a vault with the recovery kit and issues a fresh one (R-07).
+///
+/// Sanctioned for a reason the name does not give away: using a recovery kit **spends** it, so
+/// the flow issues a replacement on the spot, and that replacement is a secret travelling
+/// outbound. It is counted in the budget of three rather than smuggled in as part of unlock.
+///
+/// The new kit is saved before it is returned. If the save fails the caller gets an error and
+/// the old kit still works, which is the right way for this to fail — the alternative is a
+/// user holding a code that opens nothing.
+#[tauri::command]
+pub fn unlock_recovery_kit(
+    state: State<'_, AppState>,
+    path: String,
+    code: String,
+) -> IpcResult<RecoveryKit> {
+    let path = PathBuf::from(path);
+    let parsed = RecoveryCode::parse(&code)?;
+    let bytes = std::fs::read(&path).map_err(|_| IpcError::new(ErrorKind::Io))?;
+    let mut vault = Vault::open_with_recovery(&bytes, &parsed)?;
+
+    let reissued = vault.reissue_recovery_code()?;
+    vault.save_to(&path)?;
+    let fresh = reissued.display().to_string();
+
+    state.with(|inner| {
+        inner.generation = inner.generation.wrapping_add(1);
+        inner.vault = Some(vault);
+        inner.path = Some(path);
+        inner.last_activity = now_ms();
+    });
+
+    Ok(RecoveryKit {
+        recovery_code: fresh,
+    })
+}
+
+/// **Vault-class.** Locks on demand — R-09.
+///
+/// Idempotent: locking a locked vault succeeds and does nothing. The failure mode of a lock
+/// command that can error is a user hammering it during a panic.
+#[tauri::command]
+pub fn lock(app: AppHandle, state: State<'_, AppState>) -> IpcResult<()> {
+    lock_now(&app, &state, LockReason::Manual);
+    Ok(())
+}
+
+/// Locks the vault, flushing any buffered audit entries first, and emits `vault-locked`.
+///
+/// The flush is what D-31 means by "on save": reveals buffer in memory so that reading a
+/// password does not rewrite the vault file, and lock is the natural moment to write the tail.
+/// A crash before this point loses it, which the decision accepted.
+pub fn lock_now(app: &AppHandle, state: &AppState, reason: LockReason) {
+    state.with(|inner| {
+        if let (Some(vault), Some(path)) = (inner.vault.as_mut(), inner.path.as_ref())
+            && vault.has_unflushed_audit()
+        {
+            // Best effort. A failed flush must not prevent the lock: an unlockable vault is a
+            // worse outcome than a lost audit tail, and refusing to lock because a disk is
+            // full would leave the master key in memory.
+            let _ = vault.save_to(path);
+        }
+    });
+
+    if state.lock() {
+        let _ = app.emit("vault-locked", LockEvent { reason });
+    }
+}
+
+/// Payload of `vault-locked`.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub struct LockEvent {
+    /// Why it locked, so the lock screen can say.
+    pub reason: LockReason,
+}

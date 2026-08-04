@@ -124,6 +124,31 @@ real name lives inside the sealed body**, so while the vault is locked it cannot
 typed at onboarding, because until they unlock, it isn't.
 
 ```ts
+default_vault_path({ name: string }): string
+```
+
+Where a vault called `name` would go if the user does not say otherwise — R-08.
+
+**Not a native file picker.** A picker means `tauri-plugin-dialog`, and a plugin is widened attack
+surface in a process holding decrypted secrets; the manifest's standing rule is that a plugin
+arrives when a requirement needs one and not before. A resolved default plus an editable path
+satisfies "name & location". Revisit with a decision log entry if the typed path turns out to be
+what users get wrong.
+
+```ts
+score_password({ password: string; inputs: string[] }): { score: 0|1|2|3|4; label: string; crack_time: string }
+```
+
+Scores a password with zxcvbn (D-12) for onboarding's strength meter — R-08. Ambient because it
+needs no vault: it scores a password that does not exist yet.
+
+The password crosses **inbound**, which deserves stating rather than glossing. That direction is not
+the one this contract defends: the user typed it into the webview, so it is already in a heap that
+cannot be wiped, and nothing here changes that. What matters is that it is never sent back, never
+stored, and never logged. The frontend debounces rather than scoring every keystroke — not for
+safety, which debouncing does not buy, but because the KDF-adjacent work is not free.
+
+```ts
 calibrate_kdf(): KdfSummary
 ```
 Wraps `KdfParams::calibrate`, for onboarding step 2 — R-02. Takes seconds and holds the thread; the

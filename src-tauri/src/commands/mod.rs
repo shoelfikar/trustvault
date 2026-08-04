@@ -10,6 +10,7 @@
 
 pub mod items;
 pub mod settings;
+pub mod strength;
 pub mod vault;
 
 use crate::error::{IpcError, IpcResult};

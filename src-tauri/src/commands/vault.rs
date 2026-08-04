@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager as _, State};
 use trustvault_core::{EXTENSION, FORMAT_VERSION, KdfParams, RecoveryCode, Vault};
 
 use crate::dto::{BuildInfo, KdfSummary, VaultStatus};
@@ -17,6 +17,42 @@ pub fn build_info() -> BuildInfo {
         format_version: FORMAT_VERSION,
         extension: EXTENSION,
     }
+}
+
+/// **Ambient.** Where a vault called `name` would go if the user does not say otherwise.
+///
+/// Deliberately **not** a native file picker. A picker means `tauri-plugin-dialog`, and the
+/// manifest's rule is that a plugin is added when a requirement needs it and not before — a
+/// plugin is widened attack surface in a process that holds decrypted secrets. R-08 asks for
+/// "name & location", which a resolved default and an editable path satisfies. Revisit with a
+/// decision log entry if the typed path proves to be the thing users get wrong.
+#[tauri::command]
+pub fn default_vault_path(app: AppHandle, name: String) -> String {
+    // A filename, not a path: everything that could traverse or escape is dropped rather than
+    // escaped, because the safe subset is small and obvious and the unsafe one is not.
+    let stem: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let stem = stem.trim_matches('-');
+    let stem = if stem.is_empty() { "vault" } else { stem };
+
+    let directory = app
+        .path()
+        .document_dir()
+        .or_else(|_| app.path().home_dir())
+        .unwrap_or_else(|_| PathBuf::from("."));
+
+    directory
+        .join(format!("{}.{EXTENSION}", stem.to_lowercase()))
+        .display()
+        .to_string()
 }
 
 /// **Ambient.** Open, locked, or nothing chosen — the shape the whole frontend routes on.

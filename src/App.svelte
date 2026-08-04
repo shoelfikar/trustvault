@@ -1,155 +1,102 @@
 <script lang="ts">
-  import Specimen from './lib/screens/Specimen.svelte';
-  import Icon from './lib/icons/Icon.svelte';
+  /**
+   * The app's only router. One window with screens, not a site with routes.
+   *
+   * **Routing is driven by `vault_status`, which the host owns.** The frontend never decides
+   * it is unlocked: it asks. That is the same property `docs/ipc-contract.md` §9 check 6
+   * tests from the Rust side, expressed here as the absence of any local `unlocked` boolean.
+   * A webview reload therefore lands back on whatever the host says, which for a locked vault
+   * is the lock screen.
+   */
+  import LockScreen from './lib/screens/LockScreen.svelte';
+  import Onboarding from './lib/screens/Onboarding.svelte';
+  import {
+    getSettings,
+    onVaultLocked,
+    vaultStatus,
+    type LockReason,
+    type Settings,
+    type VaultStatus,
+  } from './lib/ipc';
+
+  let status = $state<VaultStatus | null>(null);
+  let settings = $state<Settings | null>(null);
+  let lockReason = $state<LockReason | null>(null);
+
+  async function refresh() {
+    status = await vaultStatus();
+  }
+
+  $effect(() => {
+    void refresh();
+    void getSettings().then((loaded) => (settings = loaded));
+
+    // The host announces every lock, including the ones the user did not ask for. Re-reading
+    // status rather than assuming keeps the single source of truth single.
+    const unlisten = onVaultLocked((reason) => {
+      lockReason = reason;
+      void refresh();
+    });
+    return () => void unlisten.then((stop) => stop());
+  });
 
   /**
-   * Phase 0 shell. This is scaffolding, not the app — the real three-pane shell arrives
-   * in Phase 2 (see phases/phase-2-shell-unlock.md). Everything here exists to prove the
-   * tokens, fonts, icons, and theme switching work end to end.
+   * R-28 — follow the OS, with a manual override.
+   *
+   * `tokens.css` already handles the follow half through `:root:not([data-theme])`, so the
+   * override is expressed by *removing* the attribute rather than by resolving "system" to a
+   * concrete theme here. Resolving it in JS would mean the OS changing theme while the app is
+   * open does nothing until a reload, which is the half of R-28 that is easy to lose.
    */
-
-  type Theme = 'dark' | 'light';
-  type UiScale = 'compact' | 'default' | 'large';
-
-  let theme = $state<Theme>('dark');
-  let uiScale = $state<UiScale>('default');
-
   $effect(() => {
-    document.documentElement.dataset.theme = theme;
+    const root = document.documentElement;
+    if (!settings || settings.theme === 'system') {
+      delete root.dataset.theme;
+    } else {
+      root.dataset.theme = settings.theme;
+    }
   });
-  $effect(() => {
-    document.documentElement.dataset.uiScale = uiScale;
-  });
-
-  const scales: UiScale[] = ['compact', 'default', 'large'];
 </script>
 
-<div class="chrome">
-  <div class="brand">
-    <span class="mark"><Icon name="lock" size={15} /></span>
-    <span class="wordmark">TrustVault</span>
-    <span class="phase">Phase 0 · Workbench</span>
+{#if !status}
+  <!-- One frame at most: vault_status is a memory read. No skeleton shimmer -- MASTER.md §5
+       forbids theatre over a local read that finishes in microseconds. -->
+  <div class="boot"></div>
+{:else if status.state === 'no_vault'}
+  <Onboarding ondone={refresh} />
+{:else if status.state === 'locked'}
+  <LockScreen
+    path={status.path ?? ''}
+    displayName={status.displayName}
+    reason={lockReason}
+    onunlocked={() => {
+      lockReason = null;
+      void refresh();
+    }}
+  />
+{:else}
+  <!-- The three-pane shell is the next task in phases/phase-2-shell-unlock.md. Until it
+       exists this states plainly what is open, rather than pretending to be the app. -->
+  <div class="placeholder">
+    <p>{status.displayName} is unlocked — {status.itemCount} items.</p>
+    <p class="muted">The three-pane shell is the next task in Phase 2.</p>
   </div>
-
-  <div class="spacer"></div>
-
-  <div class="segmented" role="group" aria-label="UI scale">
-    {#each scales as s (s)}
-      <button
-        type="button"
-        class:on={uiScale === s}
-        aria-pressed={uiScale === s}
-        onclick={() => (uiScale = s)}>{s}</button
-      >
-    {/each}
-  </div>
-
-  <button
-    type="button"
-    class="theme"
-    onclick={() => (theme = theme === 'dark' ? 'light' : 'dark')}
-    aria-label="Switch to {theme === 'dark' ? 'light' : 'dark'} theme"
-  >
-    <!--
-      `refresh`, not a palette glyph: the set shipped with the design has no palette, and
-      §8's "one set, no mixing" makes borrowing one from elsewhere the wrong fix. Cycling is
-      what the control does anyway, so the glyph names the action rather than the subject.
-    -->
-    <Icon name="refresh" size={14} />
-    {theme}
-  </button>
-</div>
-
-<main>
-  <Specimen {theme} {uiScale} />
-</main>
+{/if}
 
 <style>
-  .chrome {
-    height: var(--titlebar-h);
-    flex: none;
+  .boot,
+  .placeholder {
     display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    padding: 0 var(--space-4);
-    background: var(--bg-base);
-    border-bottom: 1px solid var(--border);
-  }
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-  }
-  .mark {
-    display: flex;
-    /* The glyph inherits `currentColor`, so the brass lives on the wrapper. */
-    color: var(--accent);
-  }
-  .wordmark {
-    font-size: var(--text-sm);
-    font-weight: var(--weight-semibold);
-    letter-spacing: var(--tracking-lg);
-  }
-  .phase {
-    font-size: var(--text-micro);
-    letter-spacing: var(--tracking-micro);
-    text-transform: uppercase;
-    color: var(--fg-subtle);
-  }
-  .spacer {
-    flex: 1;
-  }
-
-  .segmented {
-    display: flex;
-    gap: 2px;
-    padding: 3px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--bg-surface);
-  }
-  .segmented button {
-    padding: 3px var(--space-3);
-    border-radius: var(--radius-sm);
-    font-size: var(--text-sm);
-    font-weight: var(--weight-medium);
-    color: var(--fg-muted);
-    text-transform: capitalize;
-    transition:
-      background var(--dur-instant) var(--ease-out),
-      color var(--dur-instant) var(--ease-out);
-  }
-  .segmented button:hover {
-    color: var(--fg);
-  }
-  .segmented button.on {
-    background: var(--accent-wash);
-    color: var(--accent);
-  }
-
-  .theme {
-    display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: var(--space-2);
-    height: 26px;
-    padding: 0 var(--space-3);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
     background: var(--bg-surface);
-    font-size: var(--text-sm);
-    color: var(--fg-muted);
-    text-transform: capitalize;
-    transition:
-      color var(--dur-instant) var(--ease-out),
-      border-color var(--dur-instant) var(--ease-out);
-  }
-  .theme:hover {
+    font-size: var(--text-base);
     color: var(--fg);
-    border-color: var(--border-strong);
   }
-
-  main {
-    height: calc(100vh - var(--titlebar-h));
-    background: var(--bg-surface);
+  .muted {
+    color: var(--fg-subtle);
   }
 </style>

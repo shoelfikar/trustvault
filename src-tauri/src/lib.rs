@@ -47,9 +47,11 @@ pub fn run() {
             // Ambient — callable with no vault open.
             commands::vault::build_info,
             commands::vault::vault_status,
+            commands::vault::default_vault_path,
             commands::vault::calibrate_kdf,
             commands::settings::get_settings,
             commands::settings::set_settings,
+            commands::strength::score_password,
             // Vault-class — require an unlocked vault, return no secret.
             commands::vault::unlock,
             commands::vault::lock,

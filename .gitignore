@@ -30,6 +30,7 @@
 /phases/
 /design-system/
 /graphify-out/
+TrustVault App.html
 
 # --- Rust build output ---
 /target/

@@ -294,6 +294,25 @@ impl Item {
     }
 }
 
+/// One reveal, recorded when the audit setting is on (R-13, D-31).
+///
+/// **Holds no secret and must never be given one.** Not the value, not the field label, not
+/// the item title — an audit log that quotes what it audited is a second copy of the vault
+/// with none of the ceremony. The two identifiers are enough to name the reveal, and both are
+/// meaningless without the vault they came from.
+///
+/// It lives inside the sealed body for the same reason [`HistoryEntry`] does: a plaintext
+/// record of *which* secret was read *when* is sensitive on its own, whatever it omits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditEntry {
+    /// When the reveal happened, Unix milliseconds UTC.
+    pub at: i64,
+    /// Which item was revealed.
+    pub item_id: ItemId,
+    /// Which field of it.
+    pub field_id: FieldId,
+}
+
 /// The decrypted contents of a vault.
 ///
 /// This is the plaintext that the body seal protects. It never leaves the core as a whole:
@@ -311,12 +330,27 @@ pub struct VaultBody {
     pub updated_at: i64,
     /// The items.
     pub items: Vec<Item>,
+    /// Reveals recorded while the audit setting was on, oldest first (R-13, D-31).
+    ///
+    /// `skip_serializing_if` is not an optimization. An empty log writes **no key at all**,
+    /// so a vault that has never recorded a reveal serializes to exactly the bytes it did
+    /// before this field existed — which is what keeps the known-answer vectors in
+    /// `tests/vectors/` valid without regenerating them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audit: Vec<AuditEntry>,
     /// Keys written by a newer version, preserved untouched (N-09).
     #[serde(flatten)]
     pub unknown: Unknown,
 }
 
 impl VaultBody {
+    /// The most reveals kept. Oldest are dropped first once the log is longer — D-31.
+    ///
+    /// A count cap and no age cap, which bounds the file but not the history: for a light
+    /// user 1000 entries may reach back years. That trade was made deliberately and is
+    /// written down in the decision log rather than left to be discovered here.
+    pub const AUDIT_MAX_ENTRIES: usize = 1000;
+
     /// An empty vault body.
     pub fn new(name: impl Into<String>) -> Self {
         let now = now_ms();
@@ -326,7 +360,25 @@ impl VaultBody {
             created_at: now,
             updated_at: now,
             items: Vec::new(),
+            audit: Vec::new(),
             unknown: Unknown::new(),
+        }
+    }
+
+    /// Appends a reveal to the audit log and enforces the cap.
+    ///
+    /// Deliberately does **not** call [`Self::touch`]: a reveal reads the vault, it does not
+    /// modify it, and moving `updated_at` would make every "last changed" display in the UI
+    /// mean "last looked at" instead.
+    pub(crate) fn record_reveal(&mut self, item_id: ItemId, field_id: FieldId) {
+        self.audit.push(AuditEntry {
+            at: now_ms(),
+            item_id,
+            field_id,
+        });
+        if self.audit.len() > Self::AUDIT_MAX_ENTRIES {
+            let excess = self.audit.len() - Self::AUDIT_MAX_ENTRIES;
+            self.audit.drain(..excess);
         }
     }
 

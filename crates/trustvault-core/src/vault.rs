@@ -13,9 +13,9 @@ use zeroize::Zeroizing;
 use crate::aead::{self, NONCE_LEN, WRAP_LEN, random};
 use crate::format::{HEADER_LEN, Header, SALT_LEN, WRAP_AAD_LEN};
 use crate::kdf::{self, KEY_LEN, KdfParams, Key};
-use crate::model::{Item, ItemId, ItemKind, VaultBody};
+use crate::model::{AuditEntry, FieldId, Item, ItemId, ItemKind, VaultBody};
 use crate::recovery::RecoveryCode;
-use crate::secret::SecretBytes;
+use crate::secret::{SecretBytes, SecretString};
 use crate::{Error, FORMAT_VERSION, Result};
 
 /// An unlocked vault: the master key and the decrypted body, in one place.
@@ -33,6 +33,11 @@ pub struct Vault {
     wrap_rk: [u8; WRAP_LEN],
     master_key: Key,
     body: VaultBody,
+    /// Set when a reveal has been recorded but not yet written — see [`Vault::has_unflushed_audit`].
+    ///
+    /// Not part of the format and not derived from it: a vault loaded from disk has, by
+    /// definition, nothing unflushed.
+    audit_unflushed: bool,
 }
 
 impl Vault {
@@ -68,6 +73,7 @@ impl Vault {
             wrap_rk: [0; WRAP_LEN],
             master_key,
             body: VaultBody::new(name),
+            audit_unflushed: false,
         };
 
         vault.wrap_pw = vault.wrap_master_key(password.as_bytes(), &salt_pw, &nonce_pw)?;
@@ -152,6 +158,7 @@ impl Vault {
             wrap_rk: header.wrap_rk,
             master_key,
             body,
+            audit_unflushed: false,
         })
     }
 
@@ -222,6 +229,10 @@ impl Vault {
             // Leave no debris behind on failure. The temp file is a sealed vault or a fragment
             // of one — inert either way, but litter.
             let _ = fs::remove_file(&temp);
+        } else {
+            // The buffered audit tail is on disk now. Cleared only on success: a failed save
+            // leaves the entries pending so the next attempt still writes them.
+            self.audit_unflushed = false;
         }
         write_result
     }
@@ -271,6 +282,64 @@ impl Vault {
     pub fn remove_item(&mut self, id: ItemId) -> Option<Item> {
         let index = self.body.items.iter().position(|item| item.id == id)?;
         Some(self.body.items.remove(index))
+    }
+
+    /// Returns **one** secret field's value, recording the reveal if `audit` is on.
+    ///
+    /// This is the only sanctioned way plaintext leaves the vault a field at a time (R-10,
+    /// R-12), and the reveal and its audit entry are one operation on purpose: a command layer
+    /// that could read a value without recording it is a command layer that eventually does.
+    /// `docs/ipc-contract.md` §7 is the boundary this exists to serve.
+    ///
+    /// Refuses a field that is not marked secret ([`Error::NotSecret`]) — see that variant for
+    /// why an easier answer is worse.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NoSuchItem`], [`Error::NoSuchField`], or [`Error::NotSecret`].
+    pub fn reveal_field(
+        &mut self,
+        item_id: ItemId,
+        field_id: FieldId,
+        audit: bool,
+    ) -> Result<SecretString> {
+        let item = self.item(item_id).ok_or(Error::NoSuchItem)?;
+        let field = item.field(field_id).ok_or(Error::NoSuchField)?;
+        if !field.secret {
+            return Err(Error::NotSecret);
+        }
+        // Cloned rather than borrowed: the caller gets its own `SecretString`, which zeroizes
+        // on drop independently of the vault's copy.
+        let value = field.value.clone();
+
+        if audit {
+            self.body.record_reveal(item_id, field_id);
+            self.audit_unflushed = true;
+        }
+        Ok(value)
+    }
+
+    /// Reveals recorded since the vault was opened or last saved, oldest first.
+    pub fn audit_entries(&self) -> &[AuditEntry] {
+        &self.body.audit
+    }
+
+    /// Whether reveals have been recorded that are not yet on disk.
+    ///
+    /// D-31 buffers the log in memory and flushes it on save, so that reading a password does
+    /// not rewrite the vault file. The consequence is this flag: something has to decide when
+    /// the buffered tail is worth a write, and the natural moment is lock. A crash before then
+    /// loses the tail, which the decision accepted.
+    pub fn has_unflushed_audit(&self) -> bool {
+        self.audit_unflushed
+    }
+
+    /// Discards the whole audit log.
+    ///
+    /// Takes effect on disk at the next save, like every other body change.
+    pub fn clear_audit(&mut self) {
+        self.body.audit.clear();
+        self.audit_unflushed = true;
     }
 
     /// Replaces the master password, keeping the master key and therefore the body.
@@ -405,6 +474,160 @@ mod tests {
     fn new_vault() -> (Vault, RecoveryCode) {
         Vault::create("Personal", "correct horse", KdfParams::TESTING)
             .expect("test parameters are valid")
+    }
+
+    /// A vault with one secret field and one public one, for the reveal tests.
+    fn vault_with_a_login() -> (Vault, ItemId, FieldId, FieldId) {
+        let (mut vault, _) = new_vault();
+        let item = vault.add_item(ItemKind::Login, "GitHub");
+        let entry = vault.item_mut(item).expect("just added");
+        let secret = entry.set_field("Password", "hunter2", true);
+        let public = entry.set_field("Username", "octocat", false);
+        (vault, item, secret, public)
+    }
+
+    #[test]
+    fn reveal_returns_the_value_and_records_nothing_when_audit_is_off() {
+        let (mut vault, item, secret, _) = vault_with_a_login();
+
+        let value = vault.reveal_field(item, secret, false).unwrap();
+
+        assert_eq!(value.expose(), "hunter2");
+        assert!(vault.audit_entries().is_empty());
+        assert!(!vault.has_unflushed_audit());
+    }
+
+    #[test]
+    fn reveal_records_the_ids_and_never_the_value() {
+        let (mut vault, item, secret, _) = vault_with_a_login();
+
+        vault.reveal_field(item, secret, true).unwrap();
+
+        let entries = vault.audit_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].item_id, item);
+        assert_eq!(entries[0].field_id, secret);
+        assert!(vault.has_unflushed_audit());
+
+        // The whole point of the entry type: there is no field on it that could hold the
+        // secret, the label, or the title. Serialized, it must not contain any of them.
+        let encoded = serde_json::to_string(&entries[0]).unwrap();
+        assert!(!encoded.contains("hunter2"));
+        assert!(!encoded.contains("Password"));
+        assert!(!encoded.contains("GitHub"));
+    }
+
+    #[test]
+    fn reveal_refuses_a_field_that_is_not_secret() {
+        // Not a convenience check. If a non-secret field could be "revealed", the audit log
+        // and the IPC harness would both count reads of a username as reveals of a password.
+        let (mut vault, item, _, public) = vault_with_a_login();
+
+        assert!(matches!(
+            vault.reveal_field(item, public, true),
+            Err(Error::NotSecret)
+        ));
+        assert!(vault.audit_entries().is_empty());
+    }
+
+    #[test]
+    fn reveal_rejects_unknown_item_and_field() {
+        let (mut vault, item, secret, _) = vault_with_a_login();
+        let stranger = ItemId::new_v4();
+
+        assert!(matches!(
+            vault.reveal_field(stranger, secret, true),
+            Err(Error::NoSuchItem)
+        ));
+        assert!(matches!(
+            vault.reveal_field(item, FieldId::new_v4(), true),
+            Err(Error::NoSuchField)
+        ));
+    }
+
+    #[test]
+    fn a_reveal_does_not_move_updated_at() {
+        // A reveal reads the vault. If it touched `updated_at`, every "last changed" display
+        // in the UI would silently come to mean "last looked at".
+        let (mut vault, item, secret, _) = vault_with_a_login();
+        let before = vault.body().updated_at;
+
+        vault.reveal_field(item, secret, true).unwrap();
+
+        assert_eq!(vault.body().updated_at, before);
+    }
+
+    #[test]
+    fn the_audit_log_is_capped_and_drops_the_oldest_first() {
+        let (mut vault, item, secret, _) = vault_with_a_login();
+
+        for _ in 0..VaultBody::AUDIT_MAX_ENTRIES + 50 {
+            vault.reveal_field(item, secret, true).unwrap();
+        }
+
+        assert_eq!(vault.audit_entries().len(), VaultBody::AUDIT_MAX_ENTRIES);
+    }
+
+    #[test]
+    fn the_audit_log_survives_a_round_trip_and_clears_the_flag_on_save() {
+        let (mut vault, item, secret, _) = vault_with_a_login();
+        vault.reveal_field(item, secret, true).unwrap();
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("audited.tvault");
+        vault.save_to(&path).unwrap();
+
+        assert!(!vault.has_unflushed_audit(), "a save flushes the tail");
+
+        let reopened = Vault::open_file(&path, "correct horse").unwrap();
+        assert_eq!(reopened.audit_entries().len(), 1);
+        assert_eq!(reopened.audit_entries()[0].item_id, item);
+        assert!(
+            !reopened.has_unflushed_audit(),
+            "a vault read from disk has nothing pending by definition"
+        );
+    }
+
+    #[test]
+    fn an_empty_audit_log_writes_no_key_at_all() {
+        // This is what keeps the known-answer vectors valid without regenerating them: a
+        // vault that has never recorded a reveal must serialize exactly as it did before the
+        // field existed.
+        // Checked against the *plaintext* CBOR, not the sealed bytes: searching ciphertext for
+        // a key name would pass whatever the encoding did, which is a test that proves nothing.
+        let (mut vault, item, secret, _) = vault_with_a_login();
+
+        let mut empty = Vec::new();
+        ciborium::into_writer(vault.body(), &mut empty).unwrap();
+        assert!(
+            !empty.windows(5).any(|window| window == b"audit"),
+            "an empty audit log must not appear in the encoded body"
+        );
+
+        // And the inverse, so the check above cannot pass because the key is spelled
+        // differently or the encoding never writes text keys at all.
+        vault.reveal_field(item, secret, true).unwrap();
+        let mut populated = Vec::new();
+        ciborium::into_writer(vault.body(), &mut populated).unwrap();
+        assert!(
+            populated.windows(5).any(|window| window == b"audit"),
+            "a populated audit log must appear in the encoded body"
+        );
+    }
+
+    #[test]
+    fn clearing_the_audit_log_empties_it_and_marks_it_unflushed() {
+        let (mut vault, item, secret, _) = vault_with_a_login();
+        vault.reveal_field(item, secret, true).unwrap();
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("audited.tvault");
+        vault.save_to(&path).unwrap();
+
+        vault.clear_audit();
+
+        assert!(vault.audit_entries().is_empty());
+        assert!(vault.has_unflushed_audit());
     }
 
     #[test]

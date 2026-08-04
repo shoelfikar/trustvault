@@ -70,6 +70,41 @@ body {
   margin: 0;
 }
 
+/* The UA's own spacing is not this design's spacing. Every gap in the app comes from a
+   --space-* token applied deliberately, so the browser's paragraph and heading margins are
+   removed rather than overridden one selector at a time — otherwise the first component that
+   forgets to set a margin inherits 16px from nowhere and nobody finds it. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p,
+figure,
+blockquote,
+dl,
+dd {
+  margin: 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 body {
   background: var(--bg-surface);
   color: var(--fg);

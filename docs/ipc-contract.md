@@ -238,9 +238,10 @@ Two honesty constraints on this command, both from the prior-art survey:
   before the timer fires, the clipboard content goes with it — which is safe, but means the UI must
   not claim the clear is guaranteed after a quit.
 - Clipboard **managers** (GPaste, Klipper, CopyQ) keep their own copy and the platform hints
-  (`x-kde-passwordManagerHint`) are advisory. Whether the UI may say "Clears in 12s" or must say
-  something weaker is the open question against the Phase 2 gate. The contract is unaffected either
-  way; only the copy is.
+  (`x-kde-passwordManagerHint`) are advisory. **Measured 2026-08-05** against GPaste 45.3 on
+  GNOME/Wayland with `track-changes` on: it recorded the value *with* the hint set, and still held
+  it after `clipboard::clear()` ran — `src-tauri/tests/clipboard_manager.rs`. The contract is
+  unaffected, as expected; the UI copy is not, and now says TrustVault clears **its own** copy.
 
 ```ts
 lock(): void
@@ -252,7 +253,7 @@ hammering it during a panic.
 
 ```ts
 get_settings(): Settings
-set_settings(patch: Partial<Settings>): Settings
+set_settings({ settings: Settings }): Settings
 ```
 
 ```ts
@@ -263,15 +264,18 @@ type Settings = {
   audit_log_enabled: boolean;             // R-13, default false — D-31
   sidebar_width: number;                  // px, clamped 180–320 — MASTER.md §4
   list_width: number;                     // px, clamped 240–460
+  last_vault_path: string | null;         // host-owned, read-only to the webview — D-40
 };
 ```
 
-> **TBD — open question.** *Where* settings are stored is not decided. `theme` must be readable
-> while locked, so it cannot live in the sealed body; `audit_log_enabled` arguably should. None of
-> the four values is secret, which points at one plain config file under the OS config directory,
-> but that has not been decided and is not decided here. The command shape above does not depend on
-> the answer, which is why the contract can be written now. Resolve before the first settings
-> command is written.
+`set_settings` takes the **whole struct**, not a patch: a patch shape needs every field optional,
+and an optional boolean is how a setting gets silently reset by a caller that omitted it.
+
+`last_vault_path` is the one field the webview may read and MUST NOT set. The host overwrites
+whatever arrives in it with what it already had, because `Settings` deserializes with defaults —
+a frontend that does not know the field sends it absent, which reads as `null`, which would erase
+the user's vault on the next theme change. Storage is decided: plain JSON in the OS app-config
+directory, all of it, per **D-33**.
 
 ## 7. Sanctioned commands
 
@@ -367,15 +371,15 @@ does not run is worse than one documented as not running:
 | 1 — registered set == documented set | automated; parses `generate_handler!` and this document |
 | 2 — at most one `Secret` per response | automated for `list_items`, `get_item`, `reveal_field` |
 | 3 — only the three sanctioned commands | automated |
-| 4 — `copy_field` and events carry no value | **shape-level only.** `copy_field` writes to the real system clipboard, which a CI runner may not have, so the command body is not driven. `Copied` has one field and it is an integer |
-| 5 — scripted whole-shell session | **not automated.** It needs the shell, which does not exist yet. This is Phase 2 gate evidence and it is not yet produced |
+| 4 — `copy_field` and events carry no value | automated in `tests/ipc_session.rs`, which drives the real body and records **whichever** outcome the machine gives it. A runner with no clipboard produces an error payload, and an error payload is asserted against too — composing a message out of the failing value is a classic way to leak it |
+| 5 — scripted whole-shell session | automated in `tests/ipc_session.rs`. It scripts launch → onboarding → quit → relaunch → wrong password → unlock → list → open → reveal → copy → lock → recovery unlock, records every crossing, and reads the transcript. Two limits, named: it drives command bodies rather than a live webview, and the item it reveals is seeded through the core's API because Phase 2 ships no mutation command (D-38). The transcript is written to `target/ipc-session.log` as gate evidence |
 | 6 — every vault command refuses while locked | automated |
 | N-07 — no wildcard origin in the CSP | automated |
 
-> **Finding, not yet resolved.** R-10's acceptance criterion reads "enforced by a **core** test", but
-> `trustvault-core` must not depend on Tauri (N-02) and therefore cannot see a command at all. The
-> enforceable version of that criterion is this harness, in `src-tauri`. Either R-10's acceptance
-> text is corrected to say so, or the criterion stays unmeetable as written.
+> **Resolved 2026-08-05 — D-39.** R-10's acceptance criterion read "enforced by a **core** test",
+> which `trustvault-core` cannot do: N-02 forbids it from depending on Tauri, so it cannot see a
+> command at all. `trustvault-requirements.md` now names `src-tauri/tests/ipc_audit.rs` instead,
+> and says why, so the correction cannot be read later as a weakening.
 
 ## 10. What later phases add
 

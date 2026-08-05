@@ -162,8 +162,7 @@ fn schedule_clear(
     generation: u64,
 ) {
     thread::spawn(move || {
-        thread::sleep(Duration::from_secs(seconds));
-        clipboard::clear();
+        clear_after(seconds);
         let state = app.state::<AppState>();
         let current = state
             .with(|inner| inner.generation)
@@ -172,6 +171,16 @@ fn schedule_clear(
             let _ = app.emit("clipboard-cleared", FieldEvent { item_id, field_id });
         }
     });
+}
+
+/// Waits out the window and clears the clipboard — the whole of S-11 and R-14.
+///
+/// Split from [`schedule_clear`] so the gate can put a stopwatch on the **real** code path
+/// rather than on a re-implementation of it; what stays behind is the cosmetic event, which
+/// needs a Tauri runtime. `tests/clipboard_clear.rs` measures this function.
+pub fn clear_after(seconds: u64) {
+    thread::sleep(Duration::from_secs(seconds));
+    clipboard::clear();
 }
 
 /// Payload of `field-remasked` and `clipboard-cleared`.

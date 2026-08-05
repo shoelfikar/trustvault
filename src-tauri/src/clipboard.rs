@@ -46,9 +46,27 @@ pub fn set(value: &str) -> IpcResult<()> {
     let mut guard = handle
         .lock()
         .map_err(|_| IpcError::new(ErrorKind::Clipboard))?;
-    guard
-        .set_text(value)
-        .map_err(|_| IpcError::new(ErrorKind::Clipboard))
+
+    // On Linux the copy carries `x-kde-passwordManagerHint: secret`, which is the most widely
+    // adopted convention for asking GPaste, Klipper and CopyQ not to record it. **Advisory** —
+    // nothing obliges a manager to honour it, and `tests/clipboard_manager.rs` is what tells us
+    // whether one does. It was also D-11's whole reason for choosing `arboard`, and going and
+    // looking is how we found the hint was not actually being sent.
+    #[cfg(target_os = "linux")]
+    {
+        use arboard::SetExtLinux as _;
+        guard
+            .set()
+            .exclude_from_history()
+            .text(value)
+            .map_err(|_| IpcError::new(ErrorKind::Clipboard))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        guard
+            .set_text(value)
+            .map_err(|_| IpcError::new(ErrorKind::Clipboard))
+    }
 }
 
 /// Clears the clipboard, if this process still owns it.

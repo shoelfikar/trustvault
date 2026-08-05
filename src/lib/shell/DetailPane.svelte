@@ -189,12 +189,19 @@
 
       {#if clipboardLeft > 0 && !cleared}
         <!--
-          Whether this may promise a clear at all is the open question against the Phase 2 gate:
-          clipboard managers keep their own copy and the platform hints are advisory. The
-          wording is "clears in", not "cleared" -- but it still claims more than the platform
-          guarantees, and must be revisited once GPaste and Klipper have actually been tested.
+          Measured 2026-08-05 against GPaste 45.3 on GNOME/Wayland with track-changes on
+          (`src-tauri/tests/clipboard_manager.rs`): GPaste recorded the copied value **despite**
+          the `x-kde-passwordManagerHint` the copy carries, and still held it after TrustVault
+          cleared the clipboard. So the wording says what is true -- TrustVault clears its own
+          copy, and cannot reach a manager's history. The title carries the rest, because the
+          chip has room for one line and the honest sentence is two.
         -->
-        <p class="clip"><Icon name="clock" size={13} />Clipboard clears in {clipboardLeft}s</p>
+        <p
+          class="clip"
+          title="TrustVault clears its own copy. A clipboard manager (GPaste, Klipper, CopyQ) may keep its own — measured against GPaste 45.3, which does."
+        >
+          <Icon name="clock" size={13} />TrustVault clears its copy in {clipboardLeft}s
+        </p>
       {/if}
 
       {#if hasPassword || detail.status !== 'unknown'}

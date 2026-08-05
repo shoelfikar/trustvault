@@ -61,24 +61,90 @@ pub fn start(app: AppHandle) {
                 continue;
             };
 
-            if !unlocked {
-                continue;
-            }
-
-            // Sleep first: a machine that just woke is also, by definition, idle, and the user
-            // is better served by "your machine slept" than by "you were away".
-            if elapsed > SLEEP_JUMP_MS {
-                lock_now(&app, &state, LockReason::OsSleep);
-                continue;
-            }
-
-            // A timeout of zero means never, which is a setting a user is entitled to have and
-            // a footgun the UI should say so about.
-            if timeout_seconds > 0
-                && idle_ms > i64::try_from(timeout_seconds * 1000).unwrap_or(i64::MAX)
-            {
-                lock_now(&app, &state, LockReason::Timeout);
+            if let Some(reason) = decide(unlocked, elapsed, idle_ms, timeout_seconds) {
+                lock_now(&app, &state, reason);
             }
         }
     });
+}
+
+/// Whether this tick locks the vault, and why — the whole of R-09's automatic half.
+///
+/// Split out of the ticker so it can be *measured* rather than asserted: the loop above needs
+/// a Tauri runtime and a wall clock to reach, and a rule that can only be exercised by waiting
+/// five minutes is a rule nobody exercises. Every branch here is a line of Phase 2 gate
+/// evidence.
+pub fn decide(
+    unlocked: bool,
+    elapsed_ms: i64,
+    idle_ms: i64,
+    timeout_seconds: u64,
+) -> Option<LockReason> {
+    if !unlocked {
+        return None;
+    }
+
+    // Sleep first: a machine that just woke is also, by definition, idle, and the user is
+    // better served by "your machine slept" than by "you were away".
+    if elapsed_ms > SLEEP_JUMP_MS {
+        return Some(LockReason::OsSleep);
+    }
+
+    // A timeout of zero means never, which is a setting a user is entitled to have and a
+    // footgun the UI should say so about.
+    if timeout_seconds > 0 && idle_ms > i64::try_from(timeout_seconds * 1000).unwrap_or(i64::MAX) {
+        return Some(LockReason::Timeout);
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One tick's worth of elapsed wall clock on a machine that did not sleep.
+    const NORMAL: i64 = 5_000;
+
+    #[test]
+    fn a_locked_vault_is_never_locked_again() {
+        assert_eq!(decide(false, 10_000_000, 10_000_000, 300), None);
+    }
+
+    #[test]
+    fn the_idle_timeout_fires_just_past_the_configured_window() {
+        // R-09, trigger two. 300 s is the default; the boundary is what is tested, because an
+        // off-by-one here means either a vault that locks early or one that never does.
+        assert_eq!(decide(true, NORMAL, 299_999, 300), None);
+        assert_eq!(
+            decide(true, NORMAL, 300_001, 300),
+            Some(LockReason::Timeout)
+        );
+    }
+
+    #[test]
+    fn a_wall_clock_jump_reads_as_sleep_and_outranks_the_timeout() {
+        // R-09, trigger three, and the ordering matters: a machine that just woke is also idle,
+        // and "your machine slept" is the more useful of the two true statements.
+        assert_eq!(
+            decide(true, 20 * 60_000, 20 * 60_000, 300),
+            Some(LockReason::OsSleep)
+        );
+        assert_eq!(
+            decide(true, SLEEP_JUMP_MS + 1, 0, 0),
+            Some(LockReason::OsSleep)
+        );
+    }
+
+    #[test]
+    fn a_loaded_machine_is_not_mistaken_for_a_sleeping_one() {
+        // The reason SLEEP_JUMP_MS is generous: a 5-second timer delayed by a few seconds
+        // under load must not lock the vault, or its owner turns the feature off within a week.
+        assert_eq!(decide(true, 12_000, 1_000, 300), None);
+    }
+
+    #[test]
+    fn a_timeout_of_zero_means_never() {
+        assert_eq!(decide(true, NORMAL, 10_000_000, 0), None);
+    }
 }

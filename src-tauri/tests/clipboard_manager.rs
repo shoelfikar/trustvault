@@ -62,7 +62,11 @@ fn a_copied_secret_is_or_is_not_kept_by_gpaste() {
     // promising something this run disproved.
     println!(
         "GPaste {} the copied value (track-changes on, hint {}).",
-        if recorded { "RECORDED" } else { "did not record" },
+        if recorded {
+            "RECORDED"
+        } else {
+            "did not record"
+        },
         if HINT_IS_SET { "set" } else { "NOT set" },
     );
 

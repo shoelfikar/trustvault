@@ -35,6 +35,12 @@ pub struct FieldSummary {
     pub value: Option<String>,
     /// The mask — present only when `secret` is true.
     pub mask: Option<&'static str>,
+    /// Whether the user or an import added this field — D-43.
+    ///
+    /// Crosses because the detail pane renders custom fields as their own group below the
+    /// type's own fields, and the webview cannot derive this: inferring it from the label is
+    /// the mistake §6.3 already rejects for `secret`, one step along.
+    pub custom: bool,
 }
 
 impl FieldSummary {
@@ -51,6 +57,7 @@ impl FieldSummary {
                 Some(field.value.expose().to_owned())
             },
             mask: if field.secret { Some(MASK) } else { None },
+            custom: field.custom,
         }
     }
 }

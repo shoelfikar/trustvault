@@ -43,6 +43,12 @@ export interface FieldSummary {
    * never present it as one, and never derive anything from `mask.length`.
    */
   mask: string | null;
+  /**
+   * Whether the user or an import added this field, rather than it being one of the type's
+   * own — D-43. Stored in the vault, never inferred here: deriving it from the label is the
+   * mistake `secret` already refuses to make.
+   */
+  custom: boolean;
 }
 
 export interface ItemSummary {

@@ -66,10 +66,15 @@ fn registered_commands() -> Vec<String> {
         .collect()
 }
 
-/// Reads the command names the contract documents, from its fenced `ts` blocks.
-fn documented_commands() -> Vec<String> {
+/// Reads the command names the contract documents, split into shipped and planned.
+///
+/// A declaration carrying a trailing `// planned` marker is specified but not yet registered
+/// — §1 of the contract. The marker exists so the contract can go on being written before the
+/// code, which is the practice that caught D-25 and four Phase 2 findings; it is checked in
+/// **both** directions by the caller, so it cannot be used to park a command that shipped.
+fn documented_commands() -> (Vec<String>, Vec<String>) {
     let contract = include_str!("../../docs/ipc-contract.md");
-    let mut names = Vec::new();
+    let (mut shipped, mut planned) = (Vec::new(), Vec::new());
     for line in contract.lines() {
         // A command declaration in the contract looks like `name({...}): Shape` or `name():`.
         let Some(open) = line.find('(') else { continue };
@@ -80,12 +85,18 @@ fn documented_commands() -> Vec<String> {
                 .all(|c| c.is_ascii_lowercase() || c == '_' || c.is_ascii_digit())
             && line[open..].contains("):")
         {
-            names.push(name.to_owned());
+            if line.contains("// planned") {
+                planned.push(name.to_owned());
+            } else {
+                shipped.push(name.to_owned());
+            }
         }
     }
-    names.sort();
-    names.dedup();
-    names
+    for set in [&mut shipped, &mut planned] {
+        set.sort();
+        set.dedup();
+    }
+    (shipped, planned)
 }
 
 /// Check 1 — the registered set and the documented set are the same set.
@@ -96,41 +107,75 @@ fn documented_commands() -> Vec<String> {
 fn every_command_is_documented_and_every_documented_command_exists() {
     let mut registered = registered_commands();
     registered.sort();
-    let documented = documented_commands();
+    let (shipped, planned) = documented_commands();
 
     let undocumented: Vec<_> = registered
         .iter()
-        .filter(|name| !documented.contains(name))
+        .filter(|name| !shipped.contains(name))
         .collect();
     assert!(
         undocumented.is_empty(),
         "commands registered but absent from docs/ipc-contract.md: {undocumented:?}"
     );
 
-    let unimplemented: Vec<_> = documented
+    let unimplemented: Vec<_> = shipped
         .iter()
         .filter(|name| !registered.contains(name))
         .collect();
     assert!(
         unimplemented.is_empty(),
-        "commands documented but not registered: {unimplemented:?}"
+        "commands documented but not registered: {unimplemented:?} — \
+         if one is still being built, mark its declaration `// planned`"
+    );
+
+    // The other direction, which is the half that keeps the marker honest. A command that
+    // shipped while its declaration still says `// planned` is invisible to the check above:
+    // it would be registered, documented, and excluded from both comparisons at once.
+    let stale: Vec<_> = planned
+        .iter()
+        .filter(|name| registered.contains(name))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "registered but still marked `// planned` in docs/ipc-contract.md: {stale:?} — \
+         delete the marker in the commit that implements the command"
     );
 }
 
-/// Check 3 — exactly three commands may return a secret, and they are the named three.
+/// Check 3 — exactly four commands may return a secret, and they are the named four.
+///
+/// The count moved from three to four on 2026-08-05, which is the one change this test exists
+/// to make expensive: it asserts the sentence **and** that a decision is cited beside it by
+/// number, so the budget cannot be raised by editing prose alone.
+///
+/// It cannot check that the decision log actually holds that row, and the reason is worth
+/// recording rather than working around: `trustvault-state.md` is gitignored — the process
+/// record stays on the author's disk while the code is public — so a test that read it would
+/// compile here and fail to compile in CI. Written that way first, and caught by looking at
+/// `.gitignore` rather than by CI, which is the cheaper of the two.
 #[test]
-fn the_sanctioned_set_is_exactly_three_and_unchanged() {
+fn the_sanctioned_set_is_exactly_four_and_unchanged() {
     let contract = include_str!("../../docs/ipc-contract.md");
-    for name in ["create_vault", "unlock_recovery_kit", "reveal_field"] {
+    for name in [
+        "create_vault",
+        "unlock_recovery_kit",
+        "reveal_field",
+        "generate_password",
+    ] {
         assert!(
             contract.contains(name),
             "{name} is a sanctioned command and must stay documented"
         );
     }
     assert!(
-        contract.contains("There are **three** sanctioned commands"),
-        "the budget of three is the contract's load-bearing sentence; if it changed, \
+        contract.contains("There are **four** sanctioned commands"),
+        "the budget is the contract's load-bearing sentence; if it changed, \
          a decision log entry should have changed with it"
+    );
+
+    assert!(
+        contract.contains("since **D-44** — `generate_password`"),
+        "the budget may only move with a decision cited beside it, by number"
     );
 }
 

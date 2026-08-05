@@ -239,6 +239,7 @@ Field {
   value:      text,
   kind:       text,          // "text" | "username" | "password" | "url" | "email" | "otp" | "note" | "date"
   secret:     bool,          // §6.3
+  custom:     bool,          // §6.5; absent entirely when false
   ...unknown
 }
 
@@ -305,6 +306,38 @@ The log is inside the sealed body for the same reason `history` is: a record of 
 read *when* is sensitive on its own, whatever it omits. It is **not tamper-evidence** and must never
 be argued as such — anyone who can read it holds the master key and can therefore rewrite it. Its
 reader is the vault's owner reviewing their own activity.
+
+### 6.5 `custom` is stored, never inferred, and there is no folder
+
+Two questions that an import forces and the design never had to answer, settled together in
+**D-43** because they have the same shape: the model gets one new bit, and no new container.
+
+**Custom fields.** `custom` marks a field the user or an import added, as against one of the item
+type's own. It is stored for the reason `secret` is stored (§6.3), one step along. The tempting
+alternative — derive it, by asking whether the label is in the type's standard set — fails in both
+directions on real data: a login whose password field someone renamed becomes "custom", and an
+imported custom field that happens to be called "Username" becomes the login's own. The second
+direction is the dangerous one, because it silently merges an imported value into a real credential.
+
+Three consequences a second implementation must match:
+
+1. **Absent when false.** A field that is not custom writes no `custom` key at all, so a vault with
+   no custom field anywhere encodes exactly as it did before this key existed — which is what keeps
+   the vectors in §10 valid without regenerating them. A reader MUST treat an absent `custom` as
+   `false`, not as an error.
+2. **Custom fields are never addressed by label.** Setting a field by label searches only
+   non-custom fields. Two fields may carry the same label as long as at most one of them is not
+   custom.
+3. **Duplicate custom labels are legal and are not merged.** Bitwarden permits two custom fields
+   with the same name, and merging them on import would be a field dropped in silence — the exact
+   failure R-29 refuses to call an import.
+
+**Folders.** There is no `folder` key and there will not be one. A folder is a single-parent
+grouping, `tags` is a many-to-many one, and every folder is expressible as a tag while the reverse
+is not — so a `folder` key would be a second taxonomy over the same items, with the sidebar then
+owing two filters that mean nearly the same thing. On import a folder becomes a tag, and a **nested
+path is kept verbatim as one tag string** (`Work/Clients`, not `Clients`): flattening to the leaf
+name collides across parents, and splitting into two tags claims a hierarchy that tags do not have.
 
 ## 7. Reading a vault
 

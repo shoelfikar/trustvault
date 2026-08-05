@@ -9,6 +9,10 @@
 //! * **`secret` is stored, never inferred** (§6.3). Guessing from the label masks
 //!   "Recovery e-mail" because it contains "recovery", and leaves "PIN" in the clear because
 //!   nobody thought of it.
+//! * **`custom` is stored, never inferred either** (§6.5, D-43), for exactly that reason one
+//!   step along: deriving it from "is this label in the type's standard set?" means a login
+//!   whose password field was renamed becomes a custom field, and an imported custom field
+//!   that happens to be called "Username" becomes the standard one.
 
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -152,9 +156,25 @@ pub struct Field {
     pub kind: FieldKind,
     /// Whether the value is masked by default. Stored, never inferred (§6.3).
     pub secret: bool,
+    /// Whether the user (or an import) added this field, rather than it being one of the
+    /// type's own fields. Stored, never inferred — §6.5, D-43.
+    ///
+    /// `skip_serializing_if` is not an optimization, for the same reason it is not one on
+    /// [`VaultBody::audit`]: a vault with no custom field anywhere serializes to exactly the
+    /// bytes it did before this key existed, which is what keeps the known-answer vectors in
+    /// `tests/vectors/` valid without regenerating them.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub custom: bool,
     /// Keys written by a newer version, preserved untouched (N-09).
     #[serde(flatten)]
     pub unknown: Unknown,
+}
+
+/// Predicate for `skip_serializing_if` on a `bool` that defaults to false.
+///
+/// Takes a reference because that is the signature serde requires.
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Field {
@@ -170,6 +190,7 @@ impl Field {
                 FieldKind::Text
             },
             secret,
+            custom: false,
             unknown: Unknown::new(),
         }
     }
@@ -178,6 +199,13 @@ impl Field {
     #[must_use]
     pub fn with_kind(mut self, kind: FieldKind) -> Self {
         self.kind = kind;
+        self
+    }
+
+    /// Marks the field as user-added rather than one of the item type's own — D-43.
+    #[must_use]
+    pub fn with_custom(mut self, custom: bool) -> Self {
+        self.custom = custom;
         self
     }
 }
@@ -253,15 +281,25 @@ impl Item {
         self.fields.iter().find(|field| field.id == id)
     }
 
-    /// Sets a field by label, creating it if it does not exist.
+    /// Sets one of the item type's **own** fields by label, creating it if it does not exist.
     ///
     /// Overwriting an existing value pushes the old one onto [`Item::history`] — losing a
     /// password to a mistyped edit is a support case that cannot be undone otherwise.
+    ///
+    /// The search skips custom fields (D-43), and that is load-bearing rather than tidy: a
+    /// Bitwarden export may carry a custom field called "Username" beside the login's own
+    /// username, and without the filter, importing one would overwrite the other and push a
+    /// real credential into `history` where no UI in v1 can reach it. Custom fields arrive
+    /// through [`Item::push_field`] and are never addressed by label.
     pub fn set_field(&mut self, label: &str, value: impl Into<String>, secret: bool) -> FieldId {
         let value = SecretString::new(value);
         let now = now_ms();
 
-        if let Some(field) = self.fields.iter_mut().find(|field| field.label == label) {
+        if let Some(field) = self
+            .fields
+            .iter_mut()
+            .find(|field| !field.custom && field.label == label)
+        {
             if field.value != value {
                 self.history.push(HistoryEntry {
                     changed_at: now,
@@ -280,6 +318,29 @@ impl Item {
         self.fields.push(field);
         self.updated_at = now;
         id
+    }
+
+    /// Appends a field verbatim, with no lookup and no deduplication — D-43.
+    ///
+    /// This is the importer's path. It never merges, because merging is how an importer
+    /// drops a field in silence: Bitwarden permits two custom fields with the same name, and
+    /// a set-by-label that found the first would discard the second while reporting success.
+    /// R-29 is met only when every field is either mapped or **named in a refusal**, and a
+    /// collapsed duplicate is neither.
+    pub fn push_field(&mut self, field: Field) -> FieldId {
+        let id = field.id;
+        self.fields.push(field);
+        self.updated_at = now_ms();
+        id
+    }
+
+    /// The fields the user or an import added, in display order — D-43.
+    ///
+    /// Separated because the design draws no custom-field editor: the detail pane renders
+    /// these below the type's own fields, and an item with none looks exactly as it did
+    /// before this concept existed.
+    pub fn custom_fields(&self) -> impl Iterator<Item = &Field> {
+        self.fields.iter().filter(|field| field.custom)
     }
 
     /// Removes a field, returning whether one was there.
@@ -477,6 +538,86 @@ mod tests {
         assert!(item.remove_field(id));
         assert!(!item.remove_field(id));
         assert!(item.field(id).is_none());
+    }
+
+    #[test]
+    fn custom_is_stored_not_inferred() {
+        // §6.5, D-43. The label says nothing here either — a field called "Username" can be
+        // the login's own or one an import brought along, and only the flag distinguishes
+        // them.
+        let own = Field::new("Username", "octocat", false);
+        let brought = Field::new("Username", "octocat@work", false).with_custom(true);
+        assert!(!own.custom);
+        assert!(brought.custom);
+    }
+
+    #[test]
+    fn setting_a_field_never_reaches_a_custom_one() {
+        // The import collision D-43 exists to prevent: a custom "Username" beside the
+        // login's own. Without the filter, `set_field` would find whichever came first,
+        // overwrite it, and push a real credential into `history` where no v1 UI can reach.
+        let mut item = Item::new(ItemKind::Login, "GitHub");
+        let brought =
+            item.push_field(Field::new("Username", "from-import", false).with_custom(true));
+        let own = item.set_field("Username", "octocat", false);
+
+        assert_ne!(
+            own, brought,
+            "a new field was created, not the custom one reused"
+        );
+        assert_eq!(item.fields.len(), 2);
+        assert!(item.history.is_empty(), "nothing was overwritten");
+        assert_eq!(
+            item.field(brought).unwrap().value,
+            SecretString::new("from-import")
+        );
+        assert_eq!(item.custom_fields().count(), 1);
+    }
+
+    #[test]
+    fn pushed_fields_keep_duplicate_labels() {
+        // Bitwarden permits two custom fields with the same name. Merging them would be a
+        // field dropped in silence, which is exactly what R-29 refuses to call an import.
+        let mut item = Item::new(ItemKind::Login, "GitHub");
+        let first = item.push_field(Field::new("Note", "one", false).with_custom(true));
+        let second = item.push_field(Field::new("Note", "two", false).with_custom(true));
+
+        assert_ne!(first, second);
+        assert_eq!(item.custom_fields().count(), 2);
+    }
+
+    #[test]
+    fn an_ordinary_field_serialises_without_the_custom_key() {
+        // Not cosmetic: the known-answer vectors in tests/vectors/ were generated before this
+        // key existed, and they stay valid only because a vault with no custom field anywhere
+        // encodes to the same bytes it did then.
+        let field = Field::new("Username", "octocat", false);
+        let encoded = serde_json::to_string(&field).unwrap();
+        assert!(
+            !encoded.contains("custom"),
+            "a non-custom field must write no `custom` key: {encoded}"
+        );
+
+        let custom = field.clone().with_custom(true);
+        assert!(
+            serde_json::to_string(&custom)
+                .unwrap()
+                .contains(r#""custom":true"#)
+        );
+    }
+
+    #[test]
+    fn a_field_written_before_custom_existed_reads_as_not_custom() {
+        let json = format!(
+            r#"{{"id":"{}","label":"Username","value":"octocat","kind":"username","secret":false}}"#,
+            Uuid::new_v4()
+        );
+        let field: Field = serde_json::from_str(&json).unwrap();
+        assert!(!field.custom);
+        assert!(
+            field.unknown.is_empty(),
+            "`custom` is a known key, not one that falls through to `unknown`"
+        );
     }
 
     #[test]

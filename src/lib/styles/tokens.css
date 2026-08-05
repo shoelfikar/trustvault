@@ -87,6 +87,13 @@
   --list-max: 460px;
   --titlebar-h: 38px;
   --toolbar-h: 40px;
+  /* Every icon button, chip button and toolbar control. MASTER.md §4 puts the pointer-fine
+     minimum at 28px and §7 puts a button at 28px tall; the prototype draws these at 26px.
+     §4 wins and the 2px is logged as D-34. */
+  --control-h: 28px;
+  /* The small in-row control — reveal, copy, kebab. Same 28px floor, named apart because the
+     prototype treats it as a distinct size and a future compact density will want it back. */
+  --control-sm: 28px;
   --row-h: calc(34px * var(--ui-scale)); /* compact 30 / large 40 via --ui-scale */
   --field-row-h: 30px;
   --window-min-w: 720px;

@@ -56,7 +56,8 @@ mod vault;
 pub use format::{HEADER_LEN, Header, WRAP_AAD_LEN};
 pub use kdf::KdfParams;
 pub use model::{
-    Field, FieldId, FieldKind, HistoryEntry, Item, ItemId, ItemKind, ItemStatus, VaultBody,
+    AuditEntry, Field, FieldId, FieldKind, HistoryEntry, Item, ItemId, ItemKind, ItemStatus,
+    VaultBody,
 };
 pub use recovery::RecoveryCode;
 pub use secret::{SecretBytes, SecretString};
@@ -134,6 +135,26 @@ pub enum Error {
     /// The KDF parameters are outside the bounds in `docs/vault-format.md` §3.3.
     #[error("Argon2id parameters are out of range")]
     KdfParams,
+
+    /// No item in this vault has that identifier.
+    ///
+    /// Safe to distinguish, and it has to be: the caller is the local UI acting on a list it
+    /// was just given, so the only way to reach this is a stale selection or a bug. It says
+    /// nothing an attacker could not learn by opening the vault they already opened.
+    #[error("no such item")]
+    NoSuchItem,
+
+    /// The item exists; it has no field with that identifier.
+    #[error("no such field")]
+    NoSuchField,
+
+    /// The field exists and is not marked secret, so there is nothing to reveal.
+    ///
+    /// Revealing a non-secret field is refused rather than quietly succeeding, so that
+    /// "reveal" means one thing in the audit log, in the IPC audit harness, and in the UI.
+    /// A field whose value is already in the item list is not revealed by asking again.
+    #[error("field is not secret")]
+    NotSecret,
 
     /// An I/O failure while reading or writing the vault file.
     #[error("vault file I/O failed")]

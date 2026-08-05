@@ -1,0 +1,448 @@
+<script lang="ts">
+  /**
+   * The three-pane shell — `MASTER.md` §6. Titlebar, sidebar, item list, detail, plus the two
+   * full-width surfaces (Watchtower, Settings) and every overlay.
+   *
+   * Pane widths are persisted through the settings file (D-33), because §10 asks for them to
+   * be restored and they are no more secret than the theme. Native window decorations, per §6:
+   * custom chrome on Windows and Linux costs more bugs than it buys — so the prototype's three
+   * traffic lights are absent here. They are the operating system's, drawn above this strip.
+   *
+   * The titlebar's search is a **button, not an input**. §7 makes the command palette the
+   * primary navigation surface, and two search affordances that behave differently is how a
+   * user learns to trust neither. Clicking it opens ⌘K.
+   */
+  import { untrack } from 'svelte';
+  import Icon from '../icons/Icon.svelte';
+  import IconButton from '../components/IconButton.svelte';
+  import CommandPalette from './CommandPalette.svelte';
+  import DeleteDialog from './DeleteDialog.svelte';
+  import DetailPane from './DetailPane.svelte';
+  import GeneratorDialog from './GeneratorDialog.svelte';
+  import ItemList from './ItemList.svelte';
+  import NewItemDialog from './NewItemDialog.svelte';
+  import SettingsPane from './SettingsPane.svelte';
+  import Sidebar from './Sidebar.svelte';
+  import VaultSwitcher from './VaultSwitcher.svelte';
+  import Watchtower from './Watchtower.svelte';
+  import {
+    asIpcError,
+    listItems,
+    lock,
+    setSettings,
+    type ItemSummary,
+    type Settings,
+    type VaultStatus,
+  } from '../ipc';
+  import { isFullWidth, matches, viewTitle, type View } from './views';
+
+  interface Props {
+    status: VaultStatus;
+    settings: Settings;
+    onsettings: (next: Settings) => void;
+  }
+
+  const { status, settings, onsettings }: Props = $props();
+
+  let items = $state<ItemSummary[]>([]);
+  let view = $state<View>({ kind: 'all' });
+  let selectedId = $state<string | null>(null);
+  let error = $state('');
+
+  /** Which overlay is up. One at a time — the prototype never stacks two. */
+  let overlay = $state<
+    'none' | 'palette' | 'generator' | 'add' | 'vaults' | 'deleteItem' | 'deleteVault'
+  >('none');
+
+  /** Epoch-ms the clipboard is scheduled to clear at. Owned here; see DetailPane's note. */
+  let clipboardUntil = $state(0);
+
+  /**
+   * Live pane widths, committed to the settings file when a drag ends.
+   *
+   * Seeded from `settings` once by design — during a drag this is the authority and the
+   * settings object is stale until the drag commits. Reading it reactively would fight the
+   * pointer, so the initial-value capture is the intent, not an oversight.
+   */
+  let sidebarWidth = $state(untrack(() => settings.sidebarWidth));
+  let listWidth = $state(untrack(() => settings.listWidth));
+
+  $effect(() => {
+    void listItems()
+      .then((loaded) => (items = loaded))
+      .catch((thrown) => (error = asIpcError(thrown).message));
+  });
+
+  const visible = $derived(items.filter((item) => matches(view, item)));
+
+  const vaultFile = $derived((status.path ?? '').split(/[/\\]/).pop() || 'vault.tvault');
+  const tags = $derived(
+    [...new Set(items.flatMap((item) => item.tags))].sort((a, b) => a.localeCompare(b)),
+  );
+
+  const selectedTitle = $derived(items.find((item) => item.id === selectedId)?.title ?? '');
+
+  /**
+   * Keep the selection inside the current view, and land on the first row when it falls out.
+   *
+   * The prototype opens with an item already selected, and it is the right default: a detail
+   * pane that says "select an item" on every launch spends the app's most valuable pixels on an
+   * instruction. Switching views re-selects rather than blanking, for the same reason.
+   */
+  $effect(() => {
+    if (isFullWidth(view)) return;
+    if (selectedId && visible.some((item) => item.id === selectedId)) return;
+    selectedId = visible[0]?.id ?? null;
+  });
+
+  function goto(next: View) {
+    view = next;
+    if (isFullWidth(next)) selectedId = null;
+  }
+
+  function openItem(id: string) {
+    if (isFullWidth(view)) view = { kind: 'all' };
+    selectedId = id;
+  }
+
+  /** Clamped to `MASTER.md` §4's ranges, which the tokens also name. */
+  const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+  /**
+   * Pointer-driven resize.
+   *
+   * Written against pointer events with capture rather than a library: a splitter is twenty
+   * lines, and D-09 already rejected pulling in a component set whose defaults `MASTER.md`
+   * bans. Keyboard resizing is deliberately **not** here — it is a Phase 3 keyboard-audit
+   * item, and claiming it now would put a tick against S-08 that nothing earned.
+   */
+  function drag(which: 'sidebar' | 'list', event: PointerEvent) {
+    event.preventDefault();
+    const start = event.clientX;
+    const from = which === 'sidebar' ? sidebarWidth : listWidth;
+    const target = event.currentTarget as HTMLElement;
+    target.setPointerCapture(event.pointerId);
+
+    const move = (moved: PointerEvent) => {
+      const next = from + (moved.clientX - start);
+      if (which === 'sidebar') sidebarWidth = clamp(next, 180, 320);
+      else listWidth = clamp(next, 240, 460);
+    };
+    const done = () => {
+      target.releasePointerCapture(event.pointerId);
+      target.removeEventListener('pointermove', move);
+      target.removeEventListener('pointerup', done);
+      // Written once, at the end of the drag. Persisting on every pointermove would be a file
+      // write per frame.
+      const next = { ...settings, sidebarWidth, listWidth };
+      void setSettings(next).then(onsettings);
+    };
+    target.addEventListener('pointermove', move);
+    target.addEventListener('pointerup', done);
+  }
+
+  function saveSettings(next: Settings) {
+    void setSettings(next).then(onsettings);
+  }
+
+  /**
+   * §7's shortcuts.
+   *
+   * Every one of them re-checks nothing about the lock state, because it cannot need to: this
+   * component only exists while the host says the vault is unlocked, and the host re-checks on
+   * every command regardless of what the frontend believes.
+   */
+  function onkeydown(event: KeyboardEvent) {
+    const meta = event.metaKey || event.ctrlKey;
+    const key = event.key.toLowerCase();
+    if (meta && key === 'k') {
+      event.preventDefault();
+      overlay = 'palette';
+    } else if (meta && key === 'n') {
+      event.preventDefault();
+      overlay = 'add';
+    } else if (meta && key === 'g') {
+      event.preventDefault();
+      overlay = 'generator';
+    } else if (meta && key === 'l') {
+      event.preventDefault();
+      void lock();
+    } else if (event.key === 'Escape' && overlay !== 'none') {
+      overlay = 'none';
+    }
+  }
+</script>
+
+<svelte:window {onkeydown} />
+
+<div class="shell">
+  <!-- §6: native decorations, so this is a toolbar inside the window rather than window chrome. -->
+  <header class="titlebar">
+    <div class="vault">
+      <Icon name="vault" size={14} />
+      <span class="vault-name">{status.displayName}</span>
+    </div>
+
+    <button class="search" onclick={() => (overlay = 'palette')}>
+      <Icon name="search" size={13} />
+      <span>Search items, tags, or commands</span>
+      <span class="grow"></span>
+      <span class="kbd">⌘K</span>
+    </button>
+
+    <div class="grow"></div>
+
+    <IconButton
+      icon="settings"
+      label="Settings"
+      title="Settings"
+      active={view.kind === 'settings'}
+      onclick={() => goto({ kind: 'settings' })}
+    />
+    <button class="lock" onclick={() => void lock()}>
+      <Icon name="lock" size={14} />Lock
+    </button>
+  </header>
+
+  <div class="panes">
+    <div class="pane" style="width: {sidebarWidth}px">
+      <Sidebar
+        {items}
+        {view}
+        vaultName={status.displayName}
+        {vaultFile}
+        onview={goto}
+        onvaults={() => (overlay = 'vaults')}
+      />
+    </div>
+
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div
+      class="splitter"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize sidebar"
+      onpointerdown={(event) => drag('sidebar', event)}
+    ></div>
+
+    {#if view.kind === 'watchtower'}
+      <Watchtower {items} onopen={openItem} />
+    {:else if view.kind === 'settings'}
+      <SettingsPane
+        {settings}
+        {status}
+        itemCount={items.length}
+        onchange={saveSettings}
+        ondeletevault={() => (overlay = 'deleteVault')}
+      />
+    {:else}
+      <div class="pane" style="width: {listWidth}px">
+        <ItemList
+          items={visible}
+          {view}
+          {selectedId}
+          {error}
+          onselect={(id) => (selectedId = id)}
+          ongenerate={() => (overlay = 'generator')}
+          onadd={() => (overlay = 'add')}
+        />
+      </div>
+
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <div
+        class="splitter"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize item list"
+        onpointerdown={(event) => drag('list', event)}
+      ></div>
+
+      <DetailPane
+        itemId={selectedId}
+        listEmpty={visible.length === 0}
+        {clipboardUntil}
+        oncopied={(clearsAt) => (clipboardUntil = clearsAt)}
+        ondelete={() => (overlay = 'deleteItem')}
+      />
+    {/if}
+  </div>
+
+  {#if overlay === 'palette'}
+    <CommandPalette
+      {items}
+      onclose={() => (overlay = 'none')}
+      onopen={openItem}
+      onview={goto}
+      onlock={() => void lock()}
+      ongenerate={() => (overlay = 'generator')}
+      onadd={() => (overlay = 'add')}
+      oncopied={(clearsAt) => (clipboardUntil = clearsAt)}
+    />
+  {:else if overlay === 'generator'}
+    <GeneratorDialog onclose={() => (overlay = 'none')} />
+  {:else if overlay === 'add'}
+    <NewItemDialog
+      vaultName={status.displayName}
+      {vaultFile}
+      {tags}
+      onclose={() => (overlay = 'none')}
+    />
+  {:else if overlay === 'vaults'}
+    <VaultSwitcher
+      vaultName={status.displayName}
+      {vaultFile}
+      itemCount={items.length}
+      onclose={() => (overlay = 'none')}
+    />
+  {:else if overlay === 'deleteItem'}
+    <DeleteDialog target="item" name={selectedTitle} onclose={() => (overlay = 'none')} />
+  {:else if overlay === 'deleteVault'}
+    <DeleteDialog
+      target="vault"
+      name={status.displayName}
+      itemCount={items.length}
+      onclose={() => (overlay = 'none')}
+    />
+  {/if}
+
+  <!-- The view name is announced when it changes; the panes themselves are static landmarks. -->
+  <p class="sr" aria-live="polite">{viewTitle(view)}</p>
+</div>
+
+<style>
+  .shell {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: var(--bg-surface);
+    overflow: hidden;
+  }
+
+  .titlebar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    height: var(--titlebar-h);
+    flex: none;
+    padding: 0 var(--space-4);
+    background: var(--bg-base);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .vault {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    color: var(--fg-muted);
+  }
+  .vault-name {
+    font-size: var(--text-sm);
+    color: var(--fg);
+    white-space: nowrap;
+  }
+
+  .search {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex: 1;
+    max-width: 440px;
+    height: 24px;
+    margin: 0 auto;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface);
+    color: var(--fg-subtle);
+    font-size: var(--text-sm);
+    transition: border-color var(--dur-instant) var(--ease-out);
+  }
+  .search:hover {
+    border-color: var(--border-strong);
+  }
+  .search:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+  }
+  .kbd {
+    padding: 0 var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    line-height: 15px;
+  }
+
+  .grow {
+    flex: 1;
+  }
+
+  .lock {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    height: var(--control-h);
+    padding: 0 9px;
+    border-radius: var(--radius-sm);
+    color: var(--fg-muted);
+    font-size: var(--text-sm);
+    transition:
+      background var(--dur-instant) var(--ease-out),
+      color var(--dur-instant) var(--ease-out);
+  }
+  .lock:hover {
+    background: var(--bg-hover);
+    color: var(--fg);
+  }
+  .lock:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  .panes {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+  .pane {
+    flex: none;
+    min-width: 0;
+  }
+
+  /* A 5px grab area over a 1px hairline: the border stays the visual, the target is usable. */
+  .splitter {
+    flex: none;
+    width: 5px;
+    margin: 0 -2px;
+    cursor: col-resize;
+    background: transparent;
+    z-index: 1;
+  }
+  .splitter:hover {
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+
+  .sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* Below 900px the detail becomes an overlay sheet — §6. The list keeps the space until
+     then, which is why this collapses the two fixed panes rather than the flexible one. */
+  @media (max-width: 900px) {
+    .pane {
+      width: auto !important;
+      flex: 1;
+    }
+    .splitter {
+      display: none;
+    }
+  }
+</style>

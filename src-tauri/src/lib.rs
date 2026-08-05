@@ -36,10 +36,15 @@ pub fn run() {
             // Settings before anything else: the lock screen needs the theme, and reading it
             // after the window paints is how a themed app flashes the wrong colours.
             let loaded = commands::settings::load(&handle);
-            app.state::<AppState>().with(|inner| {
+            let state = app.state::<AppState>();
+            state.with(|inner| {
                 inner.settings = loaded;
                 inner.last_activity = state::now_ms();
             });
+            // A relaunch must land on the lock screen, not on onboarding — D-40. Nothing but
+            // the path is restored: no key, no body, so the state this produces is `locked`,
+            // which is the honest description of a vault the host knows about and cannot read.
+            commands::settings::restore_last_vault(&state);
             autolock::start(handle);
             Ok(())
         })

@@ -70,6 +70,19 @@ jobs:
             echo "::error::trustvault-core gained a forbidden dependency — see N-02"
             exit 1
           fi
+      # The other half of the boundary, and the half no Rust test can see. `ipc_session.rs`
+      # proves what the host *sends*; this proves there is exactly one place the webview can
+      # ask from. src/lib/ipc.ts is the single file a reviewer reads to answer "what can reach
+      # plaintext from here", and a stray `invoke` anywhere else makes that answer wrong.
+      - name: Assert the webview reaches IPC through one file only (R-10)
+        run: |
+          strays=$(grep -rln "invoke(" src --include='*.ts' --include='*.svelte' \
+            | grep -v '^src/lib/ipc.ts$' || true)
+          if [ -n "$strays" ]; then
+            echo "$strays"
+            echo "::error::invoke() is called outside src/lib/ipc.ts — every IPC call goes through that file (R-10)"
+            exit 1
+          fi
 
   nonce:
     name: Nonce discipline (R-06)

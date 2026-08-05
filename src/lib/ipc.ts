@@ -70,6 +70,14 @@ export interface Settings {
   sidebarWidth: number;
   /** Item-list width in px, clamped to §4's 240–460. */
   listWidth: number;
+  /**
+   * The vault opened last — **host-owned, read-only here** (D-40).
+   *
+   * It rides in this struct because it shares the settings file, not because the webview may
+   * set it: the host overwrites whatever arrives in this field with what it already had. It is
+   * what makes a relaunch land on the lock screen instead of onboarding.
+   */
+  readonly lastVaultPath: string | null;
 }
 
 export interface KdfSummary {

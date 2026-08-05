@@ -83,7 +83,25 @@ pub fn calibrate_kdf() -> KdfSummary {
 /// again — the webview renders it on step 3 and drops it.
 #[tauri::command]
 pub fn create_vault(
+    app: AppHandle,
     state: State<'_, AppState>,
+    name: String,
+    path: String,
+    password: String,
+    kdf: KdfSummary,
+) -> IpcResult<RecoveryKit> {
+    let kit = create_vault_inner(&state, name, path.clone(), password, kdf)?;
+    crate::commands::settings::remember_vault(&app, &state);
+    Ok(kit)
+}
+
+/// The body of [`create_vault`], reachable without a Tauri runtime.
+///
+/// Split for the same reason `items.rs` splits its commands: `tests/ipc_session.rs` drives the
+/// **real** command bodies through a whole-shell session, and a harness that drove a
+/// reimplementation would prove only that the reimplementation is safe.
+pub fn create_vault_inner(
+    state: &AppState,
     name: String,
     path: String,
     password: String,
@@ -102,6 +120,9 @@ pub fn create_vault(
     state.with(|inner| {
         inner.generation = inner.generation.wrapping_add(1);
         inner.vault = Some(vault);
+        // Remembered here rather than in the command wrapper, so that every path which
+        // leaves a vault open records it -- D-40. The wrapper only writes it to disk.
+        inner.settings.last_vault_path = Some(path.display().to_string());
         inner.path = Some(path);
         inner.last_activity = now_ms();
     });
@@ -128,12 +149,27 @@ pub struct RecoveryKit {
 /// work on a wrong password and a corrupt file (R-03), and any check added here that fails
 /// faster than the KDF hands that property back.
 #[tauri::command]
-pub fn unlock(state: State<'_, AppState>, path: String, password: String) -> IpcResult<()> {
+pub fn unlock(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    password: String,
+) -> IpcResult<()> {
+    unlock_inner(&state, path.clone(), password)?;
+    crate::commands::settings::remember_vault(&app, &state);
+    Ok(())
+}
+
+/// The body of [`unlock`], reachable without a Tauri runtime.
+pub fn unlock_inner(state: &AppState, path: String, password: String) -> IpcResult<()> {
     let path = PathBuf::from(path);
     let vault = Vault::open_file(&path, &password)?;
     state.with(|inner| {
         inner.generation = inner.generation.wrapping_add(1);
         inner.vault = Some(vault);
+        // Remembered here rather than in the command wrapper, so that every path which
+        // leaves a vault open records it -- D-40. The wrapper only writes it to disk.
+        inner.settings.last_vault_path = Some(path.display().to_string());
         inner.path = Some(path);
         inner.last_activity = now_ms();
     });
@@ -151,7 +187,19 @@ pub fn unlock(state: State<'_, AppState>, path: String, password: String) -> Ipc
 /// user holding a code that opens nothing.
 #[tauri::command]
 pub fn unlock_recovery_kit(
+    app: AppHandle,
     state: State<'_, AppState>,
+    path: String,
+    code: String,
+) -> IpcResult<RecoveryKit> {
+    let kit = unlock_recovery_kit_inner(&state, path.clone(), code)?;
+    crate::commands::settings::remember_vault(&app, &state);
+    Ok(kit)
+}
+
+/// The body of [`unlock_recovery_kit`], reachable without a Tauri runtime.
+pub fn unlock_recovery_kit_inner(
+    state: &AppState,
     path: String,
     code: String,
 ) -> IpcResult<RecoveryKit> {
@@ -167,6 +215,9 @@ pub fn unlock_recovery_kit(
     state.with(|inner| {
         inner.generation = inner.generation.wrapping_add(1);
         inner.vault = Some(vault);
+        // Remembered here rather than in the command wrapper, so that every path which
+        // leaves a vault open records it -- D-40. The wrapper only writes it to disk.
+        inner.settings.last_vault_path = Some(path.display().to_string());
         inner.path = Some(path);
         inner.last_activity = now_ms();
     });

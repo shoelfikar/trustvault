@@ -27,7 +27,9 @@ pub fn now_ms() -> i64 {
 /// Stored as plain JSON beside the app's config, **not** in the sealed body (D-33). None of
 /// these four values is a secret, and `theme` has to be readable before any vault is open or
 /// the lock screen renders in the wrong colours for the time it takes to unlock.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+// `Copy` was dropped when `last_vault_path` arrived: a `String` cannot be copied, and the
+// alternative — a fixed-size path — is not a thing on any platform this ships to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     /// Follow the OS, or override it — R-28.
@@ -46,6 +48,14 @@ pub struct Settings {
     /// `MASTER.md` §10 asks for them to be persisted and they are no more secret than the
     /// theme. One file, one format — D-33's argument, applied again.
     pub list_width: u32,
+    /// The vault opened last, so a relaunch lands on the **lock screen** rather than
+    /// onboarding — D-40.
+    ///
+    /// Not a secret: it is a path to a file whose whole security lies in being encrypted, and
+    /// it sits in a config directory beside the theme. What it *is* is the only thing that
+    /// makes "quit and relaunch" work at all — the host keeps nothing in memory across a quit,
+    /// so without this the app cannot name the vault it is asking the user to unlock.
+    pub last_vault_path: Option<String>,
 }
 
 impl Default for Settings {
@@ -57,6 +67,7 @@ impl Default for Settings {
             audit_log_enabled: false,
             sidebar_width: 232,
             list_width: 300,
+            last_vault_path: None,
         }
     }
 }

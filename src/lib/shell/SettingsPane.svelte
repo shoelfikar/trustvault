@@ -28,14 +28,7 @@
     ondeletevault: () => void;
   }
 
-  const {
-    settings,
-    status,
-    itemCount,
-    error = '',
-    onchange,
-    ondeletevault,
-  }: Props = $props();
+  const { settings, status, itemCount, error = '', onchange, ondeletevault }: Props = $props();
 
   const fileName = $derived((status.path ?? '').split(/[/\\]/).pop() || 'vault.tvault');
 
@@ -129,8 +122,8 @@
                words read as three sizes, and "Compact 92%" in a 40px chip does not fit at
                115% scale, which is exactly the setting that would break it. -->
           <p class="row-desc">
-            Scales everything together — text, rows and controls. Compact 92 %, Default 100 %,
-            Large 115 %.
+            Scales everything together — text, rows and controls. Compact 92 %, Default 100 %, Large
+            115 %.
           </p>
         </div>
         <Segmented
@@ -197,8 +190,8 @@
           <!-- It says "locked" because that is what happens, and a user who expects to find
                their vault open would otherwise read this as a security regression. -->
           <p class="row-desc">
-            Open TrustVault when you sign in to this computer. It starts locked — you still
-            unlock it yourself.
+            Open TrustVault when you sign in to this computer. It starts locked — you still unlock
+            it yourself.
           </p>
         </div>
         <Toggle

@@ -55,6 +55,31 @@
   const fileOf = (path: string) => path.split(/[/\\]/).pop() || path;
 
   /**
+   * ↑/↓ between vaults — `docs/keyboard-audit.md` row 15.
+   *
+   * A row holds two focusables (switch to it, leave it), so plain Tab would take four presses
+   * to reach the third vault. ↑/↓ therefore move **between rows** and Tab moves within one,
+   * which is the grid pattern the item list already uses — the two lists in this app behave the
+   * same way, which is the part that makes it learnable rather than clever.
+   *
+   * Bound to the container rather than to each button so it works from either focusable in a
+   * row, and it moves focus to the *switch* target because that is what the arrow keys are
+   * navigating towards.
+   */
+  function onkeydown(event: KeyboardEvent) {
+    const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
+    if (!step) return;
+    const picks = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('.pick')];
+    const here = picks.findIndex((pick) => pick.contains(document.activeElement));
+    // Wrapping, because a list of two or three vaults is short enough that stopping at the end
+    // reads as the key having failed.
+    const next = picks[(here + step + picks.length) % picks.length];
+    if (!next) return;
+    event.preventDefault();
+    next.focus();
+  }
+
+  /**
    * "3 days ago" is worse than a date here.
    *
    * This is the line a user reads to work out which of two similarly named vaults is the one
@@ -101,13 +126,23 @@
 </script>
 
 <Dialog title="Switch vault" icon="vault" width={440} bare {onclose}>
-  <div class="list">
+  <!-- A plain group, not a `listbox`: a listbox's children must be `option`s, and these are
+       buttons — two of them per row. The arrow keys are a convenience over real buttons, which
+       is what a screen reader should be told they are. -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div class="list" role="group" aria-label="Vaults" {onkeydown}>
     {#each vaults as vault (vault.path)}
       {@const isOpen = vault.path === openPath}
       <div class="vault" class:open={isOpen}>
+        <!-- The open vault's row is `aria-disabled`, **not** `disabled`: a disabled button
+             cannot take focus, so ↑/↓ would stop dead on the row the user is already in and
+             read as the key having failed. It stays focusable and does nothing when
+             activated — `choose` returns early for it. -->
         <button
           class="pick"
-          disabled={isOpen || busy}
+          class:current={isOpen}
+          disabled={busy}
+          aria-disabled={isOpen}
           title={isOpen ? 'This vault is already open' : `Switch to ${vault.displayName}`}
           onclick={() => void choose(vault)}
         >
@@ -118,7 +153,9 @@
                  open one they are the same string, and showing it as the file is what tells
                  the user this is a stem rather than the name they typed at onboarding. -->
             <span class="meta">
-              {fileOf(vault.path)} · {isOpen ? `${itemCount} items · unlocked` : opened(vault.lastOpenedAt)}
+              {fileOf(vault.path)} · {isOpen
+                ? `${itemCount} items · unlocked`
+                : opened(vault.lastOpenedAt)}
             </span>
           </span>
         </button>
@@ -191,8 +228,12 @@
     text-align: left;
     border-radius: var(--radius-md) 0 0 var(--radius-md);
   }
-  .pick:not(:disabled):hover {
+  .pick:not(:disabled, .current):hover {
     background: var(--bg-hover);
+  }
+  /* No pointer affordance on the row you are already in — the badge says why. */
+  .pick.current {
+    cursor: default;
   }
   .pick:focus-visible {
     outline: 2px solid var(--accent);

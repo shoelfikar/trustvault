@@ -87,10 +87,10 @@ same keystrokes and would swallow the first letter of every shortcut a later pha
 |---|---------|--------------------|------|
 | 11 | Command palette | ⌘K/Ctrl+K opens from anywhere, Esc closes, ↑/↓ navigate, Enter copies the password, ⇧Enter opens the item — R-16 | [ ] |
 | 12 | New-item dialog | Type chips selectable with ←/→ and Space; every type's fields Tab-reachable; the generator opens from inside it and returns focus; the **New tag** field takes Enter to add a tag and does **not** submit the item; the **2FA switch** takes Space and Tab from it lands in the seed field it just revealed | [ ] |
-| 13 | Delete confirmation | Focus lands on **Cancel**, not Delete; Esc cancels; Enter activates whatever is focused and nothing else — R-18 | [ ] |
+| 13 | Delete confirmation | Focus lands on **Cancel**, not Delete; Esc cancels; Enter activates whatever is focused and nothing else; for a **vault**, the confirm field is reachable and the Delete button stays disabled until the typed name matches — R-18 | [ ] |
 | 14 | Generator dialog | Length slider on ←/→ (and Home/End), the four set toggles on Space, Regenerate and Copy reachable — R-15 | [ ] |
-| 15 | Vault switcher | ↑/↓ between vaults, Enter switches, Esc closes — R-22 | [ ] |
-| 16 | Settings | Every control reachable in visual order; the segmented controls on ←/→; **UI scale changes do not move focus** — R-21 | [ ] |
+| 15 | Vault switcher | ↑/↓ between vaults **including the open one**, Enter switches, Tab within a row reaches **Leave**, Esc closes — R-22 | [ ] |
+| 16 | Settings | Every control reachable in visual order; the segmented controls on ←/→; **UI scale changes do not move focus**; the **Start at login** toggle takes Space, and when the platform refuses the write the toggle returns to its old position with the reason announced — R-21 | [ ] |
 | 17 | Watchtower | The findings list is a list: ↑/↓ and Enter to the offending item | [ ] |
 | 18 | Edit-item dialog | Every field row Tab-reachable in display order; **Replace** on a secret row reachable without hover, and Tab from it lands in the input it just opened; Remove and Add field reachable; the **New tag** field takes Enter as "add this tag" — R-17 | [ ] |
 
@@ -113,6 +113,14 @@ pass is for.
 Row 13 is a requirement, not a preference. A destructive dialog that opens with the destructive
 button focused converts the Enter keypress that opened it into a confirmation, which is how a
 keyboard user deletes something they were only reading about.
+
+Row 15's "including the open one" was written **into the switcher** on 2026-08-06 rather than
+found by this table later, which is what the checklist is for. The open vault's row was `disabled`
+first, which is the obvious way to say "you are already here" and is wrong for exactly one reason:
+a disabled button cannot take focus, so ↑/↓ stops dead on the row the user is standing in and
+reads as the arrow key having failed. It is `aria-disabled` instead — focusable, announced as
+unavailable, and a no-op when activated. The same shape is worth watching for anywhere else a
+"current" row is drawn.
 
 Row 16's parenthetical is the one that will be missed: UI scale re-renders the root, and a naïve
 implementation drops focus to `body` — leaving the user who just changed a setting at the top of the

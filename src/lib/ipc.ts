@@ -64,6 +64,45 @@ export interface ItemSummary {
 
 export type ItemDetail = ItemSummary & { fields: FieldSummary[] };
 
+/**
+ * One field of an item being created — §6.4.
+ *
+ * The only shape in this file carrying plaintext **outbound**, and §5 already concedes that
+ * direction: the password is in this heap the moment the user types it, and nothing here can
+ * take it back out. What the host does with it is move it into a `SecretString` that zeroizes.
+ */
+export interface NewField {
+  label: string;
+  kind: FieldKind;
+  value: string;
+  secret: boolean;
+  custom: boolean;
+}
+
+/**
+ * One field as the edit form submits it — §6.4.
+ *
+ * Two nullable members meaning different things, and the second is the single most
+ * load-bearing detail on this boundary:
+ *
+ * - `id: null` **creates** a field; an id **edits** the one it names.
+ * - **`value: null` means UNCHANGED.** The edit form never received the secret values — §6.1
+ *   elides them, which is the whole architecture — so a form that sent back what it is holding
+ *   would send back masks, and renaming an item would overwrite every password in it with
+ *   `"••••••••••••"`. The previous values would land in `history`, where no v1 surface reaches.
+ *
+ * And a third rule with no syntax to carry it: **omission deletes**, so this array must hold
+ * every field that is to survive, in the order they are to appear.
+ */
+export interface EditField {
+  id: string | null;
+  label: string;
+  kind: FieldKind;
+  value: string | null;
+  secret: boolean;
+  custom: boolean;
+}
+
 export type Theme = 'system' | 'light' | 'dark';
 
 export interface Settings {
@@ -156,15 +195,23 @@ function camel<T>(value: unknown): T {
   ) as T;
 }
 
-function snake(value: Record<string, unknown>): Record<string, unknown> {
+/**
+ * The mirror of `camel`, and it descends into arrays for the same reason that one does.
+ *
+ * Written without the array case first, which was harmless only because every shape crossing
+ * outbound happened to have single-word keys. `fields: EditField[]` is the first array of
+ * objects on this boundary, so the omission would have become a silently dropped key the day
+ * one of them was named with two words.
+ */
+function snake<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((entry) => snake(entry)) as T;
+  if (value === null || typeof value !== 'object') return value;
   return Object.fromEntries(
-    Object.entries(value).map(([key, entry]) => [
+    Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
       key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
-      entry !== null && typeof entry === 'object' && !Array.isArray(entry)
-        ? snake(entry as Record<string, unknown>)
-        : entry,
+      snake(entry),
     ]),
-  );
+  ) as T;
 }
 
 async function call<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
@@ -204,6 +251,32 @@ export const getItem = (itemId: string) => call<ItemDetail>('get_item', { itemId
  */
 export const copyField = (itemId: string, fieldId: string) =>
   call<{ clearsAt: number }>('copy_field', { itemId, fieldId });
+
+/**
+ * Creates an item and saves the vault — §6.4.
+ *
+ * Returns the identifier and nothing else; the caller re-reads through `getItem`, so there is
+ * one elision path in the application rather than two that drift apart.
+ */
+export const addItem = (kind: ItemKind, title: string, tags: string[], fields: NewField[]) =>
+  call<{ itemId: string }>('add_item', { kind, title, tags, fields });
+
+/** Rewrites an item from an edit form and saves — §6.4. See `EditField` for the three rules. */
+export const updateItem = (
+  itemId: string,
+  title: string,
+  tags: string[],
+  favourite: boolean,
+  fields: EditField[],
+) => call<void>('update_item', { itemId, title, tags, favourite, fields });
+
+/**
+ * Deletes an item and saves.
+ *
+ * The confirmation R-18 asks for is **here**, in the UI, and the contract says so: what it
+ * guards against is a mis-click, and the caller is the only user. The host does not re-check.
+ */
+export const deleteItem = (itemId: string) => call<void>('delete_item', { itemId });
 
 /* ---- Sanctioned — §7 ----------------------------------------------------- */
 /* Exactly three. A fourth entry in this group is a decision, not a patch.     */

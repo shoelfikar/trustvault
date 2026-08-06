@@ -46,10 +46,27 @@
      */
     clipboardUntil?: number;
     oncopied: (clearsAt: number) => void;
+    onedit: () => void;
     ondelete: () => void;
+    /**
+     * Bumped by the shell after a mutation lands, so the pane re-reads.
+     *
+     * The pane cannot notice on its own: `update_item` returns nothing, deliberately, so that
+     * `get_item` stays the single elision path. Re-reading is therefore the only way this
+     * screen learns what it now holds.
+     */
+    reloadSignal?: number;
   }
 
-  const { itemId, listEmpty = false, clipboardUntil = 0, oncopied, ondelete }: Props = $props();
+  const {
+    itemId,
+    listEmpty = false,
+    clipboardUntil = 0,
+    oncopied,
+    onedit,
+    ondelete,
+    reloadSignal = 0,
+  }: Props = $props();
 
   let detail = $state<ItemDetail | null>(null);
   let error = $state('');
@@ -61,6 +78,8 @@
 
   $effect(() => {
     const id = itemId;
+    // Read so the effect re-runs when the shell says the item changed underneath.
+    void reloadSignal;
     if (!id) {
       detail = null;
       return;
@@ -157,9 +176,7 @@
   {:else}
     <header class="toolbar">
       <span class="grow"></span>
-      <!-- `update_item` is a Phase 3 command. The control is drawn because the prototype's
-           toolbar is part of the shape, and disabled because nothing behind it exists yet. -->
-      <Button disabled title="Editing arrives with the mutation commands">Edit</Button>
+      <Button title="Edit this item" onclick={onedit}>Edit</Button>
       <IconButton
         icon="trash"
         label="Delete item"

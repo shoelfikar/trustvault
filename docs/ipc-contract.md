@@ -24,6 +24,13 @@ live in the decision log in `trustvault-state.md`.
   is the one place in the response it may appear*. It is `string` on the wire. It appears exactly
   **four** times in this document — three since Phase 2, and a fourth added by D-44 — and the audit
   harness counts them.
+- **Argument names are `snake_case` on the wire**, exactly as printed below, and `src/lib/ipc.ts`
+  converts to them on the way out. This is not cosmetic and it is not free: Tauri v2's
+  `#[tauri::command]` renames arguments to **camelCase** by default and looks the resulting key up
+  exactly, with no fallback, so every command carries
+  `#[tauri::command(rename_all = "snake_case")]` to make the host agree with this document. Found
+  the hard way on 2026-08-06 — see D-47 — and now asserted by the harness on every command, not
+  only the ones with a two-word argument today.
 - **`// planned`** on a declaration means the command is specified here and **not yet registered**.
   It exists so this document can keep being written before the code, which is the practice that
   earned its keep twice (D-25, and four findings in Phase 2). It is not a comment: the harness

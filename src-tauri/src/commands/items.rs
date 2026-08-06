@@ -21,7 +21,7 @@ use crate::state::{AppState, now_ms};
 const REVEAL_SECONDS: u64 = 10;
 
 /// **Vault-class.** Every item, secrets elided — R-11.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn list_items(state: State<'_, AppState>) -> IpcResult<Vec<ItemSummary>> {
     list_items_inner(&state)
 }
@@ -38,7 +38,7 @@ pub fn list_items_inner(state: &AppState) -> IpcResult<Vec<ItemSummary>> {
 }
 
 /// **Vault-class.** One item with its fields, secrets elided.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn get_item(state: State<'_, AppState>, item_id: ItemId) -> IpcResult<ItemDetail> {
     get_item_inner(&state, item_id)
 }
@@ -63,7 +63,7 @@ pub fn get_item_inner(state: &AppState, item_id: ItemId) -> IpcResult<ItemDetail
 ///    caller cannot read a value without recording it.
 /// 3. **The host** starts the remask timer. Not the frontend: a frontend timer is cleared by a
 ///    reload, and a reload must not extend a reveal.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn reveal_field(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -118,7 +118,7 @@ fn schedule_remask(app: AppHandle, item_id: ItemId, field_id: FieldId, generatio
 /// "copy a password" that is safe on a platform whose heap cannot be wiped.
 ///
 /// Not sanctioned, because nothing secret is in the response — which is the point.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn copy_field(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -187,7 +187,7 @@ pub fn clear_after(seconds: u64) {
 ///
 /// Returns the identifier and nothing else: the caller re-reads through [`get_item`], so there
 /// is one elision path in the application rather than two that can drift apart.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn add_item(
     state: State<'_, AppState>,
     kind: ItemKind,
@@ -230,7 +230,7 @@ pub fn add_item_inner(
 /// The three rules that are silent when they go wrong live in the core
 /// ([`trustvault_core::Item::apply_edits`]): a `null` value keeps the stored one, omission
 /// deletes, and the list is the display order.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn update_item(
     state: State<'_, AppState>,
     item_id: ItemId,
@@ -282,7 +282,7 @@ pub fn update_item_inner(
 /// explicitly: what it protects against is a mis-click, and the caller is the only user. The
 /// opposite case is `delete_vault`, which does verify, because there the typed name is the
 /// whole ceremony.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn delete_item(state: State<'_, AppState>, item_id: ItemId) -> IpcResult<()> {
     delete_item_inner(&state, item_id)
 }

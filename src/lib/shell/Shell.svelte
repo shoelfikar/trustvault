@@ -18,6 +18,7 @@
   import CommandPalette from './CommandPalette.svelte';
   import DeleteDialog from './DeleteDialog.svelte';
   import DetailPane from './DetailPane.svelte';
+  import EditItemDialog from './EditItemDialog.svelte';
   import GeneratorDialog from './GeneratorDialog.svelte';
   import ItemList from './ItemList.svelte';
   import NewItemDialog from './NewItemDialog.svelte';
@@ -51,11 +52,21 @@
 
   /** Which overlay is up. One at a time — the prototype never stacks two. */
   let overlay = $state<
-    'none' | 'palette' | 'generator' | 'add' | 'vaults' | 'deleteItem' | 'deleteVault'
+    'none' | 'palette' | 'generator' | 'add' | 'edit' | 'vaults' | 'deleteItem' | 'deleteVault'
   >('none');
 
   /** Epoch-ms the clipboard is scheduled to clear at. Owned here; see DetailPane's note. */
   let clipboardUntil = $state(0);
+
+  /**
+   * Bumped after any mutation, which is what makes both panes re-read.
+   *
+   * The mutation commands return the identifier at most — `update_item` and `delete_item`
+   * return nothing at all — because `get_item` is deliberately the one path that decides what
+   * may cross (§6.4). The cost of that is exactly this: the frontend never learns the new state
+   * from a response, so it asks again.
+   */
+  let mutations = $state(0);
 
   /**
    * Live pane widths, committed to the settings file when a drag ends.
@@ -68,6 +79,7 @@
   let listWidth = $state(untrack(() => settings.listWidth));
 
   $effect(() => {
+    void mutations;
     void listItems()
       .then((loaded) => (items = loaded))
       .catch((thrown) => (error = asIpcError(thrown).message));
@@ -143,6 +155,36 @@
 
   function saveSettings(next: Settings) {
     void setSettings(next).then(onsettings);
+  }
+
+  /**
+   * A new item landed. Select it, and leave a filtered view if it would hide it.
+   *
+   * The view change is not a nicety: adding a login while the sidebar is on the Cards filter
+   * would otherwise save the item and show nothing, which is indistinguishable from the save
+   * having failed.
+   */
+  function itemSaved(itemId: string) {
+    overlay = 'none';
+    mutations += 1;
+    view = { kind: 'all' };
+    selectedId = itemId;
+  }
+
+  /** An edit landed. Both panes re-read; the selection is already right. */
+  function itemChanged() {
+    overlay = 'none';
+    mutations += 1;
+  }
+
+  /**
+   * A delete landed. The selection is dropped first, so the detail pane stops asking for an
+   * item the vault no longer has — the `$effect` below then lands it on the next row.
+   */
+  function itemDeleted() {
+    overlay = 'none';
+    selectedId = null;
+    mutations += 1;
   }
 
   /**
@@ -261,7 +303,9 @@
         itemId={selectedId}
         listEmpty={visible.length === 0}
         {clipboardUntil}
+        reloadSignal={mutations}
         oncopied={(clearsAt) => (clipboardUntil = clearsAt)}
+        onedit={() => (overlay = 'edit')}
         ondelete={() => (overlay = 'deleteItem')}
       />
     {/if}
@@ -286,6 +330,16 @@
       {vaultFile}
       {tags}
       onclose={() => (overlay = 'none')}
+      onsaved={itemSaved}
+    />
+  {:else if overlay === 'edit' && selectedId}
+    <EditItemDialog
+      itemId={selectedId}
+      vaultName={status.displayName}
+      {vaultFile}
+      {tags}
+      onclose={() => (overlay = 'none')}
+      onsaved={itemChanged}
     />
   {:else if overlay === 'vaults'}
     <VaultSwitcher
@@ -295,7 +349,13 @@
       onclose={() => (overlay = 'none')}
     />
   {:else if overlay === 'deleteItem'}
-    <DeleteDialog target="item" name={selectedTitle} onclose={() => (overlay = 'none')} />
+    <DeleteDialog
+      target="item"
+      name={selectedTitle}
+      itemId={selectedId}
+      onclose={() => (overlay = 'none')}
+      ondeleted={itemDeleted}
+    />
   {:else if overlay === 'deleteVault'}
     <DeleteDialog
       target="vault"

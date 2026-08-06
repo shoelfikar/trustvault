@@ -142,6 +142,50 @@ fn every_command_is_documented_and_every_documented_command_exists() {
     );
 }
 
+/// Every command names its arguments in `snake_case`, which is the wire format the contract
+/// documents.
+///
+/// Found 2026-08-06 by reading the built binary rather than by any test: Tauri v2's
+/// `#[tauri::command]` renames argument keys to **camelCase** by default, and
+/// `tauri::ipc::CommandItem` looks that key up exactly, with no fallback. So the host was
+/// asking for `itemId` while `src/lib/ipc.ts` — which converts to snake_case on purpose, so
+/// the wire format is exactly what `docs/ipc-contract.md` §6 prints — sent `item_id`. Every
+/// command taking a multi-word argument was unreachable from the webview: `get_item`,
+/// `reveal_field`, `copy_field`.
+///
+/// It survived two phases because nothing had exercised one. The `_inner` split that lets this
+/// harness drive real command bodies also skips the argument decoding, and until `add_item`
+/// landed the item list was always empty, so no id was ever passed from the frontend.
+///
+/// The attribute is asserted on **every** command rather than only the ones that need it
+/// today: what makes the bug expensive is that adding a two-word argument reintroduces it
+/// silently, and a uniform rule has no such edge.
+#[test]
+fn every_command_names_its_arguments_in_snake_case() {
+    const REQUIRED: &str = r#"#[tauri::command(rename_all = "snake_case")]"#;
+
+    for (module, source) in [
+        ("items.rs", include_str!("../src/commands/items.rs")),
+        ("vault.rs", include_str!("../src/commands/vault.rs")),
+        ("settings.rs", include_str!("../src/commands/settings.rs")),
+        ("strength.rs", include_str!("../src/commands/strength.rs")),
+    ] {
+        for (number, line) in source.lines().enumerate() {
+            let line = line.trim();
+            if line.starts_with("#[tauri::command") {
+                assert_eq!(
+                    line,
+                    REQUIRED,
+                    "src/commands/{module}:{} declares a command without \
+                     `rename_all = \"snake_case\"` — Tauri v2 would then look its arguments up \
+                     in camelCase and every call from src/lib/ipc.ts would miss",
+                    number + 1
+                );
+            }
+        }
+    }
+}
+
 /// Check 3 — exactly four commands may return a secret, and they are the named four.
 ///
 /// The count moved from three to four on 2026-08-05, which is the one change this test exists

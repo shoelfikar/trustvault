@@ -14,8 +14,8 @@
 
 use std::path::PathBuf;
 
-use trustvault_core::{CharSets, FieldId, ItemId, ItemKind, KdfParams, Vault};
-use trustvault_lib::commands::{generator, import, items, search, vault as vault_cmd};
+use trustvault_core::{CharSets, FieldId, FieldKind, ItemId, ItemKind, KdfParams, Vault};
+use trustvault_lib::commands::{generator, import, items, search, totp, vault as vault_cmd};
 use trustvault_lib::dto::{Copied, MASK};
 use trustvault_lib::error::ErrorKind;
 use trustvault_lib::state::AppState;
@@ -25,6 +25,9 @@ use trustvault_lib::state::AppState;
 const SECRET: &str = "correct-horse-battery-staple";
 /// A non-secret field value, which is allowed to cross freely (`docs/ipc-contract.md` §6.1).
 const USERNAME: &str = "octocat";
+/// A TOTP seed, base32 of the RFC 6238 test key. As secret as the password beside it: the code
+/// it produces may cross this boundary (D-45), the seed never may.
+const SEED: &str = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
 
 /// An unlocked state holding one login with one secret and one public field.
 fn unlocked() -> (AppState, ItemId, FieldId, FieldId) {
@@ -34,6 +37,16 @@ fn unlocked() -> (AppState, ItemId, FieldId, FieldId) {
     let entry = vault.item_mut(item).expect("just added");
     let public = entry.set_field("Username", USERNAME, false);
     let secret = entry.set_field("Password", SECRET, true);
+    // The seed goes into the shared fixture rather than into the TOTP test alone, so that
+    // every check below — the list, the detail, the search, the session — is asserting against
+    // a vault that holds one. A second secret shape only the test that knows about it can see
+    // is a secret shape the other checks are not checking.
+    let seed = entry.set_field("2FA secret", SEED, true);
+    if let Some(field) = entry.fields.iter_mut().find(|field| field.id == seed) {
+        // Set explicitly, as both real write paths do: `set_field` guesses `password` from
+        // `secret`, which is the trap D-53 records one requirement over.
+        field.kind = FieldKind::Otp;
+    }
 
     let state = AppState::default();
     state.with(|inner| {
@@ -172,6 +185,7 @@ fn every_command_names_its_arguments_in_snake_case() {
         ("import.rs", include_str!("../src/commands/import.rs")),
         ("generator.rs", include_str!("../src/commands/generator.rs")),
         ("search.rs", include_str!("../src/commands/search.rs")),
+        ("totp.rs", include_str!("../src/commands/totp.rs")),
     ];
 
     // `include_str!` needs a literal path, so the list above is written by hand — and a
@@ -311,6 +325,44 @@ fn a_search_response_carries_no_values_and_secrets_are_not_searchable() {
     );
 }
 
+/// Check 7 — `totp_code` returns a code and never the seed — §6.6, §7.1, D-45.
+///
+/// D-45 draws the line at the seed rather than at the code, and the argument it explicitly
+/// refuses is "the code expires soon" — that one would also license returning a password about
+/// to be rotated. So what has to be pinned is not that the code crosses, which is the decision,
+/// but the two limits the decision came with: the seed does not, and no *list* carries a code.
+/// The second is the shape §2 exists to prevent — a list of live codes is a list of secrets on
+/// a refresh timer, and it is one convenience commit away at any moment.
+#[test]
+fn totp_returns_a_code_and_never_the_seed() {
+    let (state, item, _, _) = unlocked();
+
+    let response = totp::totp_code_inner(&state, item).unwrap();
+    assert_eq!(response.code.len(), 6, "a code did come back");
+
+    let encoded = serde_json::to_string(&response).unwrap();
+    assert!(!encoded.contains(SEED), "totp_code leaked the seed");
+    assert!(
+        !encoded.contains(SECRET),
+        "and it is not a second path to the password beside it"
+    );
+
+    // The seed is elided everywhere a field is listed, exactly like the password: `kind: otp`
+    // changes how it renders, never whether it crosses.
+    let detail = serde_json::to_string(&items::get_item_inner(&state, item).unwrap()).unwrap();
+    assert!(!detail.contains(SEED), "get_item leaked the seed");
+
+    // No code in any list. Asserted on the *key* rather than on the six digits, because six
+    // digits can occur inside a UUID by chance and a flaky boundary check is one that gets
+    // deleted.
+    let list = serde_json::to_string(&items::list_items_inner(&state).unwrap()).unwrap();
+    assert!(!list.contains(SEED), "list_items leaked the seed");
+    assert!(
+        !list.contains("\"code\""),
+        "no code appears in a list, however cheap it would be to add (§6.6)"
+    );
+}
+
 /// Check 2 — the one sanctioned response carries exactly one secret and nothing else.
 #[test]
 fn reveal_returns_one_secret_and_copy_returns_none() {
@@ -396,6 +448,13 @@ fn every_vault_command_refuses_while_locked() {
         search::search_items_inner(&state, "github", 10)
             .unwrap_err()
             .kind,
+        ErrorKind::Locked
+    );
+    // `totp_code` is vault-class and refuses; `totp_preview` is ambient and does not appear
+    // here, for the same reason the generator does not — it reads no vault, and a seed being
+    // typed into a dialog protects nothing yet.
+    assert_eq!(
+        totp::totp_code_inner(&state, item).unwrap_err().kind,
         ErrorKind::Locked
     );
     // The import pair refuses **before** it reads the file, which is why the path here does

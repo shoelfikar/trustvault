@@ -58,6 +58,7 @@ pub fn run() {
             commands::settings::set_settings,
             commands::strength::score_password,
             commands::generator::copy_generated,
+            commands::totp::totp_preview,
             // Vault-class — require an unlocked vault, return no secret.
             commands::vault::unlock,
             commands::vault::lock,
@@ -68,6 +69,7 @@ pub fn run() {
             commands::items::update_item,
             commands::items::delete_item,
             commands::search::search_items,
+            commands::totp::totp_code,
             commands::import::import_preview,
             commands::import::import_commit,
             // Sanctioned — exactly four, each returning exactly one secret.

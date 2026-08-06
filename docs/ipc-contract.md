@@ -224,6 +224,12 @@ Constraints:
   lock-state hole with no lock.
 - The clear interval is `clipboard_clear_seconds` from settings, the same one `copy_field` uses. Two
   clipboard timers with different durations is how one of them ends up wrong.
+- **Its third caller, from 2026-08-06, is the one-time code** in the detail pane. The name says
+  "generated" and the argument does not change: a TOTP code is a value this window already holds
+  legitimately (D-45), the host reads nothing to copy it, and what the call buys is the clear
+  scheduled in Rust. The alternative was a `copy_totp` that took an item id and re-derived the
+  code host-side — one more command, one more path to a stored seed, for a string the caller is
+  already displaying.
 - **No event follows the clear**, unlike `copy_field`'s. `clipboard-cleared` names an item and a
   field (§8) and a generated password belongs to neither — it is not in the vault and may never be.
   The response's `clears_at` is what the chip counts down from; an event carrying null identifiers,
@@ -231,7 +237,7 @@ Constraints:
   nothing.
 
 ```ts
-totp_preview({ secret: string }): { code: string; expires_at: Millis; period: number; digits: number }   // planned
+totp_preview({ secret: string }): { code: string; expires_at: Millis; period: number; digits: number }
 ```
 
 One code from a seed the user is **currently typing** into the Add dialog — the live preview R-20's
@@ -434,7 +440,7 @@ decision and not a tidy-up.
 ### 6.6 TOTP — R-20
 
 ```ts
-totp_code({ item_id: Uuid }): { code: string; expires_at: Millis; period: number; digits: number }   // planned
+totp_code({ item_id: Uuid }): { code: string; expires_at: Millis; period: number; digits: number }
 ```
 
 The current code for the item's `otp` field. Rules, each of which is a way this command could go
@@ -759,6 +765,7 @@ does not run is worse than one documented as not running:
 | 4 — `copy_field` and events carry no value | automated in `tests/ipc_session.rs`, which drives the real body and records **whichever** outcome the machine gives it. A runner with no clipboard produces an error payload, and an error payload is asserted against too — composing a message out of the failing value is a classic way to leak it |
 | 5 — scripted whole-shell session | automated in `tests/ipc_session.rs`. It scripts launch → onboarding → quit → relaunch → wrong password → unlock → list → open → reveal → copy → lock → recovery unlock, records every crossing, and reads the transcript. Two limits, named: it drives command bodies rather than a live webview, and the item it reveals is seeded through the core's API because Phase 2 ships no mutation command (D-38). The transcript is written to `target/ipc-session.log` as gate evidence |
 | 6 — every vault command refuses while locked | automated |
+| 7 — `totp_code` and `search_items` return no field value | automated, both halves. The seed now lives in the harness's shared fixture rather than in the TOTP test alone, so checks 2 and 4 assert against a vault holding one; the code half is pinned on the *absence of a `code` key in any list* rather than on the digits, because six digits occur inside a UUID by chance often enough to make a flaky check that someone eventually deletes |
 | N-07 — no wildcard origin in the CSP | automated |
 
 > **Resolved 2026-08-05 — D-39.** R-10's acceptance criterion read "enforced by a **core** test",

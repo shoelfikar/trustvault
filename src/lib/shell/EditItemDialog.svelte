@@ -26,6 +26,7 @@
   import IconButton from '../components/IconButton.svelte';
   import StrengthMeter from '../components/StrengthMeter.svelte';
   import Toggle from '../components/Toggle.svelte';
+  import TotpPreview from '../components/TotpPreview.svelte';
   import {
     ALL_SETS,
     asIpcError,
@@ -345,6 +346,14 @@
             </div>
             {#if row.kind === 'password'}
               <div class="meter"><StrengthMeter {strength} width="150px" /></div>
+            {:else if row.kind === 'otp'}
+              <!--
+                The same validator the Add dialog has, and it is here because this is the other
+                way a seed gets into the vault. A preview on only one of the two paths would be
+                reported as "sometimes it checks" — and the seed replaced here is the more
+                dangerous one, because the item already worked before the edit.
+              -->
+              <TotpPreview seed={row.value ?? ''} />
             {/if}
           {:else if row.kind === 'note'}
             <textarea rows="4" bind:value={rows[index]!.value} aria-label={row.label}></textarea>

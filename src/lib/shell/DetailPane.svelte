@@ -23,14 +23,18 @@
   import SecretField from '../components/SecretField.svelte';
   import StatusChip from '../components/StatusChip.svelte';
   import StrengthMeter from '../components/StrengthMeter.svelte';
+  import TotpRing from '../components/TotpRing.svelte';
   import {
     asIpcError,
+    copyGenerated,
     getItem,
     onClipboardCleared,
     onFieldRemasked,
+    totpCode,
     type ItemDetail,
     type ItemStatus,
     type Strength,
+    type TotpCode,
   } from '../ipc';
   import { TYPE_GLYPHS, typeLabel } from './views';
 
@@ -158,6 +162,110 @@
         : 'from the last Watchtower scan',
   );
 
+  /* ---- One-time code — R-20, §6.6, D-45 ---------------------------------- */
+
+  /**
+   * The code for the selected item, refreshed a step at a time.
+   *
+   * Held here rather than fetched per render, and dropped the moment the selection changes:
+   * D-45 exempts a code from `Secret`, and the exemption is narrow enough to be worth honouring
+   * literally — one item, the selected one, for as long as it is on screen.
+   */
+  let totp = $state<TotpCode | null>(null);
+  /**
+   * Why there is no code, when there should be one.
+   *
+   * Separate from the pane's `error`, which replaces the whole screen: a seed that will not
+   * parse is a broken row, not a broken item, and blanking the item's own fields to say so
+   * would hide the very thing the user needs in order to fix it.
+   */
+  let totpError = $state('');
+  let totpTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Swaps the copy icon to a check for a moment, the way every other copy in the app does. */
+  let codeCopied = $state(false);
+
+  /**
+   * Whether this item has a seed at all, read off the elided detail.
+   *
+   * `kind`, not the label: an imported item's seed field can be called anything, and it is the
+   * kind that both write paths set explicitly. The value itself is elided to a mask here, which
+   * is exactly right — this pane never sees the seed, only whether there is one.
+   */
+  const hasTotp = $derived(detail?.fields.some((field) => field.kind === 'otp') ?? false);
+
+  $effect(() => {
+    const id = itemId;
+    void reloadSignal;
+    clearTimeout(totpTimer);
+    totp = null;
+    codeCopied = false;
+    if (!id || !hasTotp) return;
+
+    let live = true;
+    const refresh = async () => {
+      try {
+        const next = await totpCode(id);
+        if (!live || itemId !== id) return;
+        totp = next;
+        // Re-fetched at the step boundary rather than every second, and from the host each
+        // time rather than recomputed here — the seed is what generates a code, and the seed
+        // does not cross. The extra 250 ms keeps a fast clock from asking for the step it is
+        // still in and getting the same code back with a ring already at zero.
+        totpTimer = setTimeout(
+          () => void refresh(),
+          Math.max(250, next.expiresAt - Date.now() + 250),
+        );
+      } catch (thrown) {
+        // `no_such_field` is the ordinary answer for an item whose seed field is empty, so it
+        // hides the row rather than raising anything. A malformed seed is different: it is a
+        // stored value that will never generate a code, and saying so here is the only place
+        // the user finds out.
+        if (!live || itemId !== id) return;
+        const failure = asIpcError(thrown);
+        totp = null;
+        totpError = failure.kind === 'no_such_field' ? '' : failure.message;
+      }
+    };
+    void refresh();
+
+    return () => {
+      live = false;
+      clearTimeout(totpTimer);
+    };
+  });
+
+  /**
+   * Copies the code and schedules the clear in Rust — D-37, §5.
+   *
+   * Through `copy_generated` rather than `navigator.clipboard`, for the same reason the
+   * generator goes that way: what D-37 objected to was a copy nothing would ever clear. The
+   * command's own argument covers this caller unchanged — it takes a value this side already
+   * holds, reads nothing, and returns only the instant of the clear.
+   */
+  async function copyCode() {
+    if (!totp) return;
+    try {
+      const { clearsAt } = await copyGenerated(totp.code);
+      codeCopied = true;
+      setTimeout(() => (codeCopied = false), 1200);
+      oncopied(clearsAt);
+    } catch (thrown) {
+      totpError = asIpcError(thrown).message;
+    }
+  }
+
+  /**
+   * `418209` → `418 209`, and an eight-digit code into two fours.
+   *
+   * Grouped for transcription, which is the same reason §3 puts every secret in the mono face:
+   * the user is reading this off the screen and typing it somewhere else, against a clock.
+   */
+  const grouped = $derived.by(() => {
+    const code = totp?.code ?? '';
+    const half = Math.ceil(code.length / 2);
+    return `${code.slice(0, half)} ${code.slice(half)}`.trim();
+  });
+
   const subtitle = $derived(detail ? detail.tags.join(' · ') : '');
   const updated = $derived(
     detail ? new Date(detail.updatedAt).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '',
@@ -202,6 +310,36 @@
         {#each detail.fields as field, index (field.id)}
           <SecretField itemId={detail.id} {field} first={index === 0} {remaskSignal} {oncopied} />
         {/each}
+
+        <!--
+          The one-time code sits inside the field box, below the fields, as its own row — the
+          prototype's placement, and it is the right one: the code is not a stored field and
+          must not look like one, but it belongs to this item and not to the pane.
+        -->
+        {#if hasTotp}
+          <div class="totp">
+            <span class="totp-label">
+              <span class="totp-name">One-time code</span>
+              <span class="totp-note">computed locally from your 2FA secret</span>
+            </span>
+
+            {#if totp}
+              <span class="code">{grouped}</span>
+              <TotpRing expiresAt={totp.expiresAt} period={totp.period} />
+              <IconButton
+                icon={codeCopied ? 'check' : 'copy'}
+                label="Copy one-time code"
+                title="Copy code"
+                onclick={() => void copyCode()}
+              />
+            {:else if totpError}
+              <!-- Icon and words, never colour alone — §2. -->
+              <span class="totp-broken"><Icon name="alert" size={13} />{totpError}</span>
+            {:else}
+              <span class="totp-note">Generating…</span>
+            {/if}
+          </div>
+        {/if}
       </div>
 
       {#if clipboardLeft > 0 && !cleared}
@@ -326,6 +464,55 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     overflow: hidden;
+  }
+
+  /* The prototype's geometry for this row, kept: 34px tall, 12px gaps, the label column at
+     124px so the code starts on the same x as every field value above it. */
+  .totp {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 34px;
+    padding: var(--space-2) var(--space-2) var(--space-2) 14px;
+    border-top: 1px solid var(--border);
+  }
+  .totp-label {
+    width: 124px;
+    flex: none;
+  }
+  .totp-name {
+    display: block;
+    font-size: var(--text-micro);
+    font-weight: var(--weight-medium);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--fg-subtle);
+  }
+  .totp-note {
+    display: block;
+    font-size: var(--text-micro);
+    color: var(--fg-subtle);
+  }
+  /* §3: a rendered secret — and a code being transcribed under a clock is exactly that — is
+     mono, tabular, with 0/O and 1/l/I disambiguated. The tracking is the prototype's. */
+  .code {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: var(--text-md);
+    font-weight: var(--weight-medium);
+    letter-spacing: 0.14em;
+    font-variant-numeric: tabular-nums slashed-zero;
+    font-feature-settings:
+      'ss01' 1,
+      'ss02' 1;
+  }
+  .totp-broken {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    font-size: var(--text-sm);
+    color: var(--danger);
   }
 
   .clip {

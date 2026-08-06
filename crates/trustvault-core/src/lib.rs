@@ -56,6 +56,7 @@ mod model;
 mod recovery;
 mod search;
 mod secret;
+mod totp;
 mod vault;
 
 pub use format::{HEADER_LEN, Header, WRAP_AAD_LEN};
@@ -68,6 +69,7 @@ pub use model::{
 };
 pub use recovery::RecoveryCode;
 pub use secret::{SecretBytes, SecretString};
+pub use totp::{TotpAlgorithm, TotpSpec};
 pub use vault::Vault;
 
 use thiserror::Error;
@@ -162,6 +164,16 @@ pub enum Error {
     /// A field whose value is already in the item list is not revealed by asking again.
     #[error("field is not secret")]
     NotSecret,
+
+    /// The TOTP seed will not decode, or its parameters are outside RFC 4226's bounds.
+    ///
+    /// Safe to distinguish for the same reason as [`Error::MalformedRecoveryCode`]: it is
+    /// decided before any key material or vault content is involved. It is a string the user
+    /// is typing or a string an import carried, and saying so while the field is still on
+    /// screen is the entire point — the alternative is a wrong six-digit code discovered a
+    /// month later at a login prompt.
+    #[error("TOTP secret is malformed")]
+    MalformedTotpSecret,
 
     /// The file offered for import is not an unencrypted Bitwarden JSON export.
     ///

@@ -74,6 +74,7 @@ lock screen exists to receive a password and has one field. Everywhere else, aut
 | 6 | Sidebar — views, tags, vault switcher trigger | Tab in, ↑/↓ between entries, Enter selects | [ ] |
 | 7 | Item list | ↑/↓ move selection, Home/End jump, Enter opens in the detail pane, type-ahead is **not** implemented (⌘K is the search) | [ ] |
 | 8 | Detail pane — fields and toolbar | Tab through fields; per-field Reveal and Copy reachable **without hover**; Edit and Delete in the toolbar | [ ] |
+| 8a | Detail pane — one-time code row | The **Copy code** button is a Tab stop like every other copy in the box, and the remaining seconds are readable as text rather than only as the arc — a countdown drawn in colour and geometry alone is unreadable to the people this audit is for | [ ] |
 | 9 | Empty states — every list | The primary action is focusable and is the first stop after the list itself | [ ] |
 | 10 | Titlebar / toolbar chrome | Search trigger, New item, and the lock button all Tab-reachable | [ ] |
 
@@ -85,7 +86,7 @@ same keystrokes and would swallow the first letter of every shortcut a later pha
 | # | Surface | Must be operable by | Done |
 |---|---------|--------------------|------|
 | 11 | Command palette | ⌘K/Ctrl+K opens from anywhere, Esc closes, ↑/↓ navigate, Enter copies the password, ⇧Enter opens the item — R-16 | [ ] |
-| 12 | New-item dialog | Type chips selectable with ←/→ and Space; every type's fields Tab-reachable; the generator opens from inside it and returns focus; the **New tag** field takes Enter to add a tag and does **not** submit the item | [ ] |
+| 12 | New-item dialog | Type chips selectable with ←/→ and Space; every type's fields Tab-reachable; the generator opens from inside it and returns focus; the **New tag** field takes Enter to add a tag and does **not** submit the item; the **2FA switch** takes Space and Tab from it lands in the seed field it just revealed | [ ] |
 | 13 | Delete confirmation | Focus lands on **Cancel**, not Delete; Esc cancels; Enter activates whatever is focused and nothing else — R-18 | [ ] |
 | 14 | Generator dialog | Length slider on ←/→ (and Home/End), the four set toggles on Space, Regenerate and Copy reachable — R-15 | [ ] |
 | 15 | Vault switcher | ↑/↓ between vaults, Enter switches, Esc closes — R-22 | [ ] |

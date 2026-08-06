@@ -41,14 +41,26 @@
     status: VaultStatus;
     settings: Settings;
     onsettings: (next: Settings) => void;
+    /**
+     * The open vault was switched away from or deleted — R-22, R-18.
+     *
+     * The host has already locked and zeroized by the time this fires, so what is left is for
+     * the router to re-read `vault_status` and stop drawing this shell. It re-reads rather than
+     * being told which screen to show: the host owns lock state, and a frontend that decided
+     * "so we go to the lock screen now" would be the second source of truth §9 check 6 exists
+     * to keep from existing.
+     */
+    onvaultchanged: () => void;
   }
 
-  const { status, settings, onsettings }: Props = $props();
+  const { status, settings, onsettings, onvaultchanged }: Props = $props();
 
   let items = $state<ItemSummary[]>([]);
   let view = $state<View>({ kind: 'all' });
   let selectedId = $state<string | null>(null);
   let error = $state('');
+  /** A settings write the host refused. Only `launch_at_login` can produce one. */
+  let settingsError = $state('');
 
   /** Which overlay is up. One at a time — the prototype never stacks two. */
   let overlay = $state<
@@ -153,8 +165,21 @@
     target.addEventListener('pointerup', done);
   }
 
+  /**
+   * Saves a settings change, and shows the one that can be refused.
+   *
+   * `launch_at_login` writes outside this process — a desktop entry, a `LaunchAgent`, a
+   * registry value — so the host rejects with `io` and **stores nothing** when the platform
+   * will not take it. This side therefore does not update its own copy on failure either: the
+   * toggle snaps back to what the host still holds, which is the truth about the machine, and
+   * the sentence beside it says why it moved. Optimistically keeping the new value would leave
+   * a screen promising the app starts at login when nothing registered it.
+   */
   function saveSettings(next: Settings) {
-    void setSettings(next).then(onsettings);
+    settingsError = '';
+    void setSettings(next)
+      .then(onsettings)
+      .catch((thrown) => (settingsError = asIpcError(thrown).message));
   }
 
   /**
@@ -274,6 +299,7 @@
         {settings}
         {status}
         itemCount={items.length}
+        error={settingsError}
         onchange={saveSettings}
         ondeletevault={() => (overlay = 'deleteVault')}
       />
@@ -342,10 +368,10 @@
     />
   {:else if overlay === 'vaults'}
     <VaultSwitcher
-      vaultName={status.displayName}
-      {vaultFile}
+      openPath={status.path}
       itemCount={items.length}
       onclose={() => (overlay = 'none')}
+      onswitched={onvaultchanged}
     />
   {:else if overlay === 'deleteItem'}
     <DeleteDialog
@@ -359,8 +385,10 @@
     <DeleteDialog
       target="vault"
       name={status.displayName}
+      vaultPath={status.path}
       itemCount={items.length}
       onclose={() => (overlay = 'none')}
+      ondeleted={onvaultchanged}
     />
   {/if}
 

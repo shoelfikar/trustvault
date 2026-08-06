@@ -7,14 +7,18 @@
    * thing standing between a mis-aimed click and a file whose contents cannot be reconstructed
    * from anywhere.
    *
-   * **Item deletion fires; vault deletion does not.** `delete_item` landed 2026-08-06;
-   * `delete_vault` is still `// planned` in the contract, so that half keeps the reason in its
-   * `title` instead of a handler.
+   * **Both halves fire as of 2026-08-06.** They differ in one way that is not cosmetic: the
+   * item's confirmation is checked *here* and nowhere else, and the vault's is checked **again
+   * in Rust**. The contract says why — a wrong item delete costs one entry, and a wrong vault
+   * delete costs everything with no undo anywhere in the product, so R-18's typed name is not
+   * left to the layer the contract does not trust. The gate below is therefore a courtesy that
+   * keeps the button quiet until the name matches; the real check is the host's, and its
+   * `confirmation_mismatch` is rendered like any other error.
    */
   import Button from '../components/Button.svelte';
   import Dialog from '../components/Dialog.svelte';
   import Icon from '../icons/Icon.svelte';
-  import { asIpcError, deleteItem } from '../ipc';
+  import { asIpcError, deleteItem, deleteVault } from '../ipc';
 
   interface Props {
     /** `item` names the item; `vault` demands the name typed back. */
@@ -22,12 +26,22 @@
     name: string;
     /** Which item to delete. Required when `target` is `item`. */
     itemId?: string | null;
+    /** Which vault file to delete. Required when `target` is `vault`. */
+    vaultPath?: string | null;
     itemCount?: number;
     onclose: () => void;
     ondeleted?: () => void;
   }
 
-  const { target, name, itemId = null, itemCount = 0, onclose, ondeleted }: Props = $props();
+  const {
+    target,
+    name,
+    itemId = null,
+    vaultPath = null,
+    itemCount = 0,
+    onclose,
+    ondeleted,
+  }: Props = $props();
 
   let typed = $state('');
   let deleting = $state(false);
@@ -35,8 +49,7 @@
 
   const confirmed = $derived(target === 'item' || typed.trim() === name);
 
-  /** `delete_vault` does not exist yet; `delete_item` does. */
-  const canDelete = $derived(target === 'item' ? Boolean(itemId) : false);
+  const canDelete = $derived(target === 'item' ? Boolean(itemId) : Boolean(vaultPath));
 
   /**
    * The copy says what actually happens.
@@ -54,11 +67,16 @@
   );
 
   async function confirm() {
-    if (!confirmed || !canDelete || !itemId || deleting) return;
+    if (!confirmed || !canDelete || deleting) return;
     deleting = true;
     error = '';
     try {
-      await deleteItem(itemId);
+      // What the user typed, **never the `name` prop**: sending the prop would have the host
+      // compare a string against itself, which is exactly the check being in Rust undone.
+      // Trimmed, because the gate above trims — the two must agree, or a trailing space
+      // enables the button and then the host says the name does not match.
+      if (target === 'vault') await deleteVault(vaultPath as string, typed.trim());
+      else await deleteItem(itemId as string);
       ondeleted?.();
     } catch (thrown) {
       error = asIpcError(thrown).message;
@@ -93,7 +111,6 @@
       <Button
         variant="primary"
         disabled={!confirmed || !canDelete || deleting}
-        title={target === 'vault' ? 'Vault deletion arrives with delete_vault' : undefined}
         onclick={() => void confirm()}
       >
         {#if deleting}

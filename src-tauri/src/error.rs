@@ -34,7 +34,10 @@ pub enum ErrorKind {
     Clipboard,
     /// The file offered for import is not an unencrypted Bitwarden JSON export.
     NotImportable,
-    /// Reading or writing the vault file failed.
+    /// The name typed into the vault-deletion dialog is not the vault's name — R-18.
+    ConfirmationMismatch,
+    /// A file this application had to read or write would not. The vault file, or — since
+    /// `launch_at_login` — the OS's own login-time launcher entry.
     Io,
     /// A bug in this application or a broken machine.
     Internal,
@@ -82,10 +85,23 @@ impl IpcError {
             ErrorKind::Clipboard => "Could not write to the clipboard.",
             // The only error whose cause the user can do something about by going back to the
             // other application, so it says which application and which export.
+            // Says what to type rather than only that it was wrong. The user is looking at the
+            // name on the same screen, so the failure is almost always a typo or the wrong
+            // vault selected -- and this is the one error in the product whose *success* is
+            // irreversible, so being unhelpful here has no upside.
+            ErrorKind::ConfirmationMismatch => {
+                "That is not this vault's name. Type it exactly as it is shown above."
+            }
             ErrorKind::NotImportable => {
                 "That file is not an unencrypted Bitwarden JSON export. In Bitwarden, choose                  Export vault and the .json format, without a password."
             }
-            ErrorKind::Io => "Could not read or write the vault file.",
+            // Said "the vault file" until 2026-08-06, when `launch_at_login` became the first
+            // `io` that has nothing to do with a vault: the write it fails on is a desktop
+            // entry or a registry value. A password manager telling a user their vault file
+            // could not be written, when the vault is fine and a login toggle is what failed,
+            // is the same class of wrong copy D-49 found in the delete dialog — one sentence,
+            // read at the moment it matters, describing something that did not happen.
+            ErrorKind::Io => "Could not read or write a file on this computer.",
             ErrorKind::Internal => "Something went wrong inside TrustVault.",
         };
         Self {

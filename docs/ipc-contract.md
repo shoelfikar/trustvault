@@ -460,11 +460,22 @@ wrong:
 ```ts
 type VaultRef = { path: string; display_name: string; last_opened_at: Millis | null };
 
-list_vaults(): VaultRef[]   // planned
-switch_vault({ path: string }): void   // planned
-forget_vault({ path: string }): void   // planned
-delete_vault({ path: string; confirm_name: string }): void   // planned
+list_vaults(): VaultRef[]
+switch_vault({ path: string }): void
+forget_vault({ path: string }): void
+delete_vault({ path: string; confirm_name: string }): void
 ```
+
+**All four are ambient**, decided when they shipped on 2026-08-06 and worth stating because it
+reads as a widening and is the opposite: the switcher's whole job is to be usable while nothing is
+unlocked, which is where a user who wants a different vault most often is. None of the four returns
+anything from inside a vault — a list of paths on the user's own disk, which their file manager
+shows them anyway, and a name that is the file stem for every row but the open one.
+
+The list behind them, `known_vaults`, is **appended on every path that leaves a vault open**, and
+that is one function (`Inner::opened`) rather than a line repeated at three call sites. The reason
+is the fourth call site: a reader adding one copies the vault and the path, and does not know there
+was bookkeeping to copy — after which the switcher is missing the vault the user is looking at.
 
 `display_name` carries the §5 wrinkle unchanged and it bites harder here: the real name is inside
 the sealed body, so **every vault in this list except the open one shows its file stem**. The
@@ -477,6 +488,10 @@ in any lock state (§2.2). R-22's acceptance criterion is exactly the first half
 `forget_vault` removes the entry from the list. **The file is untouched** — this is the "Leave
 vault" flow, and confusing it with the next one would be the worst bug in the application.
 
+`forget_vault` is allowed on the **open** vault and does not close it: the user has said "stop
+listing this", not "get me out of it". It does clear `last_vault_path` when it names the vault a
+relaunch would have offered, or the next launch re-adds the entry that was just removed.
+
 `delete_vault` erases the file, and the confirmation is enforced **here, in Rust**: `confirm_name`
 must equal the `display_name` this command would report for that path, or it returns
 `confirmation_mismatch` and deletes nothing. This is the one confirmation the host verifies rather
@@ -485,7 +500,20 @@ than trusting the UI with, and the asymmetry with `delete_item` above is deliber
 everything, with no undo anywhere in the product. R-18 asks for the typed name; a typed name checked
 only in JavaScript is checked by the layer this document does not trust.
 
-Deleting the **open** vault locks it first, in that order, so the key is zeroized before the bytes go.
+Three orderings in this command, each of which is the reason it is written the way it is:
+
+1. **The name is checked before anything else**, including the lock. A typo must not cost the user
+   their open session.
+2. **The open vault is locked before its file is touched**, so the master key is zeroized before
+   the bytes go.
+3. **The file goes before the bookkeeping.** If the remove fails, the entry stays in the list — a
+   vault still on disk that the switcher stopped showing is a file the user can no longer reach
+   from inside the app and has not been told about.
+
+`display_name_for` is one function serving both `list_vaults` and this check, which is a
+correctness requirement and not a refactor: two implementations that drifted would make a vault
+undeletable through its own dialog, with the user typing exactly what is on their screen and being
+told it does not match.
 
 ### 6.8 Import — R-29, D-42
 
@@ -566,19 +594,33 @@ type Settings = {
 };
 ```
 
-The five fields below `last_vault_path` are Phase 3's. Two of them are not merely stored:
+The five fields below `last_vault_path` are Phase 3's, and all five shipped 2026-08-06. Two of them
+are not merely stored:
 
-- **`ui_scale` scales the root `rem`**, which `tokens.css` already implements through
-  `[data-ui-scale]`; what was missing was somewhere to keep the choice. Because every token is
-  derived from `rem`, this is the one setting that moves every measurement in the application at
-  once, and `MASTER.md` §10 asks for it end to end.
+- **`ui_scale` moves every measurement in the application at once**, which is what `MASTER.md` §10
+  asks for end to end. Written here as "scales the root `rem`", which is `MASTER.md` §3's own
+  wording and **is not what the code does** — found on the day it was wired, which is the fifth
+  time in five groups that this document has been falsified by the thing it described. `tokens.css`
+  has no `rem` in it at all: every size is `calc(<px> * var(--ui-scale))`, and the setting sets
+  `data-ui-scale` on the root. The outcome is identical *today* and only because nothing in the
+  codebase uses `rem` — **D-57**, with a CI grep keeping that true, because the first `rem` written
+  is the one the setting silently stops reaching.
 - **`launch_at_login` is the only setting with an effect outside this process** — a desktop entry,
   a `LaunchAgent`, or a registry value, one per platform. It is a `boolean` here and three
   implementations behind that, and on a platform where the write fails it MUST report `io` and
-  leave the stored value alone rather than showing a toggle that lies.
+  leave the stored value alone rather than showing a toggle that lies. It is also the only setting
+  **reconciled at start-up**: the OS is asked what it actually has registered and the stored value
+  is corrected to match, because a user who removed the entry through their desktop's own startup
+  tool has said something this screen must not contradict.
 
 Window geometry lives here rather than in a separate window-state file, for D-40's reason
-unchanged: one store, one format, one migration story.
+unchanged: one store, one format, one migration story. Two rules the implementation settled:
+
+- **A maximized window's size is not recorded**, only the flag. Its dimensions are the screen's,
+  and restoring to them is what makes un-maximizing land on a window the size of the display.
+- **The position is not restored, only the size.** A remembered position on a display that is no
+  longer attached opens the window off-screen, which is indistinguishable from the app failing to
+  launch and cannot be undone from inside the app.
 
 **`known_vaults` is deliberately not in this struct.** It is host-owned bookkeeping in the same
 settings file, and its read path is `list_vaults` (§6.7), which derives a `display_name` per entry —
@@ -587,11 +629,22 @@ work `get_settings` has no business doing and the webview must not do for itself
 `set_settings` takes the **whole struct**, not a patch: a patch shape needs every field optional,
 and an optional boolean is how a setting gets silently reset by a caller that omitted it.
 
-`last_vault_path` is the one field the webview may read and MUST NOT set. The host overwrites
-whatever arrives in it with what it already had, because `Settings` deserializes with defaults —
-a frontend that does not know the field sends it absent, which reads as `null`, which would erase
-the user's vault on the next theme change. Storage is decided: plain JSON in the OS app-config
-directory, all of it, per **D-33**.
+**Four fields are host-owned: the webview may read them and MUST NOT set them.** The host
+overwrites whatever arrives in them with what it already had, because `Settings` deserializes with
+defaults — a frontend that does not know a field sends it absent, and the default lands. Storage is
+decided: plain JSON in the OS app-config directory, all of it, per **D-33**.
+
+- `last_vault_path` (D-40). Lost, it would erase the user's vault on the next theme change.
+- `window_width`, `window_height`, `window_maximized` (R-27), added 2026-08-06 with the geometry
+  itself. Only the host measures the window, and it does so on every resize. The trap here is
+  sharper than `last_vault_path`'s, because it needs no ignorance of the field to spring: the
+  webview holds a `Settings` from when its screen opened, so **resize the window, then change any
+  setting**, and a frontend that faithfully echoes every field it knows about sends the dimensions
+  from before the resize.
+
+The rule is enforced in one named function, `merge_incoming`, with a test per field rather than a
+line inside a closure — a host-owned field that is only host-owned by convention is one the next
+field added will quietly break.
 
 ## 7. Sanctioned commands
 

@@ -105,6 +105,9 @@ export interface EditField {
 
 export type Theme = 'system' | 'light' | 'dark';
 
+/** 92 % / 100 % / 115 % — R-21. The three steps `tokens.css` names, not a free percentage. */
+export type UiScale = 'compact' | 'default' | 'large';
+
 export interface Settings {
   theme: Theme;
   autoLockSeconds: number;
@@ -123,6 +126,33 @@ export interface Settings {
    * what makes a relaunch land on the lock screen instead of onboarding.
    */
   readonly lastVaultPath: string | null;
+  /**
+   * How large the whole interface draws — R-21.
+   *
+   * Applied by setting `data-ui-scale` on the root, which `tokens.css` turns into
+   * `--ui-scale`; every size token is derived from it, so this is the one setting that moves
+   * every measurement in the application at once.
+   */
+  uiScale: UiScale;
+  /**
+   * Whether the OS starts TrustVault at login — R-21.
+   *
+   * **The only setting whose write can fail.** It is a desktop entry, a `LaunchAgent` or a
+   * registry value depending on the platform, and `setSettings` rejects with `io` rather than
+   * storing a value the platform refused — so a caller must re-read from the resolved
+   * settings rather than assume its own optimistic value took.
+   */
+  launchAtLogin: boolean;
+  /**
+   * Window geometry — R-27, and **host-owned like `lastVaultPath`**.
+   *
+   * Only the host measures the window, and it does so on every resize. These ride in the
+   * struct because they share the settings file (D-33's one-store argument); sending changed
+   * values back here does nothing, because the host keeps its own.
+   */
+  readonly windowWidth: number;
+  readonly windowHeight: number;
+  readonly windowMaximized: boolean;
 }
 
 export interface KdfSummary {
@@ -179,6 +209,10 @@ export type ErrorKind =
   // returned it since the importer landed, and this side would have narrowed it to `internal`.
   | 'not_importable'
   | 'malformed_totp_secret'
+  // The typed name in the vault-deletion dialog did not match — R-18. The one confirmation
+  // the **host** verifies, so this side must be able to name it: narrowed to `internal`, the
+  // dialog would tell a user who mistyped that something went wrong inside TrustVault.
+  | 'confirmation_mismatch'
   | 'io'
   | 'internal';
 
@@ -298,7 +332,61 @@ export const totpPreview = (secret: string) => call<TotpCode>('totp_preview', { 
 
 export const getSettings = () => call<Settings>('get_settings');
 
+/**
+ * Replaces the settings — §6.3.
+ *
+ * **Can reject.** `launch_at_login` writes outside the process, and the host returns `io`
+ * without storing anything when the platform refuses. A caller must therefore take the
+ * *returned* settings as the truth rather than the object it sent, or the screen shows a
+ * toggle promising something nothing registered.
+ */
 export const setSettings = (settings: Settings) => call<Settings>('set_settings', { settings });
+
+/* ---- Multi-vault — §6.7, R-22 -------------------------------------------- */
+
+/**
+ * One row of the switcher.
+ *
+ * `displayName` is the **file stem** for every vault except the open one, and the surface must
+ * not imply otherwise: the real name is inside the sealed body, so with no key there is
+ * nothing to read it with.
+ */
+export interface VaultRef {
+  path: string;
+  displayName: string;
+  lastOpenedAt: number | null;
+}
+
+/** Ambient — the switcher's job is to work while nothing is unlocked. */
+export const listVaults = () => call<VaultRef[]>('list_vaults');
+
+/**
+ * Points the app at another vault — R-22.
+ *
+ * **Locks and zeroizes the outgoing vault first**, then moves, and leaves the state `locked`:
+ * it is given no password, so it cannot and does not unlock. Callers re-read `vaultStatus`
+ * rather than assuming, which is what puts the lock screen up.
+ */
+export const switchVault = (path: string) => call<void>('switch_vault', { path });
+
+/**
+ * Removes a vault from the list. **The file is untouched** — this is "Leave vault".
+ *
+ * Confusing this with `deleteVault` would be the worst bug in the application, which is why
+ * they are kept apart in the command name, the confirmation, and the words on the button.
+ */
+export const forgetVault = (path: string) => call<void>('forget_vault', { path });
+
+/**
+ * Erases a vault file — R-18, R-22.
+ *
+ * `confirmName` must equal the `displayName` `listVaults` reports for that path, and **the
+ * host checks it**, rejecting with `confirmation_mismatch` and deleting nothing. That is the
+ * asymmetry with `deleteItem`, whose confirmation is only in the UI: a wrong item delete costs
+ * one entry, and a wrong vault delete costs everything with no undo anywhere in the product.
+ */
+export const deleteVault = (path: string, confirmName: string) =>
+  call<void>('delete_vault', { path, confirmName });
 
 /* ---- Vault-class — §6.3 -------------------------------------------------- */
 

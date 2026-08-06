@@ -25,8 +25,14 @@ pub fn now_ms() -> i64 {
 /// User settings — `docs/ipc-contract.md` §6.3.
 ///
 /// Stored as plain JSON beside the app's config, **not** in the sealed body (D-33). None of
-/// these four values is a secret, and `theme` has to be readable before any vault is open or
-/// the lock screen renders in the wrong colours for the time it takes to unlock.
+/// these values is a secret, and `theme` has to be readable before any vault is open or the
+/// lock screen renders in the wrong colours for the time it takes to unlock.
+///
+/// **Three of these fields are host-owned**, and which ones is not a detail: `last_vault_path`
+/// (D-40) and the three `window_*` values are written by this process and only *read* by the
+/// webview. [`crate::commands::settings::merge_incoming`] is where that is true or merely
+/// intended — the webview sends the whole struct back on every change, and it is holding a
+/// copy that was current when the settings screen opened.
 // `Copy` was dropped when `last_vault_path` arrived: a `String` cannot be copied, and the
 // alternative — a fixed-size path — is not a thing on any platform this ships to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,6 +62,29 @@ pub struct Settings {
     /// makes "quit and relaunch" work at all — the host keeps nothing in memory across a quit,
     /// so without this the app cannot name the vault it is asking the user to unlock.
     pub last_vault_path: Option<String>,
+    /// How large the whole interface draws — R-21.
+    ///
+    /// The one setting that moves every measurement in the application at once: `tokens.css`
+    /// derives every size from `--ui-scale`, so this multiplies text, rows, controls and
+    /// spacing together rather than growing the type and leaving the rows where they were.
+    pub ui_scale: UiScale,
+    /// Whether the OS starts TrustVault at login — R-21.
+    ///
+    /// **The only setting with an effect outside this process**, which is why writing it can
+    /// fail: it is a desktop entry, a `LaunchAgent` or a registry value depending on the
+    /// platform. [`crate::autostart`] holds the three implementations, and `set_settings`
+    /// refuses to store a value the platform would not take — a toggle that lies about
+    /// whether the app will start tomorrow is worse than one that reports the failure now.
+    pub launch_at_login: bool,
+    /// Window width in px — R-27. Host-owned: only this process ever measures the window.
+    pub window_width: u32,
+    /// Window height in px — R-27.
+    pub window_height: u32,
+    /// Whether the window was maximized when it was last closed — R-27.
+    ///
+    /// Kept beside the size rather than replacing it, because restoring a maximized window
+    /// still needs somewhere to put it when the user un-maximizes.
+    pub window_maximized: bool,
 }
 
 impl Default for Settings {
@@ -68,8 +97,33 @@ impl Default for Settings {
             sidebar_width: 232,
             list_width: 300,
             last_vault_path: None,
+            ui_scale: UiScale::Default,
+            launch_at_login: false,
+            // The dimensions in `tauri.conf.json`, repeated here rather than read from it:
+            // this default only applies on a first run, and a mismatch costs one window of the
+            // wrong size once. Reading the config at runtime to save that is a dependency
+            // between two files for no benefit.
+            window_width: 1360,
+            window_height: 864,
+            window_maximized: false,
         }
     }
+}
+
+/// How large the interface draws — R-21, `MASTER.md` §10.
+///
+/// Three steps rather than a slider, and they are the design's own: an arbitrary percentage
+/// makes every layout a distinct one to have tested, and `tokens.css` names exactly these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UiScale {
+    /// 92 %.
+    Compact,
+    /// 100 %.
+    #[default]
+    Default,
+    /// 115 %.
+    Large,
 }
 
 /// Theme preference.
@@ -100,6 +154,25 @@ pub enum LockReason {
     OsSleep,
 }
 
+/// One vault this installation knows about — R-22.
+///
+/// **Not in `Settings`**, and the contract says why: its read path is `list_vaults`, which
+/// derives a `display_name` per entry, and that is work `get_settings` has no business doing
+/// and the webview must not do for itself. It shares the settings *file* (D-33's one store),
+/// not the settings *struct*.
+///
+/// The name is deliberately absent from this record. A vault's real name is inside its sealed
+/// body, so storing one here would mean keeping a copy that goes stale the moment a vault is
+/// renamed — and a switcher listing a name the vault no longer has is worse than one showing
+/// the file stem, because the stem is at least verifiably true.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KnownVault {
+    /// Absolute path to the `.tvault` file.
+    pub path: String,
+    /// When it was last opened, Unix milliseconds. `None` for one that never has been.
+    pub last_opened_at: Option<i64>,
+}
+
 /// Everything the host process knows.
 #[derive(Debug, Default)]
 pub struct Inner {
@@ -109,6 +182,8 @@ pub struct Inner {
     pub path: Option<PathBuf>,
     /// Settings, loaded at start-up.
     pub settings: Settings,
+    /// Every vault this installation has opened, most recent first — R-22.
+    pub known_vaults: Vec<KnownVault>,
     /// When a command last ran, for the idle timer. Unix milliseconds.
     pub last_activity: i64,
     /// Bumped on every lock and unlock, so a timer that fires late cannot act on a stale view.
@@ -117,6 +192,41 @@ pub struct Inner {
     /// for an item in a vault that is no longer open — harmless today, and exactly the kind of
     /// thing that stops being harmless when someone reuses the event.
     pub generation: u64,
+}
+
+impl Inner {
+    /// Records that `vault` is now open at `path`, with everything that has to follow from it.
+    ///
+    /// One function rather than the three identical blocks that were in `create_vault_inner`,
+    /// `unlock_inner` and `unlock_recovery_kit_inner`, and consolidating them was not tidying:
+    /// **`known_vaults` had to be updated on every path that leaves a vault open**, and a
+    /// fourth such path is exactly the thing a reader adds without noticing there were three
+    /// bookkeeping lines to copy. The switcher would then be missing the vault the user is
+    /// looking at.
+    ///
+    /// The list is **most-recently-opened first**, which is the order the switcher wants and
+    /// the reason `last_opened_at` is stored at all.
+    pub fn opened(&mut self, vault: Vault, path: PathBuf) {
+        let now = now_ms();
+        let key = path.display().to_string();
+
+        self.generation = self.generation.wrapping_add(1);
+        self.vault = Some(vault);
+        // D-40: the remembered path is set here, on the path that leaves a vault open, rather
+        // than in the command wrapper -- the wrapper only writes it to disk.
+        self.settings.last_vault_path = Some(key.clone());
+        self.path = Some(path);
+        self.last_activity = now;
+
+        self.known_vaults.retain(|known| known.path != key);
+        self.known_vaults.insert(
+            0,
+            KnownVault {
+                path: key,
+                last_opened_at: Some(now),
+            },
+        );
+    }
 }
 
 /// The Tauri-managed state handle.

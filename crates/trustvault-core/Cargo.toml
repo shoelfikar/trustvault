@@ -22,16 +22,33 @@ thiserror.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 
+[features]
+# The reference vault of trustvault-requirements.md — 1 000 items, 4 fields each. Off in the
+# shipped library on purpose: a fixture generator compiled into the application is a way to
+# create a thousand fake items in somebody's real vault.
+benchfixture = []
+
 [dev-dependencies]
 # R-01 asks for a round-trip over 10 000 generated vaults; generating them by hand is how
 # the interesting shapes get missed.
 proptest = "1.11"
 tempfile = "3"
+# The crate depending on itself is how a feature is turned on for benchmarks and tests only.
+# It is a dev-edge, so `cargo tree --edges normal` — which is what the N-02 boundary job in CI
+# reads — does not see it, and the shipped library is built without the fixture.
+trustvault-core = { path = ".", features = ["benchfixture"] }
 
 # S-03 is measured, not asserted: `cargo bench --bench kdf`. No criterion — the measurement
 # is one wall-clock number and a harness would be more code than the thing it measures.
 [[bench]]
 name = "kdf"
+harness = false
+
+# S-04's host half, on the reference vault: `cargo bench --bench search`. Same reasoning as
+# above, plus one of its own — the number that matters is a p95, and a percentile over a few
+# thousand samples is three lines of `sort`.
+[[bench]]
+name = "search"
 harness = false
 
 [lints.rust]

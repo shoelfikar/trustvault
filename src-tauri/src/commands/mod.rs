@@ -12,6 +12,7 @@
 pub mod generator;
 pub mod import;
 pub mod items;
+pub mod search;
 pub mod settings;
 pub mod strength;
 pub mod vault;

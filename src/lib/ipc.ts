@@ -282,6 +282,20 @@ export const listItems = () => call<ItemSummary[]>('list_items');
 export const getItem = (itemId: string) => call<ItemDetail>('get_item', { itemId });
 
 /**
+ * Ranks the vault against a palette query — §6.5, R-16, D-46.
+ *
+ * The matching runs in Rust, against plaintext that never leaves the core, and what comes back
+ * is the same elided summary the list gets — **no field values, not even the one that matched**.
+ * The alternative was to hold every username and URL in this heap and filter here: permitted by
+ * §6.1 and still the wrong trade, which is why it took a decision rather than a preference.
+ *
+ * A **secret field's value is never matched**, so this cannot be used to confirm a guessed
+ * password through the order of the rows.
+ */
+export const searchItems = (query: string, limit: number) =>
+  call<ItemSummary[]>('search_items', { query, limit });
+
+/**
  * Copies a field to the clipboard. **Returns no value** — that absence is R-10.
  *
  * The secret is written to the clipboard by Rust and never enters this heap.

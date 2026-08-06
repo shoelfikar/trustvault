@@ -85,13 +85,13 @@ same keystrokes and would swallow the first letter of every shortcut a later pha
 | # | Surface | Must be operable by | Done |
 |---|---------|--------------------|------|
 | 11 | Command palette | ⌘K/Ctrl+K opens from anywhere, Esc closes, ↑/↓ navigate, Enter copies the password, ⇧Enter opens the item — R-16 | [ ] |
-| 12 | New-item dialog | Type chips selectable with ←/→ and Space; every type's fields Tab-reachable; the generator opens from inside it and returns focus | [ ] |
+| 12 | New-item dialog | Type chips selectable with ←/→ and Space; every type's fields Tab-reachable; the generator opens from inside it and returns focus; the **New tag** field takes Enter to add a tag and does **not** submit the item | [ ] |
 | 13 | Delete confirmation | Focus lands on **Cancel**, not Delete; Esc cancels; Enter activates whatever is focused and nothing else — R-18 | [ ] |
 | 14 | Generator dialog | Length slider on ←/→ (and Home/End), the four set toggles on Space, Regenerate and Copy reachable — R-15 | [ ] |
 | 15 | Vault switcher | ↑/↓ between vaults, Enter switches, Esc closes — R-22 | [ ] |
 | 16 | Settings | Every control reachable in visual order; the segmented controls on ←/→; **UI scale changes do not move focus** — R-21 | [ ] |
 | 17 | Watchtower | The findings list is a list: ↑/↓ and Enter to the offending item | [ ] |
-| 18 | Edit-item dialog | Every field row Tab-reachable in display order; **Replace** on a secret row reachable without hover, and Tab from it lands in the input it just opened; Remove and Add field reachable — R-17 | [ ] |
+| 18 | Edit-item dialog | Every field row Tab-reachable in display order; **Replace** on a secret row reachable without hover, and Tab from it lands in the input it just opened; Remove and Add field reachable; the **New tag** field takes Enter as "add this tag" — R-17 | [ ] |
 
 Row 18 was added 2026-08-06 with the dialog itself, and it is the reason this table's count is now
 **18 against the gate's 15**: the prototype draws no edit surface at all, so the surface exists
@@ -102,6 +102,12 @@ what exists, and the gate line needs a list rather than a total.
 Row 18's "Tab from Replace lands in the input it just opened" is the finding waiting to happen:
 pressing Replace swaps a disabled input for an editable one in the same position, and the browser
 has no reason to move focus there on its own.
+
+The tag clause on rows 12 and 18 is there because both dialogs deliberately **swallow Enter** in
+one field. A dialog's Enter submits it, and a tag being typed is not a finished item — without the
+interception, adding a tag would save a half-filled form, which is the more expensive of the two
+surprises. Whether it reads as broken to somebody who does not know that is exactly what the manual
+pass is for.
 
 Row 13 is a requirement, not a preference. A destructive dialog that opens with the destructive
 button focused converts the Enter keypress that opened it into a confirmation, which is how a

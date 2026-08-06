@@ -132,6 +132,37 @@
   const toggleTag = (tag: string) =>
     (chosen = chosen.includes(tag) ? chosen.filter((one) => one !== tag) : [...chosen, tag]);
 
+  /**
+   * Tags invented in this dialog, offered as chips beside the vault's own.
+   *
+   * Without this the chips are the tags already in the vault, so a fresh vault offers none and
+   * no first item can ever be tagged — the taxonomy would have no way to start.
+   */
+  let created = $state<string[]>([]);
+  let fresh = $state('');
+
+  const offered = $derived([...tags, ...created]);
+
+  /**
+   * Adds the typed tag and selects it.
+   *
+   * Matching an existing tag case-insensitively **selects that one** rather than creating a
+   * near-duplicate: `work` and `Work` would otherwise be two tags, two sidebar rows and two
+   * filters that each hold half the items, with nothing on screen explaining why.
+   */
+  function addTag() {
+    const tag = fresh.trim();
+    if (!tag) return;
+    const existing = offered.find((one) => one.toLowerCase() === tag.toLowerCase());
+    if (existing) {
+      if (!chosen.includes(existing)) chosen = [...chosen, existing];
+    } else {
+      created = [...created, tag];
+      chosen = [...chosen, tag];
+    }
+    fresh = '';
+  }
+
   const glyph = (candidate: ItemKind): IconName => TYPE_GLYPHS[candidate];
 
   const canSave = $derived(title.trim().length > 0 && !saving);
@@ -294,24 +325,38 @@
       {/if}
     {/if}
 
-    {#if tags.length}
-      <div class="control">
-        <span class="label-as-text">Tags</span>
-        <div class="chips">
-          {#each tags as tag (tag)}
-            <button
-              type="button"
-              class="chip tag"
-              class:on={chosen.includes(tag)}
-              aria-pressed={chosen.includes(tag)}
-              onclick={() => toggleTag(tag)}
-            >
-              <span class="dot" style="background:{tagColour(tag)}"></span>{tag}
-            </button>
-          {/each}
-        </div>
+    <div class="control">
+      <label class="label-as-text" for="new-item-tag">Tags</label>
+      <div class="chips">
+        {#each offered as tag (tag)}
+          <button
+            type="button"
+            class="chip tag"
+            class:on={chosen.includes(tag)}
+            aria-pressed={chosen.includes(tag)}
+            onclick={() => toggleTag(tag)}
+          >
+            <span class="dot" style="background:{tagColour(tag)}"></span>{tag}
+          </button>
+        {/each}
+        <input
+          id="new-item-tag"
+          class="new-tag"
+          bind:value={fresh}
+          placeholder="New tag…"
+          spellcheck="false"
+          onkeydown={(event) => {
+            if (event.key !== 'Enter') return;
+            // The dialog's own Enter would submit the item. A tag being typed is not a
+            // finished item, and losing a half-filled form to it is the worse failure.
+            event.preventDefault();
+            event.stopPropagation();
+            addTag();
+          }}
+          onblur={addTag}
+        />
       </div>
-    {/if}
+    </div>
 
     {#if error}
       <p class="error" role="alert"><Icon name="alert" size={13} />{error}</p>
@@ -385,6 +430,27 @@
     width: 7px;
     height: 7px;
     border-radius: 2px;
+  }
+  /* A chip-shaped field rather than a labelled input: it sits in the same row as the tags it
+     adds to, so the affordance is "one more of these" and not "a separate setting". */
+  .new-tag {
+    height: 24px;
+    min-width: 92px;
+    max-width: 140px;
+    padding: 0 9px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+  }
+  .new-tag::placeholder {
+    color: var(--fg-subtle);
+  }
+  .new-tag:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
   }
 
   .form {

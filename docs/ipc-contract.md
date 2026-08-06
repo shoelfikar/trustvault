@@ -383,7 +383,7 @@ the thing it protects against is a mis-click, not a hostile caller — the calle
 ### 6.5 Search and tags — R-16
 
 ```ts
-search_items({ query: string; limit: number }): ItemSummary[]   // planned
+search_items({ query: string; limit: number }): ItemSummary[]
 list_tags(): { tag: string; count: number }[]   // planned
 ```
 
@@ -401,8 +401,35 @@ including the value that matched — if the design turns out to need the matched
 the row, that is a bounded addition covering the visible results only, and it gets its own decision
 rather than arriving as a widened return type.
 
+Three rules the implementation settled, written here because each is silent when it goes wrong:
+
+- **A secret field's value is never a haystack, and that is the only rule.** Searched: the title,
+  the tags, and the value of every field the user did not declare secret. This is a security
+  property, not a scope — a palette that matched stored passwords would answer *"is this string the
+  password for one of these items?"* through the ranking alone, with nothing revealed, nothing
+  crossing the boundary, and no audit entry.
+  Written first as R-16's list word for word — non-secret fields of kind `username`, `url` and
+  `email` — and **falsified within the hour by the IPC harness's own fixture**, which is the fourth
+  time in four phases a document written before the code has been. `Item::set_field` guesses `kind`
+  from `secret`, so a username stored through it is a `text` and was not searchable. `kind` is how a
+  field renders and is only as accurate as whoever created it; `secret` is what the user declared.
+  Filtering on the first makes searchability quietly wrong in a way no user can diagnose, so
+  `crates/trustvault-core/src/search.rs` gates on the second alone. The consequence to keep in view
+  is that the weights, not the haystack list, are what stop a note body from outranking a title.
+- **An empty query is not an empty result.** It returns the first `limit` items in vault order,
+  which is what the palette shows before anything is typed.
+- **`limit` is a request, not an instruction.** The host caps it at 50. The palette draws six rows;
+  what the cap stops is the whole vault arriving through a command whose response nobody reviews as
+  a list. `list_items` is the way to get the list.
+
 `list_tags` counts across the vault, for the sidebar's tag list and the Add dialog's chips. A tag is
-metadata: it is drawn in the item list already.
+metadata: it is drawn in the item list already. **Still `// planned` on 2026-08-06, and that
+sentence is why**: `ItemSummary.tags` already carries every tag to the frontend, so the sidebar and
+both dialogs build their lists and their counts from `list_items` without it. Implementing it now
+would add a second path to data the webview already holds legitimately. Left specified and
+unregistered until something needs a count the list cannot compute — raised as an open question in
+`trustvault-state.md` rather than deleted here, because removing a command from this document is a
+decision and not a tidy-up.
 
 ### 6.6 TOTP — R-20
 

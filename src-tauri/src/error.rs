@@ -34,6 +34,8 @@ pub enum ErrorKind {
     Clipboard,
     /// The file offered for import is not an unencrypted Bitwarden JSON export.
     NotImportable,
+    /// The name typed into the vault-deletion dialog is not the vault's name — R-18.
+    ConfirmationMismatch,
     /// A file this application had to read or write would not. The vault file, or — since
     /// `launch_at_login` — the OS's own login-time launcher entry.
     Io,
@@ -83,6 +85,13 @@ impl IpcError {
             ErrorKind::Clipboard => "Could not write to the clipboard.",
             // The only error whose cause the user can do something about by going back to the
             // other application, so it says which application and which export.
+            // Says what to type rather than only that it was wrong. The user is looking at the
+            // name on the same screen, so the failure is almost always a typo or the wrong
+            // vault selected -- and this is the one error in the product whose *success* is
+            // irreversible, so being unhelpful here has no upside.
+            ErrorKind::ConfirmationMismatch => {
+                "That is not this vault's name. Type it exactly as it is shown above."
+            }
             ErrorKind::NotImportable => {
                 "That file is not an unencrypted Bitwarden JSON export. In Bitwarden, choose                  Export vault and the .json format, without a password."
             }

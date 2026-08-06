@@ -41,9 +41,19 @@
     status: VaultStatus;
     settings: Settings;
     onsettings: (next: Settings) => void;
+    /**
+     * The open vault was switched away from or deleted — R-22, R-18.
+     *
+     * The host has already locked and zeroized by the time this fires, so what is left is for
+     * the router to re-read `vault_status` and stop drawing this shell. It re-reads rather than
+     * being told which screen to show: the host owns lock state, and a frontend that decided
+     * "so we go to the lock screen now" would be the second source of truth §9 check 6 exists
+     * to keep from existing.
+     */
+    onvaultchanged: () => void;
   }
 
-  const { status, settings, onsettings }: Props = $props();
+  const { status, settings, onsettings, onvaultchanged }: Props = $props();
 
   let items = $state<ItemSummary[]>([]);
   let view = $state<View>({ kind: 'all' });
@@ -358,10 +368,10 @@
     />
   {:else if overlay === 'vaults'}
     <VaultSwitcher
-      vaultName={status.displayName}
-      {vaultFile}
+      openPath={status.path}
       itemCount={items.length}
       onclose={() => (overlay = 'none')}
+      onswitched={onvaultchanged}
     />
   {:else if overlay === 'deleteItem'}
     <DeleteDialog
@@ -375,8 +385,10 @@
     <DeleteDialog
       target="vault"
       name={status.displayName}
+      vaultPath={status.path}
       itemCount={items.length}
       onclose={() => (overlay = 'none')}
+      ondeleted={onvaultchanged}
     />
   {/if}
 

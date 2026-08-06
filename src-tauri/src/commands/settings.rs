@@ -5,17 +5,36 @@
 //! unlock takes; not one of the values here is a secret. What *is* sensitive — the audit log
 //! itself — stays inside the vault, and only the switch that governs it lives here.
 //!
-//! One field is **host-owned**: `last_vault_path` (D-40). It is in this file because it shares
-//! the file's lifetime and its non-secrecy, not because the webview may set it, and
-//! [`merge_incoming`] is what keeps that true.
+//! Four fields are **host-owned**: `last_vault_path` (D-40) and the three `window_*` values
+//! (R-27). They are in this file because they share its lifetime and its non-secrecy, not
+//! because the webview may set them, and [`merge_incoming`] is what keeps that true.
+//!
+//! **`known_vaults` shares the file but not the struct** — the contract's §6.3 rule, and this
+//! module is where it holds: [`Stored`] is what goes on disk, `Settings` is what crosses IPC,
+//! and the list's read path is `list_vaults`, which derives a display name per entry.
 
 use std::fs;
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use crate::error::{ErrorKind, IpcError, IpcResult};
-use crate::state::{AppState, Settings};
+use crate::state::{AppState, KnownVault, Settings};
+
+/// The shape of `settings.json`: the user's settings **plus the host's own bookkeeping**.
+///
+/// One file, per D-33 — and one struct short of `Settings`, per the contract. `known_vaults`
+/// never crosses IPC in this shape: the webview asks `list_vaults`, which turns each entry
+/// into a `VaultRef` with a display name derived for it. Flattening keeps the file readable as
+/// a flat object rather than nesting every setting one level deeper for the sake of one key.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+struct Stored {
+    #[serde(flatten)]
+    settings: Settings,
+    known_vaults: Vec<KnownVault>,
+}
 
 /// Where the settings file lives, or `None` if the platform will not say.
 fn settings_path(app: &AppHandle) -> Option<PathBuf> {
@@ -25,29 +44,29 @@ fn settings_path(app: &AppHandle) -> Option<PathBuf> {
         .map(|dir| dir.join("settings.json"))
 }
 
-/// Reads settings from disk, falling back to the defaults.
+/// Reads settings and the known-vault list from disk, falling back to the defaults.
 ///
 /// A missing file is the normal first-run case, and a **corrupt** file is treated the same
 /// way: the defaults are safe by construction — audit off, auto-lock on, a short clipboard
-/// window — so failing back to them is a safe failure, and refusing to start because a
-/// preferences file was truncated is not.
-pub fn load(app: &AppHandle) -> Settings {
-    settings_path(app)
+/// window, no vaults known — so failing back to them is a safe failure, and refusing to start
+/// because a preferences file was truncated is not.
+pub fn load(app: &AppHandle) -> (Settings, Vec<KnownVault>) {
+    let stored: Stored = settings_path(app)
         .and_then(|path| fs::read_to_string(path).ok())
         .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    (stored.settings, stored.known_vaults)
 }
 
-/// Writes the remembered vault path out, so the **next launch** can offer to unlock it.
+/// Writes the remembered vault path and the known-vault list out, so the **next launch** can
+/// offer to unlock what this one had open.
 ///
-/// The value itself is recorded by the command bodies, which is where every path that leaves
-/// a vault open passes; this only puts it on disk, because that is the half needing an
-/// `AppHandle`. Best effort: failing to write it costs the user one "Open vault file…" on the
+/// The values themselves are recorded by the command bodies, which is where every path that
+/// leaves a vault open passes; this only puts them on disk, because that is the half needing
+/// an `AppHandle`. Best effort: failing to write costs the user one "Open vault file…" on the
 /// next launch, not access.
 pub fn remember_vault(app: &AppHandle, state: &AppState) {
-    if let Some(settings) = state.with(|inner| inner.settings.clone()) {
-        persist(app, &settings);
-    }
+    persist(app, state);
 }
 
 /// Points the host at the vault it had open last, so a relaunch lands on the lock screen.
@@ -71,15 +90,25 @@ pub fn restore_last_vault(state: &AppState) {
     });
 }
 
-/// Writes settings to disk. Best effort — the process keeps the values in memory regardless.
-fn persist(app: &AppHandle, settings: &Settings) {
+/// Writes the whole stored file. Best effort — the process keeps the values in memory anyway.
+///
+/// Takes the state rather than a `Settings`, which is the change that made `known_vaults`
+/// safe to add: a signature that accepted only the settings would need every caller to
+/// remember to write the list too, and the one that forgot would silently drop a vault.
+fn persist(app: &AppHandle, state: &AppState) {
     let Some(path) = settings_path(app) else {
+        return;
+    };
+    let Some(stored) = state.with(|inner| Stored {
+        settings: inner.settings.clone(),
+        known_vaults: inner.known_vaults.clone(),
+    }) else {
         return;
     };
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    if let Ok(text) = serde_json::to_string_pretty(settings) {
+    if let Ok(text) = serde_json::to_string_pretty(&stored) {
         let _ = fs::write(path, text);
     }
 }
@@ -123,7 +152,7 @@ pub fn set_settings(
             inner.settings.clone()
         })
         .unwrap_or(settings);
-    persist(&app, &stored);
+    persist(&app, &state);
     Ok(stored)
 }
 
@@ -151,9 +180,7 @@ pub fn record_geometry(state: &AppState, width: u32, height: u32, maximized: boo
 
 /// Writes the recorded geometry out. Called when the window is closing.
 pub fn persist_geometry(app: &AppHandle, state: &AppState) {
-    if let Some(settings) = state.with(|inner| inner.settings.clone()) {
-        persist(app, &settings);
-    }
+    persist(app, state);
 }
 
 /// Reconciles the stored `launch_at_login` with what the OS actually has registered.

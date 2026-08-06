@@ -154,6 +154,25 @@ pub enum LockReason {
     OsSleep,
 }
 
+/// One vault this installation knows about — R-22.
+///
+/// **Not in `Settings`**, and the contract says why: its read path is `list_vaults`, which
+/// derives a `display_name` per entry, and that is work `get_settings` has no business doing
+/// and the webview must not do for itself. It shares the settings *file* (D-33's one store),
+/// not the settings *struct*.
+///
+/// The name is deliberately absent from this record. A vault's real name is inside its sealed
+/// body, so storing one here would mean keeping a copy that goes stale the moment a vault is
+/// renamed — and a switcher listing a name the vault no longer has is worse than one showing
+/// the file stem, because the stem is at least verifiably true.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KnownVault {
+    /// Absolute path to the `.tvault` file.
+    pub path: String,
+    /// When it was last opened, Unix milliseconds. `None` for one that never has been.
+    pub last_opened_at: Option<i64>,
+}
+
 /// Everything the host process knows.
 #[derive(Debug, Default)]
 pub struct Inner {
@@ -163,6 +182,8 @@ pub struct Inner {
     pub path: Option<PathBuf>,
     /// Settings, loaded at start-up.
     pub settings: Settings,
+    /// Every vault this installation has opened, most recent first — R-22.
+    pub known_vaults: Vec<KnownVault>,
     /// When a command last ran, for the idle timer. Unix milliseconds.
     pub last_activity: i64,
     /// Bumped on every lock and unlock, so a timer that fires late cannot act on a stale view.
@@ -171,6 +192,41 @@ pub struct Inner {
     /// for an item in a vault that is no longer open — harmless today, and exactly the kind of
     /// thing that stops being harmless when someone reuses the event.
     pub generation: u64,
+}
+
+impl Inner {
+    /// Records that `vault` is now open at `path`, with everything that has to follow from it.
+    ///
+    /// One function rather than the three identical blocks that were in `create_vault_inner`,
+    /// `unlock_inner` and `unlock_recovery_kit_inner`, and consolidating them was not tidying:
+    /// **`known_vaults` had to be updated on every path that leaves a vault open**, and a
+    /// fourth such path is exactly the thing a reader adds without noticing there were three
+    /// bookkeeping lines to copy. The switcher would then be missing the vault the user is
+    /// looking at.
+    ///
+    /// The list is **most-recently-opened first**, which is the order the switcher wants and
+    /// the reason `last_opened_at` is stored at all.
+    pub fn opened(&mut self, vault: Vault, path: PathBuf) {
+        let now = now_ms();
+        let key = path.display().to_string();
+
+        self.generation = self.generation.wrapping_add(1);
+        self.vault = Some(vault);
+        // D-40: the remembered path is set here, on the path that leaves a vault open, rather
+        // than in the command wrapper -- the wrapper only writes it to disk.
+        self.settings.last_vault_path = Some(key.clone());
+        self.path = Some(path);
+        self.last_activity = now;
+
+        self.known_vaults.retain(|known| known.path != key);
+        self.known_vaults.insert(
+            0,
+            KnownVault {
+                path: key,
+                last_opened_at: Some(now),
+            },
+        );
+    }
 }
 
 /// The Tauri-managed state handle.

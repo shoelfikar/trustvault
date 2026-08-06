@@ -98,7 +98,12 @@
     }}
   />
 {:else if settings}
-  <Shell {status} {settings} onsettings={(next) => (settings = next)} />
+  <Shell
+    {status}
+    {settings}
+    onsettings={(next) => (settings = next)}
+    onvaultchanged={refresh}
+  />
 {/if}
 
 <style>

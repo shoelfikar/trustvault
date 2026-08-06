@@ -36,10 +36,11 @@ pub fn run() {
             let handle = app.handle().clone();
             // Settings before anything else: the lock screen needs the theme, and reading it
             // after the window paints is how a themed app flashes the wrong colours.
-            let loaded = commands::settings::load(&handle);
+            let (loaded, known) = commands::settings::load(&handle);
             let state = app.state::<AppState>();
             state.with(|inner| {
                 inner.settings = loaded;
+                inner.known_vaults = known;
                 inner.last_activity = state::now_ms();
             });
             // A relaunch must land on the lock screen, not on onboarding — D-40. Nothing but
@@ -86,6 +87,12 @@ pub fn run() {
             commands::strength::score_password,
             commands::generator::copy_generated,
             commands::totp::totp_preview,
+            // Multi-vault — ambient, because the switcher's whole job is to be usable while
+            // nothing is unlocked. None of the four returns anything from inside a vault.
+            commands::vault::list_vaults,
+            commands::vault::switch_vault,
+            commands::vault::forget_vault,
+            commands::vault::delete_vault,
             // Vault-class — require an unlocked vault, return no secret.
             commands::vault::unlock,
             commands::vault::lock,

@@ -313,6 +313,7 @@
           onselect={(id) => (selectedId = id)}
           ongenerate={() => (overlay = 'generator')}
           onadd={() => (overlay = 'add')}
+          onview={goto}
         />
       </div>
 

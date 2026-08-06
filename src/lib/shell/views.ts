@@ -85,15 +85,18 @@ const TYPE_LABELS: Record<ItemKind, string> = {
 export const typeLabel = (kind: ItemKind) => TYPE_LABELS[kind];
 
 /**
- * One glyph per item type.
+ * One glyph per item type, and now seven distinct ones.
  *
- * `ssh_key` and `api_key` both land on `terminal`, which makes two of the seven types
- * indistinguishable in the list — the shipped 30-glyph set has no third candidate and `key` is
- * already spent on `login`. Tracked in `docs/icon-gaps.md`; it is a glyph somebody has to draw.
+ * `ssh_key` and `api_key` both landed on `terminal` until 2026-08-06, which made two of the
+ * seven indistinguishable in the list — `docs/icon-gaps.md` called it the worst gap in the set.
+ * The fix is **one** new glyph rather than two: `MASTER.md` §8 assigns `terminal` to the SSH key
+ * itself, and the type it never assigned anything to is `api_key`, which is why the two collided.
+ * `code` is that glyph, and it names the world the credential belongs to exactly as §8's own
+ * `terminal` does.
  */
 export const TYPE_GLYPHS = {
   login: 'key',
-  api_key: 'terminal',
+  api_key: 'code',
   card: 'card',
   note: 'note',
   wifi: 'wifi',

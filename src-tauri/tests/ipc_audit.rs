@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 
 use trustvault_core::{FieldId, ItemId, ItemKind, KdfParams, Vault};
-use trustvault_lib::commands::{items, vault as vault_cmd};
+use trustvault_lib::commands::{import, items, vault as vault_cmd};
 use trustvault_lib::dto::MASK;
 use trustvault_lib::error::ErrorKind;
 use trustvault_lib::state::AppState;
@@ -164,12 +164,32 @@ fn every_command_is_documented_and_every_documented_command_exists() {
 fn every_command_names_its_arguments_in_snake_case() {
     const REQUIRED: &str = r#"#[tauri::command(rename_all = "snake_case")]"#;
 
-    for (module, source) in [
+    let modules = [
         ("items.rs", include_str!("../src/commands/items.rs")),
         ("vault.rs", include_str!("../src/commands/vault.rs")),
         ("settings.rs", include_str!("../src/commands/settings.rs")),
         ("strength.rs", include_str!("../src/commands/strength.rs")),
-    ] {
+        ("import.rs", include_str!("../src/commands/import.rs")),
+    ];
+
+    // `include_str!` needs a literal path, so the list above is written by hand — and a
+    // hand-written list of the files in a directory is exactly the thing that goes stale on
+    // the day someone adds one. This reads the directory to prove it has not: a new command
+    // module that nobody added above would otherwise be silently exempt from the whole check.
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands");
+    for entry in std::fs::read_dir(&directory).unwrap() {
+        let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+        if name == "mod.rs" {
+            continue;
+        }
+        assert!(
+            modules.iter().any(|(module, _)| *module == name),
+            "src/commands/{name} is not in this test's module list, so its commands are \
+             unchecked — add it beside the others"
+        );
+    }
+
+    for (module, source) in modules {
         for (number, line) in source.lines().enumerate() {
             let line = line.trim();
             if line.starts_with("#[tauri::command") {
@@ -295,6 +315,21 @@ fn every_vault_command_refuses_while_locked() {
     );
     assert_eq!(
         items::copy_field_inner(&state, item, secret)
+            .unwrap_err()
+            .kind,
+        ErrorKind::Locked
+    );
+    // The import pair refuses **before** it reads the file, which is why the path here does
+    // not exist: a locked vault that still parses a foreign vault into this process would
+    // have loaded plaintext nothing is going to lock.
+    assert_eq!(
+        import::import_preview_inner(&state, "/nonexistent/export.json")
+            .unwrap_err()
+            .kind,
+        ErrorKind::Locked
+    );
+    assert_eq!(
+        import::import_commit_inner(&state, "/nonexistent/export.json")
             .unwrap_err()
             .kind,
         ErrorKind::Locked

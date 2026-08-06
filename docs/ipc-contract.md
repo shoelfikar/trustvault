@@ -464,8 +464,8 @@ type ImportReport = {
   refusals: Refusal[];
 };
 
-import_preview({ path: string }): ImportReport   // planned
-import_commit({ path: string }): ImportReport   // planned
+import_preview({ path: string }): ImportReport
+import_commit({ path: string }): ImportReport
 ```
 
 R-29 is met only when **every field is either mapped or named in a refusal** — the documented

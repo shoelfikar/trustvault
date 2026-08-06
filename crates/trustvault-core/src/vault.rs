@@ -4,6 +4,7 @@
 //! step by step in that document because the *order* is what makes R-03 and R-05 hold — a
 //! correct-looking reordering breaks a security property with no visible symptom.
 
+use std::collections::BTreeSet;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -12,6 +13,7 @@ use zeroize::Zeroizing;
 
 use crate::aead::{self, NONCE_LEN, WRAP_LEN, random};
 use crate::format::{HEADER_LEN, Header, SALT_LEN, WRAP_AAD_LEN};
+use crate::import::{ImportReport, bitwarden};
 use crate::kdf::{self, KEY_LEN, KdfParams, Key};
 use crate::model::{AuditEntry, FieldId, Item, ItemId, ItemKind, VaultBody};
 use crate::recovery::RecoveryCode;
@@ -284,6 +286,77 @@ impl Vault {
         Some(self.body.items.remove(index))
     }
 
+    /// Reports what importing a Bitwarden export would do, and changes nothing — R-29, D-42.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotImportable`] if the file is not an unencrypted Bitwarden JSON export, or
+    /// [`Error::Io`] if it cannot be read.
+    pub fn preview_bitwarden(&self, path: impl AsRef<Path>) -> Result<ImportReport> {
+        let json = read_import_file(path.as_ref())?;
+        let mut parsed = bitwarden::parse(&json)?;
+        self.record_tag_delta(&parsed.items, &mut parsed.report);
+        Ok(parsed.report)
+    }
+
+    /// Imports a Bitwarden export as **one transaction** — R-29, D-42.
+    ///
+    /// It lands whole or leaves the vault untouched: every item is built before the first one
+    /// is added, so a malformed entry two thirds of the way through a 400-item export cannot
+    /// produce a half-imported vault nobody can reason about.
+    ///
+    /// The file is read once, into a buffer that is zeroized when this returns, and **no copy
+    /// of it is written anywhere** — no backup, no temp file, no log line. That is half of
+    /// R-29 and the easy half to lose to a debugging aid.
+    ///
+    /// Deliberately re-reads and re-parses rather than taking a preview's result: holding one
+    /// would keep a full plaintext copy of a foreign vault alive for as long as the user reads
+    /// the preview, outside the vault and so outside everything that locks
+    /// (`docs/ipc-contract.md` §6.8). The consequence is a real race — a file edited between
+    /// the two calls imports as it is now, not as previewed — which is why this returns a
+    /// report of its own and why that one is authoritative.
+    ///
+    /// # Errors
+    ///
+    /// As [`Vault::preview_bitwarden`].
+    pub fn import_bitwarden(&mut self, path: impl AsRef<Path>) -> Result<ImportReport> {
+        let json = read_import_file(path.as_ref())?;
+        let mut parsed = bitwarden::parse(&json)?;
+        self.record_tag_delta(&parsed.items, &mut parsed.report);
+
+        self.body.items.append(&mut parsed.items);
+        self.body.touch();
+        Ok(parsed.report)
+    }
+
+    /// Fills in which tags an import would introduce and which it would land on.
+    ///
+    /// The merge itself needs no code — a tag is its own string, so importing `Work` into a
+    /// vault that has `Work` produces one tag and not two. What the user cannot see without
+    /// being told is *which* of the two happened, and a folder quietly joining an existing tag
+    /// is the surprising one.
+    fn record_tag_delta(&self, items: &[Item], report: &mut ImportReport) {
+        let existing: BTreeSet<&str> = self
+            .body
+            .items
+            .iter()
+            .flat_map(|item| item.tags.iter())
+            .map(String::as_str)
+            .collect();
+
+        let (mut created, mut merged) = (BTreeSet::new(), BTreeSet::new());
+        for tag in items.iter().flat_map(|item| item.tags.iter()) {
+            if existing.contains(tag.as_str()) {
+                merged.insert(tag.clone());
+            } else {
+                created.insert(tag.clone());
+            }
+        }
+
+        report.tags_created = created.into_iter().collect();
+        report.tags_merged = merged.into_iter().collect();
+    }
+
     /// Returns **one** secret field's value, recording the reveal if `audit` is on.
     ///
     /// This is the only sanctioned way plaintext leaves the vault a field at a time (R-10,
@@ -464,6 +537,18 @@ fn temp_path(destination: &Path) -> Result<PathBuf> {
     let suffix = random::<4>()?;
     let suffix: String = suffix.iter().map(|byte| format!("{byte:02x}")).collect();
     Ok(directory.join(format!(".{name}.tmp-{suffix}")))
+}
+
+/// Reads a file offered for import into a buffer that is zeroized when it is dropped — R-29.
+///
+/// The bytes and the string are both wrapped, because the conversion between them allocates and
+/// the intermediate would otherwise be a full plaintext copy of a foreign vault sitting in a
+/// heap nothing wipes. Nothing else in this function may touch the contents: no logging, no
+/// backup, no temp file.
+fn read_import_file(path: &Path) -> Result<Zeroizing<String>> {
+    let bytes = Zeroizing::new(fs::read(path)?);
+    let text = core::str::from_utf8(&bytes).map_err(|_| Error::NotImportable)?;
+    Ok(Zeroizing::new(text.to_owned()))
 }
 
 #[cfg(test)]

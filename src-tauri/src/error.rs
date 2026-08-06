@@ -28,6 +28,8 @@ pub enum ErrorKind {
     NoSuchField,
     /// The field is not marked secret, so there is nothing to reveal.
     NotSecret,
+    /// The TOTP seed will not decode, or carries parameters this build cannot generate.
+    MalformedTotpSecret,
     /// The system clipboard refused the write.
     Clipboard,
     /// The file offered for import is not an unencrypted Bitwarden JSON export.
@@ -71,6 +73,12 @@ impl IpcError {
             ErrorKind::NoSuchItem => "That item no longer exists.",
             ErrorKind::NoSuchField => "That field no longer exists.",
             ErrorKind::NotSecret => "That field is not hidden, so there is nothing to reveal.",
+            // Said while the user is still looking at the field, which is the only moment it
+            // can be acted on. It names both shapes we accept, because the commonest cause is
+            // a paste of the wrong half of a setup page.
+            ErrorKind::MalformedTotpSecret => {
+                "That is not a valid 2FA secret. Paste the base32 key or the whole otpauth:// link."
+            }
             ErrorKind::Clipboard => "Could not write to the clipboard.",
             // The only error whose cause the user can do something about by going back to the
             // other application, so it says which application and which export.
@@ -105,6 +113,7 @@ impl From<CoreError> for IpcError {
             CoreError::NoSuchItem => ErrorKind::NoSuchItem,
             CoreError::NoSuchField => ErrorKind::NoSuchField,
             CoreError::NotSecret => ErrorKind::NotSecret,
+            CoreError::MalformedTotpSecret => ErrorKind::MalformedTotpSecret,
             CoreError::NotImportable => ErrorKind::NotImportable,
             CoreError::Io(_) => ErrorKind::Io,
             // Encode, Entropy and KdfParams are bugs or a broken machine, not user errors,

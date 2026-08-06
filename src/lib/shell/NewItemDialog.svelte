@@ -18,6 +18,7 @@
   import Segmented from '../components/Segmented.svelte';
   import StrengthMeter from '../components/StrengthMeter.svelte';
   import Toggle from '../components/Toggle.svelte';
+  import TotpPreview from '../components/TotpPreview.svelte';
   import {
     ALL_SETS,
     addItem,
@@ -128,6 +129,9 @@
       error = asIpcError(thrown).message;
     }
   }
+
+  /** The seed as typed, which `TotpPreview` both renders a code from and validates — R-20. */
+  const seed = $derived(totpField ? (values[totpField.index] ?? '') : '');
 
   const toggleTag = (tag: string) =>
     (chosen = chosen.includes(tag) ? chosen.filter((one) => one !== tag) : [...chosen, tag]);
@@ -318,9 +322,17 @@
               />
             </div>
           </div>
-          <p class="hint">
-            Paste the secret first — the live 6-digit preview arrives with TOTP support.
-          </p>
+          <!--
+            The prototype draws a "Scan QR on screen" button beside this field. It is not here,
+            and that is D-55 rather than an omission: reading a QR code off the screen needs
+            screen capture, which v1 does not ask for and which is a permission this app would
+            rather never hold. A button that opened nothing is the same class of false promise
+            as the "Copy & autofill" D-52 removed one screen over.
+          -->
+          <TotpPreview
+            {seed}
+            hint="Paste the secret key or the whole otpauth:// link. A live code appears here so you can check it against the site before saving."
+          />
         </div>
       {/if}
     {/if}

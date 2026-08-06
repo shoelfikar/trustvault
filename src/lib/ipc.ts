@@ -173,6 +173,12 @@ export type ErrorKind =
   | 'no_such_field'
   | 'not_secret'
   | 'clipboard'
+  // The Phase 3 kinds (§4). All three are decided **before** any key material or vault content
+  // is involved, which is the whole of why they are safe to distinguish while `unreadable`
+  // is not. `not_importable` was missing from this union until 2026-08-06 — the host has
+  // returned it since the importer landed, and this side would have narrowed it to `internal`.
+  | 'not_importable'
+  | 'malformed_totp_secret'
   | 'io'
   | 'internal';
 
@@ -267,6 +273,29 @@ export const calibrateKdf = () => call<KdfSummary>('calibrate_kdf');
 export const copyGenerated = (password: string) =>
   call<{ clearsAt: number }>('copy_generated', { password });
 
+/**
+ * One code and what the countdown ring needs — §5, §6.6.
+ *
+ * `expiresAt` is the **step** boundary, not "now plus the period": every authenticator in the
+ * world rolls over at the same instant, and a ring that started when the pane opened would
+ * disagree with the phone lying beside the keyboard.
+ */
+export interface TotpCode {
+  code: string;
+  expiresAt: number;
+  period: number;
+  digits: number;
+}
+
+/**
+ * One code from a seed the user is still typing — §5, R-20.
+ *
+ * Ambient because there is no item yet. It doubles as the seed's validator, which is the point
+ * of having it: a base32 string that will not decode is caught while the field is on screen,
+ * rather than a month later at a login prompt with the phone already wiped.
+ */
+export const totpPreview = (secret: string) => call<TotpCode>('totp_preview', { secret });
+
 export const getSettings = () => call<Settings>('get_settings');
 
 export const setSettings = (settings: Settings) => call<Settings>('set_settings', { settings });
@@ -328,6 +357,19 @@ export const updateItem = (
  * guards against is a mis-click, and the caller is the only user. The host does not re-check.
  */
 export const deleteItem = (itemId: string) => call<void>('delete_item', { itemId });
+
+/**
+ * The current code for one item — §6.6, R-20, D-45.
+ *
+ * **Not sanctioned, and not a way to read the seed.** The seed is a `secret: true` field and
+ * comes out, if ever, through `revealField` like any other; what crosses here is a code, which
+ * D-45 exempts because it is not the credential, it is single-use, and the protocol's own
+ * operation is to type it into somebody else's form.
+ *
+ * One item at a time, the selected one. There is deliberately no batched form and no code in
+ * `listItems`: a list of live codes is a list of secrets on a refresh timer.
+ */
+export const totpCode = (itemId: string) => call<TotpCode>('totp_code', { itemId });
 
 /* ---- Sanctioned — §7 ----------------------------------------------------- */
 /* Exactly four. A fifth entry in this group is a decision, not a patch.       */

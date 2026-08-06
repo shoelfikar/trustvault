@@ -90,6 +90,17 @@ const FIELDS = [
     value: null,
     mask: '••••••••••••',
   },
+  // The seed the detail pane's one-time code row is drawn from. It is `kind: 'otp'` and
+  // elided like any other secret — the pane reads the kind to know a code exists, never the
+  // value, which is the whole shape §6.6 asks for.
+  {
+    id: 'f5',
+    label: '2FA secret',
+    kind: 'otp',
+    secret: true,
+    value: null,
+    mask: '••••••••••••',
+  },
 ];
 
 const SETTINGS = {
@@ -127,6 +138,16 @@ const SCENARIOS = {
   palette: { status: UNLOCKED, drive: `key('k', { ctrlKey: true })` },
   generator: { status: UNLOCKED, drive: `key('g', { ctrlKey: true })` },
   newItem: { status: UNLOCKED, drive: `key('n', { ctrlKey: true })` },
+  // The Add dialog with its 2FA seed filled in, so the live preview strip is in the baseline
+  // rather than only in the code. It is a separate scenario and not a change to `newItem`,
+  // because the empty dialog is the shot that shows what the form looks like before anyone
+  // touches it — and that is the one most likely to regress unnoticed.
+  newItemTotp: {
+    status: UNLOCKED,
+    drive: `key('n', { ctrlKey: true }); await sleep(120);
+            click('[role="switch"][aria-label="Save 2FA secret"]'); await sleep(120);
+            fill('#new-totp', 'GEZDGNBVGY3TQOJQ'); await sleep(600)`,
+  },
   editItem: { status: UNLOCKED, drive: `clickText('button', 'Edit')` },
   deleteItem: { status: UNLOCKED, drive: `click('[title="Delete item"]')` },
 };
@@ -179,6 +200,11 @@ function respond(cmd, args) {
     case 'generate_password':
       return { password: 'k4Vq-7pXm-2Rtz-9Bhw', score: 4, label: 'Excellent', crack_time: 'centuries' };
     case 'copy_generated': return { clears_at: Date.now() + 12000 };
+    // Fixed, for the reason generate_password is: the real code changes every 30 seconds and
+    // a shot that never matches itself cannot become a baseline. The 22 seconds left is the
+    // prototype's own figure, so the ring is drawn at the fraction the design shows.
+    case 'totp_code': case 'totp_preview':
+      return { code: '418209', expires_at: Date.now() + 22000, period: 30, digits: 6 };
     case 'calibrate_kdf': return { m_cost: 262144, t_cost: 3, p_cost: 1 };
     case 'default_vault_path': return '/home/shoel/Documents/personal.tvault';
     case 'lock': case 'unlock': return null;
@@ -227,6 +253,16 @@ document.documentElement.dataset.theme = ${JSON.stringify(theme)};
       .find((el) => el.textContent.trim().includes(text))?.click();
   const key = (k, init = {}) =>
     window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, ...init }));
+  // Typing, for the surfaces that only appear once a field has something in it. The value is
+  // set and an input event dispatched, which is what Svelte's bind:value listens for --
+  // assigning .value alone updates the DOM and tells the component nothing.
+  // (No backticks in this block: it lives inside the template literal that builds the page.)
+  const fill = (selector, value) => {
+    const el = document.querySelector(selector);
+    if (!el) return;
+    el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  };
 
   // Let Svelte mount and the first commands resolve, then drive.
   await sleep(250);

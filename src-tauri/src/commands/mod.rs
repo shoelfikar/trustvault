@@ -15,6 +15,7 @@ pub mod items;
 pub mod search;
 pub mod settings;
 pub mod strength;
+pub mod totp;
 pub mod vault;
 
 use crate::error::{ErrorKind, IpcError, IpcResult};

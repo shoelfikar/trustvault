@@ -91,6 +91,17 @@ same keystrokes and would swallow the first letter of every shortcut a later pha
 | 15 | Vault switcher | ↑/↓ between vaults, Enter switches, Esc closes — R-22 | [ ] |
 | 16 | Settings | Every control reachable in visual order; the segmented controls on ←/→; **UI scale changes do not move focus** — R-21 | [ ] |
 | 17 | Watchtower | The findings list is a list: ↑/↓ and Enter to the offending item | [ ] |
+| 18 | Edit-item dialog | Every field row Tab-reachable in display order; **Replace** on a secret row reachable without hover, and Tab from it lands in the input it just opened; Remove and Add field reachable — R-17 | [ ] |
+
+Row 18 was added 2026-08-06 with the dialog itself, and it is the reason this table's count is now
+**18 against the gate's 15**: the prototype draws no edit surface at all, so the surface exists
+because R-17 needs one and not because the design has a picture of it. That widens the
+reconciliation this section already owed rather than changing its shape — the source is right about
+what exists, and the gate line needs a list rather than a total.
+
+Row 18's "Tab from Replace lands in the input it just opened" is the finding waiting to happen:
+pressing Replace swaps a disabled input for an editable one in the same position, and the browser
+has no reason to move focus there on its own.
 
 Row 13 is a requirement, not a preference. A destructive dialog that opens with the destructive
 button focused converts the Enter keypress that opened it into a confirmation, which is how a

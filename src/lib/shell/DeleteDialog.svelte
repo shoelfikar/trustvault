@@ -7,40 +7,64 @@
    * thing standing between a mis-aimed click and a file whose contents cannot be reconstructed
    * from anywhere.
    *
-   * Neither action fires yet. `delete_item` and vault deletion are Phase 3 commands, so the
-   * confirm button carries the reason rather than a handler.
+   * **Item deletion fires; vault deletion does not.** `delete_item` landed 2026-08-06;
+   * `delete_vault` is still `// planned` in the contract, so that half keeps the reason in its
+   * `title` instead of a handler.
    */
   import Button from '../components/Button.svelte';
   import Dialog from '../components/Dialog.svelte';
   import Icon from '../icons/Icon.svelte';
+  import { asIpcError, deleteItem } from '../ipc';
 
   interface Props {
     /** `item` names the item; `vault` demands the name typed back. */
     target: 'item' | 'vault';
     name: string;
+    /** Which item to delete. Required when `target` is `item`. */
+    itemId?: string | null;
     itemCount?: number;
     onclose: () => void;
+    ondeleted?: () => void;
   }
 
-  const { target, name, itemCount = 0, onclose }: Props = $props();
+  const { target, name, itemId = null, itemCount = 0, onclose, ondeleted }: Props = $props();
 
   let typed = $state('');
+  let deleting = $state(false);
+  let error = $state('');
 
   const confirmed = $derived(target === 'item' || typed.trim() === name);
 
-  /**
-   * No command exists behind either action yet, so the button never enables.
-   *
-   * Written as a named constant rather than a hard-coded `disabled` so that landing
-   * `delete_item` is a one-line change here and the naming gate above is already wired.
-   */
-  const CAN_DELETE = false;
+  /** `delete_vault` does not exist yet; `delete_item` does. */
+  const canDelete = $derived(target === 'item' ? Boolean(itemId) : false);
 
+  /**
+   * The copy says what actually happens.
+   *
+   * It said "It goes to Trash for 30 days first", which was written against a Trash view that
+   * holds nothing and a command that does not have one: `delete_item` removes the item and
+   * saves, and the removed value is zeroized on drop. A password manager promising a recovery
+   * window it does not have is the worst kind of wrong copy — it is the sentence someone reads
+   * right before they click, and it is the reason they click.
+   */
   const body = $derived(
     target === 'item'
-      ? `“${name}” and every field on it are removed from this vault. It goes to Trash for 30 days first.`
+      ? `“${name}” and every field on it are removed from this vault straight away. There is no Trash and no undo.`
       : `${itemCount} items will be gone for good. The file is deleted from this computer and there is no copy anywhere else.`,
   );
+
+  async function confirm() {
+    if (!confirmed || !canDelete || !itemId || deleting) return;
+    deleting = true;
+    error = '';
+    try {
+      await deleteItem(itemId);
+      ondeleted?.();
+    } catch (thrown) {
+      error = asIpcError(thrown).message;
+      deleting = false;
+    }
+  }
 </script>
 
 <Dialog width={420} bare {onclose}>
@@ -60,14 +84,23 @@
       </div>
     {/if}
 
+    {#if error}
+      <p class="error" role="alert"><Icon name="alert" size={13} />{error}</p>
+    {/if}
+
     <div class="actions">
       <Button onclick={onclose}>Cancel</Button>
       <Button
         variant="primary"
-        disabled={!confirmed || !CAN_DELETE}
-        title="Deletion arrives with the mutation commands"
+        disabled={!confirmed || !canDelete || deleting}
+        title={target === 'vault' ? 'Vault deletion arrives with delete_vault' : undefined}
+        onclick={() => void confirm()}
       >
-        {target === 'item' ? 'Delete item' : 'Delete vault'}
+        {#if deleting}
+          Deleting…
+        {:else}
+          {target === 'item' ? 'Delete item' : 'Delete vault'}
+        {/if}
       </Button>
     </div>
   </div>
@@ -136,5 +169,15 @@
     gap: var(--space-3);
     justify-content: flex-end;
     margin-top: var(--space-6);
+  }
+
+  /* Status is never colour alone — §2. The icon and the sentence carry it. */
+  .error {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: var(--space-5);
+    font-size: var(--text-sm);
+    color: var(--danger);
   }
 </style>

@@ -127,6 +127,8 @@ const SCENARIOS = {
   palette: { status: UNLOCKED, drive: `key('k', { ctrlKey: true })` },
   generator: { status: UNLOCKED, drive: `key('g', { ctrlKey: true })` },
   newItem: { status: UNLOCKED, drive: `key('n', { ctrlKey: true })` },
+  editItem: { status: UNLOCKED, drive: `clickText('button', 'Edit')` },
+  deleteItem: { status: UNLOCKED, drive: `click('[title="Delete item"]')` },
 };
 
 /* ---- The injected page ---------------------------------------------------- */
@@ -165,6 +167,12 @@ function respond(cmd, args) {
     case 'calibrate_kdf': return { m_cost: 262144, t_cost: 3, p_cost: 1 };
     case 'default_vault_path': return '/home/shoel/Documents/personal.tvault';
     case 'lock': case 'unlock': return null;
+    // The mutation commands are answered so a screenshot run cannot be the thing that writes
+    // to a vault, and so an accidental call is a no-op rather than an unhandled warning. The
+    // list they return to is static, which is why nothing here changes ITEMS.
+    // (No backticks in this block: it lives inside the template literal that builds the page.)
+    case 'add_item': return { item_id: ITEMS[0].id };
+    case 'update_item': case 'delete_item': return null;
     case 'create_vault': case 'unlock_recovery_kit':
       return { recovery_code: 'K7QX-2MRE-9WVT-4HDP-6SNA-3JFB' };
     default:

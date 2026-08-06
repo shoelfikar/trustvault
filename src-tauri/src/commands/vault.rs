@@ -10,7 +10,7 @@ use crate::error::{ErrorKind, IpcError, IpcResult};
 use crate::state::{AppState, LockReason, now_ms};
 
 /// **Ambient.** Build and format information, for the About surface and bug reports.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn build_info() -> BuildInfo {
     BuildInfo {
         version: env!("CARGO_PKG_VERSION"),
@@ -26,7 +26,7 @@ pub fn build_info() -> BuildInfo {
 /// plugin is widened attack surface in a process that holds decrypted secrets. R-08 asks for
 /// "name & location", which a resolved default and an editable path satisfies. Revisit with a
 /// decision log entry if the typed path proves to be the thing users get wrong.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn default_vault_path(app: AppHandle, name: String) -> String {
     // A filename, not a path: everything that could traverse or escape is dropped rather than
     // escaped, because the safe subset is small and obvious and the unsafe one is not.
@@ -56,7 +56,7 @@ pub fn default_vault_path(app: AppHandle, name: String) -> String {
 }
 
 /// **Ambient.** Open, locked, or nothing chosen — the shape the whole frontend routes on.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn vault_status(state: State<'_, AppState>) -> VaultStatus {
     state.status()
 }
@@ -66,7 +66,7 @@ pub fn vault_status(state: State<'_, AppState>) -> VaultStatus {
 /// Takes seconds and holds the thread, which is why onboarding shows progress while it runs.
 /// The measured wall-clock time is not returned: `KdfParams::calibrate` does not expose it,
 /// and timing this command from JS would measure the IPC boundary rather than the KDF.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn calibrate_kdf() -> KdfSummary {
     let params = KdfParams::calibrate();
     KdfSummary {
@@ -81,7 +81,7 @@ pub fn calibrate_kdf() -> KdfSummary {
 /// The recovery code is the least avoidable secret in the product: it exists to be read by a
 /// human off a screen and written down, so it must cross. There is no command to fetch it
 /// again — the webview renders it on step 3 and drops it.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn create_vault(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -148,7 +148,7 @@ pub struct RecoveryKit {
 /// length check on the password, not a cached-failure short-circuit. The core spends equal
 /// work on a wrong password and a corrupt file (R-03), and any check added here that fails
 /// faster than the KDF hands that property back.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn unlock(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -185,7 +185,7 @@ pub fn unlock_inner(state: &AppState, path: String, password: String) -> IpcResu
 /// The new kit is saved before it is returned. If the save fails the caller gets an error and
 /// the old kit still works, which is the right way for this to fail — the alternative is a
 /// user holding a code that opens nothing.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn unlock_recovery_kit(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -231,7 +231,7 @@ pub fn unlock_recovery_kit_inner(
 ///
 /// Idempotent: locking a locked vault succeeds and does nothing. The failure mode of a lock
 /// command that can error is a user hammering it during a panic.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn lock(app: AppHandle, state: State<'_, AppState>) -> IpcResult<()> {
     lock_now(&app, &state, LockReason::Manual);
     Ok(())

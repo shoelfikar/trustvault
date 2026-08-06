@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 
 use trustvault_core::{FieldId, ItemId, ItemKind, KdfParams, Vault};
-use trustvault_lib::commands::{items, vault as vault_cmd};
+use trustvault_lib::commands::{import, items, vault as vault_cmd};
 use trustvault_lib::dto::MASK;
 use trustvault_lib::error::ErrorKind;
 use trustvault_lib::state::AppState;
@@ -142,6 +142,70 @@ fn every_command_is_documented_and_every_documented_command_exists() {
     );
 }
 
+/// Every command names its arguments in `snake_case`, which is the wire format the contract
+/// documents.
+///
+/// Found 2026-08-06 by reading the built binary rather than by any test: Tauri v2's
+/// `#[tauri::command]` renames argument keys to **camelCase** by default, and
+/// `tauri::ipc::CommandItem` looks that key up exactly, with no fallback. So the host was
+/// asking for `itemId` while `src/lib/ipc.ts` — which converts to snake_case on purpose, so
+/// the wire format is exactly what `docs/ipc-contract.md` §6 prints — sent `item_id`. Every
+/// command taking a multi-word argument was unreachable from the webview: `get_item`,
+/// `reveal_field`, `copy_field`.
+///
+/// It survived two phases because nothing had exercised one. The `_inner` split that lets this
+/// harness drive real command bodies also skips the argument decoding, and until `add_item`
+/// landed the item list was always empty, so no id was ever passed from the frontend.
+///
+/// The attribute is asserted on **every** command rather than only the ones that need it
+/// today: what makes the bug expensive is that adding a two-word argument reintroduces it
+/// silently, and a uniform rule has no such edge.
+#[test]
+fn every_command_names_its_arguments_in_snake_case() {
+    const REQUIRED: &str = r#"#[tauri::command(rename_all = "snake_case")]"#;
+
+    let modules = [
+        ("items.rs", include_str!("../src/commands/items.rs")),
+        ("vault.rs", include_str!("../src/commands/vault.rs")),
+        ("settings.rs", include_str!("../src/commands/settings.rs")),
+        ("strength.rs", include_str!("../src/commands/strength.rs")),
+        ("import.rs", include_str!("../src/commands/import.rs")),
+    ];
+
+    // `include_str!` needs a literal path, so the list above is written by hand — and a
+    // hand-written list of the files in a directory is exactly the thing that goes stale on
+    // the day someone adds one. This reads the directory to prove it has not: a new command
+    // module that nobody added above would otherwise be silently exempt from the whole check.
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands");
+    for entry in std::fs::read_dir(&directory).unwrap() {
+        let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+        if name == "mod.rs" {
+            continue;
+        }
+        assert!(
+            modules.iter().any(|(module, _)| *module == name),
+            "src/commands/{name} is not in this test's module list, so its commands are \
+             unchecked — add it beside the others"
+        );
+    }
+
+    for (module, source) in modules {
+        for (number, line) in source.lines().enumerate() {
+            let line = line.trim();
+            if line.starts_with("#[tauri::command") {
+                assert_eq!(
+                    line,
+                    REQUIRED,
+                    "src/commands/{module}:{} declares a command without \
+                     `rename_all = \"snake_case\"` — Tauri v2 would then look its arguments up \
+                     in camelCase and every call from src/lib/ipc.ts would miss",
+                    number + 1
+                );
+            }
+        }
+    }
+}
+
 /// Check 3 — exactly four commands may return a secret, and they are the named four.
 ///
 /// The count moved from three to four on 2026-08-05, which is the one change this test exists
@@ -251,6 +315,21 @@ fn every_vault_command_refuses_while_locked() {
     );
     assert_eq!(
         items::copy_field_inner(&state, item, secret)
+            .unwrap_err()
+            .kind,
+        ErrorKind::Locked
+    );
+    // The import pair refuses **before** it reads the file, which is why the path here does
+    // not exist: a locked vault that still parses a foreign vault into this process would
+    // have loaded plaintext nothing is going to lock.
+    assert_eq!(
+        import::import_preview_inner(&state, "/nonexistent/export.json")
+            .unwrap_err()
+            .kind,
+        ErrorKind::Locked
+    );
+    assert_eq!(
+        import::import_commit_inner(&state, "/nonexistent/export.json")
             .unwrap_err()
             .kind,
         ErrorKind::Locked

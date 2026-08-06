@@ -32,7 +32,7 @@ pub struct Strength {
 /// penalizes a password built out of words the user is surrounded by, and it cannot know what
 /// those are unless it is told. Passing them is what stops "PersonalVault2026" scoring well on
 /// a vault called Personal.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn score_password(password: String, inputs: Vec<String>) -> IpcResult<Strength> {
     Ok(score(&password, &inputs))
 }

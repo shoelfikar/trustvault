@@ -30,6 +30,8 @@ pub enum ErrorKind {
     NotSecret,
     /// The system clipboard refused the write.
     Clipboard,
+    /// The file offered for import is not an unencrypted Bitwarden JSON export.
+    NotImportable,
     /// Reading or writing the vault file failed.
     Io,
     /// A bug in this application or a broken machine.
@@ -70,6 +72,11 @@ impl IpcError {
             ErrorKind::NoSuchField => "That field no longer exists.",
             ErrorKind::NotSecret => "That field is not hidden, so there is nothing to reveal.",
             ErrorKind::Clipboard => "Could not write to the clipboard.",
+            // The only error whose cause the user can do something about by going back to the
+            // other application, so it says which application and which export.
+            ErrorKind::NotImportable => {
+                "That file is not an unencrypted Bitwarden JSON export. In Bitwarden, choose                  Export vault and the .json format, without a password."
+            }
             ErrorKind::Io => "Could not read or write the vault file.",
             ErrorKind::Internal => "Something went wrong inside TrustVault.",
         };
@@ -98,6 +105,7 @@ impl From<CoreError> for IpcError {
             CoreError::NoSuchItem => ErrorKind::NoSuchItem,
             CoreError::NoSuchField => ErrorKind::NoSuchField,
             CoreError::NotSecret => ErrorKind::NotSecret,
+            CoreError::NotImportable => ErrorKind::NotImportable,
             CoreError::Io(_) => ErrorKind::Io,
             // Encode, Entropy and KdfParams are bugs or a broken machine, not user errors,
             // and none of them should reach a user with a distinguishing message.

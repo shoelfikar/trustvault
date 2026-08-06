@@ -88,7 +88,7 @@ fn persist(app: &AppHandle, settings: &Settings) {
 ///
 /// Ambient rather than vault-class on purpose: the lock screen needs the theme, and it runs
 /// before anything is unlocked.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn get_settings(state: State<'_, AppState>) -> Settings {
     state
         .with(|inner| inner.settings.clone())
@@ -99,7 +99,7 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
 ///
 /// Takes the whole struct rather than a patch. A patch shape needs every field optional, and
 /// an optional boolean is how a setting gets silently reset by a caller that omitted it.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn set_settings(
     app: AppHandle,
     state: State<'_, AppState>,

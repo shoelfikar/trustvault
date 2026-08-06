@@ -15,6 +15,9 @@ authors = ["Sulfikardi"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
+# The only dependency D-42 cost. A Bitwarden export is JSON and nothing else in the vault
+# format is — the body is CBOR (D-10) — so this crate is here for the importer alone.
+serde_json = "1"
 thiserror = "2"
 zeroize = { version = "1.9", features = ["derive"] }
 

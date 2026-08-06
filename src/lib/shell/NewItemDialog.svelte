@@ -1,12 +1,11 @@
 <script lang="ts">
   /**
-   * The New-item dialog — every field the prototype draws, per type.
+   * The New-item dialog — every field the prototype draws, per type, and now saving.
    *
-   * **Nothing here can be saved yet.** `add_item` is a Phase 3 command by the roadmap's own
-   * split, and Phase 2 deliberately shipped no mutation commands. The dialog is drawn in full
-   * because the shape of what an item *is* is a design decision that belongs with the rest of
-   * the design, and disabled at the one place it would lie — the Save button, which carries the
-   * reason.
+   * The form is built from `ITEM_FIELDS` rather than from a block of markup per type. That
+   * changed when `add_item` landed: markup describing an item and code building the payload
+   * are two statements of the same thing, and the first edit that touches only one of them is
+   * a field saved under the wrong label or, worse, a secret saved unmasked.
    *
    * The typed password is scored through `score_password` in the host, the same path onboarding
    * uses: zxcvbn's dictionaries are a few hundred kilobytes and S-01 budgets 800ms for cold
@@ -20,7 +19,15 @@
   import StrengthMeter from '../components/StrengthMeter.svelte';
   import Toggle from '../components/Toggle.svelte';
   import { ALL_SETS, generatePassword } from '../passwords';
-  import { scorePassword, type ItemKind, type Strength } from '../ipc';
+  import {
+    addItem,
+    asIpcError,
+    scorePassword,
+    type ItemKind,
+    type NewField,
+    type Strength,
+  } from '../ipc';
+  import { ITEM_FIELDS, TITLE_PLACEHOLDERS, passwordIndex, type FieldTemplate } from './itemFields';
   import { TYPE_GLYPHS, tagColour, typeLabel } from './views';
 
   interface Props {
@@ -29,21 +36,63 @@
     /** Tags already in the vault, offered as chips. */
     tags: string[];
     onclose: () => void;
+    /** The item landed in the vault; the shell reloads the list and selects it. */
+    onsaved: (itemId: string) => void;
   }
 
-  const { vaultName, vaultFile, tags, onclose }: Props = $props();
+  const { vaultName, vaultFile, tags, onclose, onsaved }: Props = $props();
 
   const KINDS: ItemKind[] = ['login', 'api_key', 'card', 'note', 'wifi', 'ssh_key', 'identity'];
 
+  /** A fixed choice starts on its first option; everything else starts empty. */
+  const blank = (of: ItemKind) => ITEM_FIELDS[of].map((field) => field.options?.[0] ?? '');
+
   let kind = $state<ItemKind>('login');
   let title = $state('');
-  let password = $state('');
+  let values = $state<string[]>(blank('login'));
   let revealed = $state(false);
   let totpOn = $state(false);
-  let totpSecret = $state('');
-  let environment = $state('Production');
   let chosen = $state<string[]>([]);
   let strength = $state<Strength | null>(null);
+  let saving = $state(false);
+  let error = $state('');
+
+  function pickKind(next: ItemKind) {
+    if (next === kind) return;
+    kind = next;
+    // Cleared rather than carried across. The types share labels ("Password" is on three of
+    // them) and a value that survived a type change would be a secret the user believes they
+    // discarded, sitting in a field they are no longer looking at.
+    values = blank(next);
+    revealed = false;
+    totpOn = false;
+    strength = null;
+    error = '';
+  }
+
+  const templates = $derived(ITEM_FIELDS[kind]);
+  const passwordAt = $derived(passwordIndex(kind));
+  const password = $derived(passwordAt >= 0 ? (values[passwordAt] ?? '') : '');
+
+  /**
+   * The visible fields, grouped into rows so an `inline` template shares a row with the one
+   * before it — the card's Expiry and CVV.
+   */
+  const rows = $derived.by(() => {
+    const out: { template: FieldTemplate; index: number }[][] = [];
+    templates.forEach((template, index) => {
+      if (template.behindTotpSwitch) return;
+      const last = out[out.length - 1];
+      if (template.inline && last) last.push({ template, index });
+      else out.push([{ template, index }]);
+    });
+    return out;
+  });
+
+  const totpField = $derived.by(() => {
+    const index = templates.findIndex((template) => template.behindTotpSwitch);
+    return index < 0 ? null : { template: templates[index]!, index };
+  });
 
   let scoreTimer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
@@ -60,22 +109,46 @@
     }, 180);
   });
 
-  const placeholder = $derived(
-    {
-      login: 'Tokopedia',
-      api_key: 'Anthropic API',
-      card: 'BCA Visa Platinum',
-      note: '2FA recovery codes',
-      wifi: 'Home Wi-Fi',
-      ssh_key: 'Production server',
-      identity: 'Passport',
-    }[kind],
-  );
-
   const toggleTag = (tag: string) =>
     (chosen = chosen.includes(tag) ? chosen.filter((one) => one !== tag) : [...chosen, tag]);
 
   const glyph = (candidate: ItemKind): IconName => TYPE_GLYPHS[candidate];
+
+  const canSave = $derived(title.trim().length > 0 && !saving);
+
+  async function save() {
+    if (!canSave) return;
+    saving = true;
+    error = '';
+
+    /*
+     * Empty fields are not sent.
+     *
+     * The alternative is an item whose detail pane is mostly blank rows, and a blank row is
+     * not information — it is a field the user declined to fill in, which the absence says
+     * better. Editing the item adds it back the moment there is something to put in it.
+     */
+    const fields: NewField[] = templates
+      .map((template, index) => ({ template, value: (values[index] ?? '').trim() }))
+      .filter(({ template, value }) => value !== '' && (!template.behindTotpSwitch || totpOn))
+      .map(({ template, value }) => ({
+        label: template.label,
+        kind: template.kind,
+        value,
+        secret: template.secret,
+        // Everything a template produces is one of the type's own — D-43. `custom` is stored,
+        // never inferred, and this is the one place the false is asserted rather than guessed.
+        custom: false,
+      }));
+
+    try {
+      const { itemId } = await addItem(kind, title.trim(), chosen, fields);
+      onsaved(itemId);
+    } catch (thrown) {
+      error = asIpcError(thrown).message;
+      saving = false;
+    }
+  }
 </script>
 
 <Dialog title="New item" icon="plus" meta={vaultName} width={560} maxHeight={720} {onclose}>
@@ -87,7 +160,7 @@
         class="chip"
         class:on={kind === candidate}
         aria-pressed={kind === candidate}
-        onclick={() => (kind = candidate)}
+        onclick={() => pickKind(candidate)}
       >
         <Icon name={glyph(candidate)} size={14} />
         {typeLabel(candidate)}
@@ -99,49 +172,79 @@
     <div class="control">
       <label for="new-title">Title</label>
       <!-- svelte-ignore a11y_autofocus -- the dialog exists to be filled in from the top. -->
-      <input id="new-title" bind:value={title} {placeholder} autofocus />
+      <input id="new-title" bind:value={title} placeholder={TITLE_PLACEHOLDERS[kind]} autofocus />
     </div>
 
-    {#if kind === 'login'}
-      <div class="control">
-        <label for="new-user">Username or email</label>
-        <input id="new-user" placeholder="budi.santoso@gmail.com" />
-      </div>
+    {#each rows as row, rowIndex (rowIndex)}
+      <div class:split={row.length > 1}>
+        {#each row as { template, index } (template.label)}
+          <div class="control" class:grow={row.length > 1 && index !== row[row.length - 1]?.index}>
+            {#if template.options}
+              <span class="label-as-text">{template.label}</span>
+              <Segmented
+                label={template.label}
+                options={template.options.map((option) => ({ value: option, label: option }))}
+                value={values[index] ?? ''}
+                onchange={(next) => (values[index] = next as string)}
+              />
+            {:else}
+              <label for="new-{index}">{template.label}</label>
 
-      <div class="control">
-        <label for="new-pass">Password</label>
-        <div class="composite">
-          <input
-            id="new-pass"
-            class="mono"
-            type={revealed ? 'text' : 'password'}
-            bind:value={password}
-          />
-          <IconButton
-            icon={revealed ? 'eye-off' : 'eye'}
-            label={revealed ? 'Hide password' : 'Reveal password'}
-            onclick={() => (revealed = !revealed)}
-          />
-          <Button
-            variant="ghost"
-            icon="refresh"
-            title="Generate a new password on this device"
-            onclick={() => {
-              password = generatePassword(20, ALL_SETS);
-              revealed = true;
-            }}
-          >
-            Generate
-          </Button>
-        </div>
-        <div class="meter"><StrengthMeter {strength} width="150px" /></div>
+              {#if template.multiline}
+                <textarea
+                  id="new-{index}"
+                  class:mono={template.mono}
+                  rows={template.kind === 'note' ? 5 : 3}
+                  spellcheck="false"
+                  placeholder={template.placeholder}
+                  bind:value={values[index]}></textarea>
+              {:else if index === passwordAt}
+                <div class="composite">
+                  <input
+                    id="new-{index}"
+                    class="mono"
+                    type={revealed ? 'text' : 'password'}
+                    bind:value={values[index]}
+                  />
+                  <IconButton
+                    icon={revealed ? 'eye-off' : 'eye'}
+                    label={revealed ? 'Hide password' : 'Reveal password'}
+                    onclick={() => (revealed = !revealed)}
+                  />
+                  <Button
+                    variant="ghost"
+                    icon="refresh"
+                    title="Generate a new password on this device"
+                    onclick={() => {
+                      values[index] = generatePassword(20, ALL_SETS);
+                      revealed = true;
+                    }}
+                  >
+                    Generate
+                  </Button>
+                </div>
+                <div class="meter"><StrengthMeter {strength} width="150px" /></div>
+              {:else}
+                <input
+                  id="new-{index}"
+                  class:mono={template.mono}
+                  type={template.secret ? 'password' : 'text'}
+                  placeholder={template.placeholder}
+                  spellcheck="false"
+                  bind:value={values[index]}
+                />
+              {/if}
+            {/if}
+          </div>
+        {/each}
       </div>
+    {/each}
 
-      <div class="control">
-        <label for="new-site">Website</label>
-        <input id="new-site" class="mono" placeholder="tokopedia.com" />
-      </div>
+    {#if kind === 'api_key'}
+      <p class="hint">Stored encrypted. Only the last 4 characters show in the list.</p>
+    {/if}
 
+    {#if totpField}
       <div class="switch">
         <Toggle label="Save 2FA secret" checked={totpOn} onchange={(next) => (totpOn = next)} />
         <div class="switch-text">
@@ -161,8 +264,8 @@
               <input
                 id="new-totp"
                 class="mono"
-                bind:value={totpSecret}
-                placeholder="JBSW Y3DP EHPK 3PXP or otpauth://…"
+                bind:value={values[totpField.index]}
+                placeholder={totpField.template.placeholder}
                 spellcheck="false"
               />
             </div>
@@ -172,104 +275,6 @@
           </p>
         </div>
       {/if}
-    {:else if kind === 'api_key'}
-      <div class="control">
-        <label for="new-token">API key / token</label>
-        <textarea
-          id="new-token"
-          class="mono"
-          rows="3"
-          spellcheck="false"
-          placeholder="sk-ant-api03-… or ghp_… — paste the token here"></textarea>
-        <p class="hint">Stored encrypted. Only the last 4 characters show in the list.</p>
-      </div>
-      <div class="split">
-        <div class="control grow">
-          <span class="label-as-text">Environment</span>
-          <Segmented
-            label="Environment"
-            options={[
-              { value: 'Production', label: 'Production' },
-              { value: 'Staging', label: 'Staging' },
-              { value: 'Local', label: 'Local' },
-            ]}
-            value={environment}
-            onchange={(next) => (environment = next as string)}
-          />
-        </div>
-        <div class="control narrow">
-          <label for="new-exp">Expiry (optional)</label>
-          <input id="new-exp" class="mono" placeholder="31 Dec 2026" />
-        </div>
-      </div>
-      <div class="control">
-        <label for="new-docs">Docs / console URL</label>
-        <input id="new-docs" class="mono" placeholder="console.anthropic.com" />
-      </div>
-    {:else if kind === 'card'}
-      <div class="control">
-        <label for="new-holder">Name on card</label>
-        <input id="new-holder" placeholder="BUDI SANTOSO" />
-      </div>
-      <div class="control">
-        <label for="new-number">Card number</label>
-        <input id="new-number" class="mono" placeholder="4811 7742 9930 4417" />
-      </div>
-      <div class="split">
-        <div class="control grow">
-          <label for="new-card-exp">Expiry</label>
-          <input id="new-card-exp" class="mono" placeholder="08 / 29" />
-        </div>
-        <div class="control narrow">
-          <label for="new-cvv">CVV</label>
-          <input id="new-cvv" class="mono" type="password" placeholder="•••" />
-        </div>
-      </div>
-    {:else if kind === 'note'}
-      <div class="control">
-        <label for="new-note">Note</label>
-        <textarea id="new-note" rows="5" placeholder="This note is encrypted just like a password."
-        ></textarea>
-      </div>
-    {:else if kind === 'wifi'}
-      <div class="control">
-        <label for="new-ssid">Network name (SSID)</label>
-        <input id="new-ssid" placeholder="Santoso-5G" />
-      </div>
-      <div class="control">
-        <label for="new-wifi-pass">Password</label>
-        <input id="new-wifi-pass" class="mono" type="password" />
-      </div>
-      <div class="control">
-        <label for="new-sec">Security</label>
-        <input id="new-sec" placeholder="WPA3-Personal" />
-      </div>
-    {:else if kind === 'ssh_key'}
-      <div class="control">
-        <label for="new-host">Host</label>
-        <input id="new-host" class="mono" placeholder="10.4.1.22" />
-      </div>
-      <div class="control">
-        <label for="new-ssh-user">User</label>
-        <input id="new-ssh-user" class="mono" placeholder="deploy" />
-      </div>
-      <div class="control">
-        <label for="new-passphrase">Passphrase</label>
-        <input id="new-passphrase" class="mono" type="password" />
-      </div>
-    {:else}
-      <div class="control">
-        <label for="new-full">Full name</label>
-        <input id="new-full" placeholder="Budi Santoso" />
-      </div>
-      <div class="control">
-        <label for="new-email">Email</label>
-        <input id="new-email" class="mono" placeholder="budi@example.com" />
-      </div>
-      <div class="control">
-        <label for="new-phone">Phone</label>
-        <input id="new-phone" class="mono" placeholder="+62 812 8891 4402" />
-      </div>
     {/if}
 
     {#if tags.length}
@@ -290,13 +295,22 @@
         </div>
       </div>
     {/if}
+
+    {#if error}
+      <p class="error" role="alert"><Icon name="alert" size={13} />{error}</p>
+    {/if}
   </div>
 
   {#snippet footer()}
     <span class="stored">Stored encrypted in {vaultFile}</span>
     <Button onclick={onclose}>Cancel</Button>
-    <Button variant="primary" disabled title="Saving arrives with the mutation commands">
-      Save item
+    <Button
+      variant="primary"
+      disabled={!canSave}
+      title={title.trim() ? undefined : 'An item needs a title'}
+      onclick={() => void save()}
+    >
+      {saving ? 'Saving…' : 'Save item'}
     </Button>
   {/snippet}
 </Dialog>
@@ -454,11 +468,12 @@
     display: flex;
     gap: var(--space-4);
   }
-  .grow {
-    flex: 1;
-  }
-  .narrow {
+  .split .control {
     width: 150px;
+  }
+  .split .control.grow {
+    flex: 1;
+    width: auto;
   }
 
   .switch {
@@ -490,6 +505,15 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--bg-raised);
+  }
+
+  /* Status is never colour alone — §2. The icon and the sentence carry it. */
+  .error {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--text-sm);
+    color: var(--danger);
   }
 
   .stored {

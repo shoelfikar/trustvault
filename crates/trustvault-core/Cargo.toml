@@ -16,15 +16,13 @@ ciborium.workspace = true
 data-encoding.workspace = true
 getrandom.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
-# Tests only. The vault body itself is CBOR (decision D-10) — JSON is used here purely to
-# assert that the serde field names, which are part of the on-disk format, stay stable.
-serde_json = "1"
 # R-01 asks for a round-trip over 10 000 generated vaults; generating them by hand is how
 # the interesting shapes get missed.
 proptest = "1.11"

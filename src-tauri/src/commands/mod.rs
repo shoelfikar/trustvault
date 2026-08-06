@@ -8,6 +8,7 @@
 //! written above it. There are **three** sanctioned commands, the ones that may return
 //! plaintext, and adding a fourth is a decision log entry rather than a patch.
 
+pub mod import;
 pub mod items;
 pub mod settings;
 pub mod strength;

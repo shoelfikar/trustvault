@@ -326,7 +326,7 @@ type NewField = {
   custom: boolean;        // D-43
 };
 
-add_item({ kind: ItemSummary["kind"]; title: string; tags: string[]; fields: NewField[] }): { item_id: Uuid }   // planned
+add_item({ kind: ItemSummary["kind"]; title: string; tags: string[]; fields: NewField[] }): { item_id: Uuid }
 ```
 
 Returns the identifier and nothing else — the caller re-reads through `get_item`, which keeps one
@@ -344,8 +344,8 @@ type EditField = {
   custom: boolean;
 };
 
-update_item({ item_id: Uuid; title: string; tags: string[]; favourite: boolean; fields: EditField[] }): void   // planned
-delete_item({ item_id: Uuid }): void   // planned
+update_item({ item_id: Uuid; title: string; tags: string[]; favourite: boolean; fields: EditField[] }): void
+delete_item({ item_id: Uuid }): void
 ```
 
 **`value: null` means "leave it alone", and it is the single most load-bearing detail in this

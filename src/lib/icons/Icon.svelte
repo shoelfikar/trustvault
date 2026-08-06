@@ -2,8 +2,9 @@
   /**
    * The project's icon set, inlined at build time.
    *
-   * `MASTER.md` §8 asks for one set and no mixing. That set is `src/lib/icons/ui/` — 30
-   * hand-drawn glyphs on a 24px viewBox at 1.6px stroke, shipped with the design (D-28).
+   * `MASTER.md` §8 asks for one set and no mixing. That set is `src/lib/icons/ui/` — 31
+   * hand-drawn glyphs on a 24px viewBox at 1.6px stroke, shipped with the design (D-28) and
+   * added to only under the rule in `docs/icon-gaps.md`.
    *
    * They are inlined rather than loaded through `<img>` for one reason that decides it: an
    * `<img>` cannot inherit `currentColor`, and §8 specifies an icon that is `--fg-muted` at
@@ -29,6 +30,7 @@
     'check',
     'chev',
     'clock',
+    'code',
     'copy',
     'enter',
     'eye',

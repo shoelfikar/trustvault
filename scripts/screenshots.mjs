@@ -136,6 +136,14 @@ const SCENARIOS = {
   settings: { status: UNLOCKED, drive: `click('[title="Settings"]')` },
   watchtower: { status: UNLOCKED, drive: `clickText('button', 'Watchtower')` },
   palette: { status: UNLOCKED, drive: `key('k', { ctrlKey: true })` },
+  // The palette with a query that matches nothing. Its own empty state (R-19) is otherwise
+  // unreachable in a shot, and it is the one place in the app where "no results" and "the
+  // search broke" look the same if the pane is left blank.
+  paletteEmpty: {
+    status: UNLOCKED,
+    drive: `key('k', { ctrlKey: true }); await sleep(120);
+            fill('.search input', 'zzzz'); await sleep(400)`,
+  },
   generator: { status: UNLOCKED, drive: `key('g', { ctrlKey: true })` },
   newItem: { status: UNLOCKED, drive: `key('n', { ctrlKey: true })` },
   // The Add dialog with its 2FA seed filled in, so the live preview strip is in the baseline
@@ -150,6 +158,14 @@ const SCENARIOS = {
   },
   editItem: { status: UNLOCKED, drive: `clickText('button', 'Edit')` },
   deleteItem: { status: UNLOCKED, drive: `click('[title="Delete item"]')` },
+  // The two empty states R-19 is actually about, and the only two a screenshot can reach: the
+  // vault with nothing in it, and Trash — which is empty by construction and stays that way
+  // (D-49), so it is the one whose copy nobody would otherwise ever look at again.
+  emptyVault: {
+    status: { ...UNLOCKED, display_name: 'Fresh Vault', item_count: 0 },
+    items: [],
+  },
+  trash: { status: UNLOCKED, drive: `clickText('button', 'Trash')` },
 };
 
 /* ---- The injected page ---------------------------------------------------- */
@@ -166,12 +182,15 @@ const SCENARIOS = {
  * cannot become a baseline.
  */
 function harness(scenario, theme) {
-  const { status, drive } = SCENARIOS[scenario];
+  // A scenario may replace the item fixture wholesale — that is how an empty vault is shot,
+  // and it is a substitution rather than a flag because "the list is empty" is a different
+  // fixture, not a different rendering of the same one.
+  const { status, drive, items = ITEMS } = SCENARIOS[scenario];
   return `
 <script>
 window.__SHOT__ = ${JSON.stringify({ scenario, theme })};
 const STATUS = ${JSON.stringify(status)};
-const ITEMS = ${JSON.stringify(ITEMS)};
+const ITEMS = ${JSON.stringify(items)};
 const FIELDS = ${JSON.stringify(FIELDS)};
 const SETTINGS = ${JSON.stringify(SETTINGS)};
 
@@ -192,6 +211,8 @@ function respond(cmd, args) {
         item.title.toLowerCase().includes(String(args.query ?? '').trim().toLowerCase()),
       ).slice(0, args.limit ?? 6);
     case 'get_item': return { ...ITEMS[0], fields: FIELDS };
+    // Guarded rather than assumed: the empty-vault scenario has no ITEMS[0], and an unguarded
+    // read there would be a TypeError inside the stub host rather than a blank screenshot.
     case 'reveal_field': return { value: 'tR7-vault-2026!qz', remask_at: Date.now() + 10000 };
     case 'copy_field': return { clears_at: Date.now() + 12000 };
     case 'score_password': return { score: 3, label: 'Strong', crack_time: 'centuries' };
@@ -212,7 +233,7 @@ function respond(cmd, args) {
     // to a vault, and so an accidental call is a no-op rather than an unhandled warning. The
     // list they return to is static, which is why nothing here changes ITEMS.
     // (No backticks in this block: it lives inside the template literal that builds the page.)
-    case 'add_item': return { item_id: ITEMS[0].id };
+    case 'add_item': return { item_id: ITEMS[0]?.id ?? 'new' };
     case 'update_item': case 'delete_item': return null;
     case 'create_vault': case 'unlock_recovery_kit':
       return { recovery_code: 'K7QX-2MRE-9WVT-4HDP-6SNA-3JFB' };

@@ -24,6 +24,7 @@
    */
   import Button from '../components/Button.svelte';
   import Dialog from '../components/Dialog.svelte';
+  import EmptyState from '../components/EmptyState.svelte';
   import Icon from '../icons/Icon.svelte';
   import { asIpcError, forgetVault, listVaults, switchVault, type VaultRef } from '../ipc';
 
@@ -170,8 +171,14 @@
     {#if vaults.length === 0 && !error}
       <!-- Unreachable in practice — any vault the app has opened is listed, and a session that
            reaches this dialog has opened one. Drawn anyway: an empty box with no words in it
-           reads as a failed load. -->
-      <p class="empty">No vaults yet. The one you create at setup appears here.</p>
+           reads as a failed load. It carries **no action**, which is the one honest gap in the
+           R-19 sweep: both footer buttons are disabled for reasons of their own, and an action
+           here would have to be a third path to a file this build cannot pick. -->
+      <EmptyState
+        icon="vault"
+        message="No vaults yet — the one you create at setup appears here."
+        quiet
+      />
     {/if}
 
     {#if error}
@@ -299,13 +306,6 @@
   .leave:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
-  }
-
-  .empty {
-    padding: var(--space-4);
-    font-size: var(--text-sm);
-    color: var(--fg-muted);
-    text-wrap: pretty;
   }
 
   /* Status is never colour alone — §2. */

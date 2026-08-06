@@ -13,6 +13,7 @@
    */
   import { tick } from 'svelte';
   import Dialog from '../components/Dialog.svelte';
+  import EmptyState from '../components/EmptyState.svelte';
   import Icon, { type IconName } from '../icons/Icon.svelte';
   import { asIpcError, copyField, getItem, searchItems, type ItemSummary } from '../ipc';
   import { TYPE_GLYPHS, type View } from './views';
@@ -248,7 +249,20 @@
     {/if}
 
     {#if rows.length === 0}
-      <p class="none">No results for “{query.trim()}”</p>
+      <!-- R-19: the palette's results are a list, so it gets an empty state rather than a line
+           of grey text. The action is not the duplicate it looks like — a query that matches no
+           item has also filtered the New item *command* row away, so this is the only way to
+           act on what was just typed and found missing. -->
+      <EmptyState
+        icon="search"
+        message={`Nothing matches “${query.trim()}”.`}
+        actionLabel="New item"
+        onaction={() => {
+          onadd();
+          onclose();
+        }}
+        quiet
+      />
     {/if}
 
     {#if error}
@@ -365,12 +379,6 @@
     white-space: nowrap;
   }
 
-  .none {
-    padding: var(--space-7);
-    text-align: center;
-    font-size: var(--text-base);
-    color: var(--fg-subtle);
-  }
   .error {
     display: flex;
     align-items: center;

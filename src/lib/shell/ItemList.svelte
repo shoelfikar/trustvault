@@ -19,29 +19,29 @@
   import IconButton from '../components/IconButton.svelte';
   import StatusChip from '../components/StatusChip.svelte';
   import type { ItemSummary } from '../ipc';
-  import { TYPE_GLYPHS, viewTitle, type View } from './views';
+  import { TYPE_GLYPHS, typeLabel, viewTitle, type View } from './views';
 
   interface Props {
     items: ItemSummary[];
     view: View;
     selectedId: string | null;
-    /** Non-empty when the list is empty *because* of a search rather than an empty vault. */
-    query?: string;
     error?: string;
     onselect: (id: string) => void;
     ongenerate: () => void;
     onadd: () => void;
+    /** The empty states' way out: every pane that cannot be filled from here offers All Items. */
+    onview: (next: View) => void;
   }
 
   const {
     items,
     view,
     selectedId,
-    query = '',
     error = '',
     onselect,
     ongenerate,
     onadd,
+    onview,
   }: Props = $props();
 
   /**
@@ -53,15 +53,53 @@
    */
   const subtitle = (item: ItemSummary) => item.tags.join(' · ');
 
+  /**
+   * The empty state, per view — R-19, `MASTER.md` §7.
+   *
+   * One message for all of them is what this file carried until now, and it stated two things
+   * that were not true. Standing in Favorites in a vault holding fifty items, it read *"No items
+   * in this vault yet"*; standing in Trash it read *"Deleted items sit here for 30 days"*,
+   * against a `delete_item` that removes the item and a Trash that can never hold anything —
+   * the same sentence D-49 took out of the delete dialog, still here one screen over.
+   *
+   * So each branch names **what is actually empty**, and the action is what the person standing
+   * in that pane can do about it: add an item where adding fills the pane, and All Items where
+   * it does not, because Trash and an unused tag are dead ends you leave rather than fill.
+   */
   const empty = $derived.by(() => {
-    if (view.kind === 'trash')
-      return {
-        icon: 'trash' as const,
-        text: 'Trash is empty. Deleted items sit here for 30 days.',
-      };
-    if (query.trim())
-      return { icon: 'search' as const, text: `Nothing matches “${query.trim()}”.` };
-    return { icon: 'list' as const, text: 'No items in this vault yet.' };
+    const toAll = { label: 'Show all items', run: () => onview({ kind: 'all' }) };
+    const add = { label: 'Add item', run: onadd };
+    switch (view.kind) {
+      case 'trash':
+        return {
+          icon: 'trash' as const,
+          text: 'Deleting an item removes it straight away, so nothing collects here.',
+          ...toAll,
+        };
+      case 'favourites':
+        return {
+          icon: 'star' as const,
+          text: 'No favorites yet — star an item to keep it here.',
+          ...toAll,
+        };
+      case 'tag':
+        return {
+          icon: 'tag' as const,
+          text: `Nothing is tagged “${view.tag}” yet.`,
+          ...toAll,
+        };
+      case 'type':
+        return {
+          icon: TYPE_GLYPHS[view.type],
+          text: `No ${typeLabel(view.type)} items in this vault yet.`,
+          ...add,
+        };
+      // `watchtower` and `settings` replace this pane entirely (`isFullWidth`), so they never
+      // reach here. They share `all`'s copy rather than a placeholder, because a placeholder is
+      // what gets shipped the day one of them stops being full-width.
+      default:
+        return { icon: 'list' as const, text: 'No items in this vault yet.', ...add };
+    }
   });
 
   /** Roving arrow-key movement, so the list is operable without a pointer (S-08 groundwork). */
@@ -94,12 +132,12 @@
   {#if error}
     <EmptyState icon="alert" message={error} />
   {:else if items.length === 0}
-    <!-- §7: never a blank pane. Every list has an empty state. -->
+    <!-- §7: never a blank pane. Every list has an empty state, and every one has an action. -->
     <EmptyState
       icon={empty.icon}
       message={empty.text}
-      actionLabel={view.kind === 'trash' ? undefined : 'Add item'}
-      onaction={onadd}
+      actionLabel={empty.label}
+      onaction={empty.run}
     />
   {:else}
     <ul class="list sb" aria-label="Items">

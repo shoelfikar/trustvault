@@ -26,7 +26,12 @@
         { "name": "Recovery code", "value": "fixture-hidden-value", "type": 1, "linkedId": null },
         { "name": "Work account", "value": "true", "type": 2, "linkedId": null },
         { "name": "Auto-fill username", "value": null, "type": 3, "linkedId": 100 },
-        { "name": "Security question", "value": "fixture-second-answer", "type": 0, "linkedId": null }
+        {
+          "name": "Security question",
+          "value": "fixture-second-answer",
+          "type": 0,
+          "linkedId": null
+        }
       ],
       "login": {
         "fido2Credentials": [{ "credentialId": "fixture-passkey" }],

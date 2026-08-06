@@ -132,6 +132,26 @@
   const toggleTag = (tag: string) =>
     (chosen = chosen.includes(tag) ? chosen.filter((one) => one !== tag) : [...chosen, tag]);
 
+  /** Tags invented here, offered beside the vault's own — see `NewItemDialog`. */
+  let created = $state<string[]>([]);
+  let fresh = $state('');
+
+  const offered = $derived([...tags, ...created]);
+
+  /** Adds the typed tag and selects it, folding a case-only difference onto the existing one. */
+  function addTag() {
+    const tag = fresh.trim();
+    if (!tag) return;
+    const existing = offered.find((one) => one.toLowerCase() === tag.toLowerCase());
+    if (existing) {
+      if (!chosen.includes(existing)) chosen = [...chosen, existing];
+    } else {
+      created = [...created, tag];
+      chosen = [...chosen, tag];
+    }
+    fresh = '';
+  }
+
   /**
    * Opens a secret row for replacement. Until this is pressed the row sends `null`.
    *
@@ -343,24 +363,36 @@
         <Button icon="plus" onclick={addField}>Add field</Button>
       </div>
 
-      {#if tags.length}
-        <div class="control">
-          <span class="label-as-text">Tags</span>
-          <div class="chips">
-            {#each tags as tag (tag)}
-              <button
-                type="button"
-                class="chip tag"
-                class:on={chosen.includes(tag)}
-                aria-pressed={chosen.includes(tag)}
-                onclick={() => toggleTag(tag)}
-              >
-                <span class="dot" style="background:{tagColour(tag)}"></span>{tag}
-              </button>
-            {/each}
-          </div>
+      <div class="control">
+        <label class="label-as-text" for="edit-item-tag">Tags</label>
+        <div class="chips">
+          {#each offered as tag (tag)}
+            <button
+              type="button"
+              class="chip tag"
+              class:on={chosen.includes(tag)}
+              aria-pressed={chosen.includes(tag)}
+              onclick={() => toggleTag(tag)}
+            >
+              <span class="dot" style="background:{tagColour(tag)}"></span>{tag}
+            </button>
+          {/each}
+          <input
+            id="edit-item-tag"
+            class="new-tag"
+            bind:value={fresh}
+            placeholder="New tag…"
+            spellcheck="false"
+            onkeydown={(event) => {
+              if (event.key !== 'Enter') return;
+              event.preventDefault();
+              event.stopPropagation();
+              addTag();
+            }}
+            onblur={addTag}
+          />
         </div>
-      {/if}
+      </div>
 
       {#if error}
         <p class="error" role="alert"><Icon name="alert" size={13} />{error}</p>
@@ -585,6 +617,26 @@
     width: 7px;
     height: 7px;
     border-radius: 2px;
+  }
+  /* Chip-shaped, for the reason `NewItemDialog` gives: it belongs to the row it adds to. */
+  .new-tag {
+    height: 24px;
+    min-width: 92px;
+    max-width: 140px;
+    padding: 0 9px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+  }
+  .new-tag::placeholder {
+    color: var(--fg-subtle);
+  }
+  .new-tag:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
   }
 
   /* Status is never colour alone — §2. The icon and the sentence carry it. */

@@ -162,6 +162,14 @@ function respond(cmd, args) {
     case 'get_settings': return { ...SETTINGS, theme: ${JSON.stringify(theme)} };
     case 'set_settings': return { ...SETTINGS, ...(args.settings ?? {}) };
     case 'list_items': return ITEMS;
+    // The palette asks the host to rank; the ranking itself is Rust (D-46) and is tested
+    // there. What a screenshot needs is rows, so the stub matches on the title alone — a
+    // deliberately dumber rule than the real one, because a second fuzzy implementation
+    // living here is the "two generators, one of them real" mistake D-44 named.
+    case 'search_items':
+      return ITEMS.filter((item) =>
+        item.title.toLowerCase().includes(String(args.query ?? '').trim().toLowerCase()),
+      ).slice(0, args.limit ?? 6);
     case 'get_item': return { ...ITEMS[0], fields: FIELDS };
     case 'reveal_field': return { value: 'tR7-vault-2026!qz', remask_at: Date.now() + 10000 };
     case 'copy_field': return { clears_at: Date.now() + 12000 };

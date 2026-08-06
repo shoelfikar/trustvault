@@ -46,12 +46,15 @@
 #![forbid(unsafe_code)]
 
 mod aead;
+#[cfg(feature = "benchfixture")]
+pub mod benchfixture;
 mod format;
 mod generate;
 pub mod import;
 mod kdf;
 mod model;
 mod recovery;
+mod search;
 mod secret;
 mod vault;
 

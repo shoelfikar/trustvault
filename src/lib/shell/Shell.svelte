@@ -313,7 +313,6 @@
 
   {#if overlay === 'palette'}
     <CommandPalette
-      {items}
       onclose={() => (overlay = 'none')}
       onopen={openItem}
       onview={goto}

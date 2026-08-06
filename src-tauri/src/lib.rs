@@ -67,6 +67,7 @@ pub fn run() {
             commands::items::add_item,
             commands::items::update_item,
             commands::items::delete_item,
+            commands::search::search_items,
             commands::import::import_preview,
             commands::import::import_commit,
             // Sanctioned — exactly four, each returning exactly one secret.

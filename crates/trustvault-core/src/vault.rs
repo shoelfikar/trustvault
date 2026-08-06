@@ -17,6 +17,7 @@ use crate::import::{ImportReport, bitwarden};
 use crate::kdf::{self, KEY_LEN, KdfParams, Key};
 use crate::model::{AuditEntry, FieldId, Item, ItemId, ItemKind, VaultBody};
 use crate::recovery::RecoveryCode;
+use crate::search;
 use crate::secret::{SecretBytes, SecretString};
 use crate::{Error, FORMAT_VERSION, Result};
 
@@ -260,6 +261,20 @@ impl Vault {
     /// Every item, in insertion order.
     pub fn items(&self) -> impl Iterator<Item = &Item> {
         self.body.items.iter()
+    }
+
+    /// The items matching `query`, best first, at most `limit` of them — R-16, D-46.
+    ///
+    /// The matching happens here rather than in the webview, and `crate::search` records why:
+    /// the alternative is a permitted crossing that would still put every title, username and
+    /// URL in the vault into a heap nothing can wipe. A **secret field's value is never
+    /// matched**, so the palette cannot be used to confirm a guessed password through its
+    /// ranking.
+    ///
+    /// An empty query returns the first `limit` items in vault order — what the palette shows
+    /// before anything is typed.
+    pub fn search(&self, query: &str, limit: usize) -> Vec<&Item> {
+        search::rank(self.items(), query, limit)
     }
 
     /// Adds an empty item and returns its identifier.

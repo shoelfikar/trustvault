@@ -11,13 +11,13 @@
    * clear is scheduled by Rust. This file never sees a value; it looks up which field to copy
    * and hands the host two ids. That round trip is the reason `run` is async.
    */
+  import { tick } from 'svelte';
   import Dialog from '../components/Dialog.svelte';
   import Icon, { type IconName } from '../icons/Icon.svelte';
-  import { asIpcError, copyField, getItem, type ItemSummary } from '../ipc';
+  import { asIpcError, copyField, getItem, searchItems, type ItemSummary } from '../ipc';
   import { TYPE_GLYPHS, type View } from './views';
 
   interface Props {
-    items: ItemSummary[];
     onclose: () => void;
     onopen: (id: string) => void;
     onview: (next: View) => void;
@@ -28,11 +28,15 @@
     oncopied: (clearsAt: number) => void;
   }
 
-  const { items, onclose, onopen, onview, onlock, ongenerate, onadd, oncopied }: Props = $props();
+  const { onclose, onopen, onview, onlock, ongenerate, onadd, oncopied }: Props = $props();
+
+  /** How many item rows the palette draws, and therefore how many it asks the host for. */
+  const ROWS = 6;
 
   let query = $state('');
   let cursor = $state(0);
   let error = $state('');
+  let matched = $state<ItemSummary[]>([]);
 
   interface Row {
     key: string;
@@ -71,13 +75,45 @@
 
   const needle = $derived(query.trim().toLowerCase());
 
-  const matched = $derived(
-    needle
-      ? items.filter((item) =>
-          `${item.title} ${item.tags.join(' ')}`.toLowerCase().includes(needle),
-        )
-      : items.slice(0, 5),
-  );
+  /**
+   * Which query the rows on screen belong to.
+   *
+   * A round trip per keystroke means two answers can be in flight at once, and the slower one
+   * must not win: typing `gi` then `git` would otherwise leave `gi`'s rows under a cursor bound
+   * to Enter, which copies a password. The counter is the guard — a reply for anything but the
+   * latest request is dropped.
+   */
+  let issued = 0;
+
+  /**
+   * Ask the host to rank the vault — R-16, D-46.
+   *
+   * Every keystroke crosses IPC and nothing is filtered here, because nothing here has the
+   * usernames and URLs R-16 asks to search. The `performance` marks are S-04's measurement
+   * instrument: the criterion is *keystroke to filtered results rendered*, so the mark is set
+   * before the call and the measure is taken after `tick()`, once Svelte has flushed the rows.
+   * Read them from the devtools console with
+   * `performance.getEntriesByName('palette-keystroke-to-render')`. The host half of the same
+   * path is measured by `cargo bench --bench search`.
+   */
+  $effect(() => {
+    const asked = ++issued;
+    const text = query;
+    performance.mark('palette-keystroke');
+    void searchItems(text, ROWS)
+      .then(async (hits) => {
+        if (asked !== issued) return;
+        matched = hits;
+        error = '';
+        await tick();
+        performance.measure('palette-keystroke-to-render', 'palette-keystroke');
+      })
+      .catch((thrown) => {
+        if (asked !== issued) return;
+        matched = [];
+        error = asIpcError(thrown).message;
+      });
+  });
 
   const commands = $derived(
     (
@@ -102,7 +138,7 @@
   );
 
   const itemRows = $derived<Row[]>(
-    matched.slice(0, 6).map((item) => ({
+    matched.map((item) => ({
       key: `item:${item.id}`,
       title: item.title,
       sub: item.tags.join(' · '),

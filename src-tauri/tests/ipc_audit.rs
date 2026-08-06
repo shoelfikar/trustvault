@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 
 use trustvault_core::{CharSets, FieldId, ItemId, ItemKind, KdfParams, Vault};
-use trustvault_lib::commands::{generator, import, items, vault as vault_cmd};
+use trustvault_lib::commands::{generator, import, items, search, vault as vault_cmd};
 use trustvault_lib::dto::{Copied, MASK};
 use trustvault_lib::error::ErrorKind;
 use trustvault_lib::state::AppState;
@@ -171,6 +171,7 @@ fn every_command_names_its_arguments_in_snake_case() {
         ("strength.rs", include_str!("../src/commands/strength.rs")),
         ("import.rs", include_str!("../src/commands/import.rs")),
         ("generator.rs", include_str!("../src/commands/generator.rs")),
+        ("search.rs", include_str!("../src/commands/search.rs")),
     ];
 
     // `include_str!` needs a literal path, so the list above is written by hand — and a
@@ -269,6 +270,47 @@ fn no_list_or_detail_response_carries_a_secret() {
     );
 }
 
+/// Checks 2 and 4 for the palette — a search response is a list, and lists carry no values.
+///
+/// The second assertion is the one worth having. It is not about the response shape, which is
+/// `ItemSummary` and could not hold a value if it wanted to: it is that a query **equal to a
+/// stored password matches nothing**. A palette that ranked on secret values would confirm a
+/// guessed password through the order of its rows, with nothing crossing this boundary and no
+/// audit entry written — a leak with no payload to find afterwards.
+#[test]
+fn a_search_response_carries_no_values_and_secrets_are_not_searchable() {
+    let (state, _, _, _) = unlocked();
+
+    let hits = search::search_items_inner(&state, "github", 10).unwrap();
+    assert_eq!(hits.len(), 1, "the fixture's one item is found by title");
+
+    let encoded = serde_json::to_string(&hits).unwrap();
+    assert!(
+        !encoded.contains(SECRET),
+        "search_items leaked the password"
+    );
+    assert!(
+        !encoded.contains(USERNAME),
+        "search results carry no field values at all — not even the one that matched (D-46)"
+    );
+
+    // The username *is* searchable, which is R-16, and the value still does not come back.
+    assert_eq!(
+        search::search_items_inner(&state, USERNAME, 10)
+            .unwrap()
+            .len(),
+        1,
+        "a non-secret username is one of the four haystacks R-16 names"
+    );
+
+    assert!(
+        search::search_items_inner(&state, SECRET, 10)
+            .unwrap()
+            .is_empty(),
+        "a query equal to a stored password must not identify the item holding it"
+    );
+}
+
 /// Check 2 — the one sanctioned response carries exactly one secret and nothing else.
 #[test]
 fn reveal_returns_one_secret_and_copy_returns_none() {
@@ -346,6 +388,12 @@ fn every_vault_command_refuses_while_locked() {
     );
     assert_eq!(
         items::copy_field_inner(&state, item, secret)
+            .unwrap_err()
+            .kind,
+        ErrorKind::Locked
+    );
+    assert_eq!(
+        search::search_items_inner(&state, "github", 10)
             .unwrap_err()
             .kind,
         ErrorKind::Locked

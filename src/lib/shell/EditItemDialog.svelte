@@ -26,9 +26,10 @@
   import IconButton from '../components/IconButton.svelte';
   import StrengthMeter from '../components/StrengthMeter.svelte';
   import Toggle from '../components/Toggle.svelte';
-  import { ALL_SETS, generatePassword } from '../passwords';
   import {
+    ALL_SETS,
     asIpcError,
+    generatePassword,
     getItem,
     scorePassword,
     updateItem,
@@ -146,6 +147,26 @@
     row.revealed = true;
     await tick();
     document.getElementById(`edit-secret-${index}`)?.focus();
+  }
+
+  /**
+   * Replaces a secret row's value with one minted by the host — D-44.
+   *
+   * Writes into `row.value`, which means the row stops being *unchanged*: `null` is the only
+   * value that keeps the stored secret, so generating here is a replacement the user has to
+   * mean. `Keep` puts it back.
+   */
+  async function fillGenerated(index: number) {
+    const row = rows[index];
+    if (!row) return;
+    try {
+      const generated = await generatePassword(20, ALL_SETS);
+      row.value = generated.password;
+      row.revealed = true;
+      error = '';
+    } catch (thrown) {
+      error = asIpcError(thrown).message;
+    }
   }
 
   /** Puts a secret row back to unchanged, discarding whatever was typed into it. */
@@ -292,11 +313,8 @@
                 <Button
                   variant="ghost"
                   icon="refresh"
-                  title="Generate a new password on this device"
-                  onclick={() => {
-                    row.value = generatePassword(20, ALL_SETS);
-                    row.revealed = true;
-                  }}
+                  title="Generate a new password with the operating system's random source"
+                  onclick={() => void fillGenerated(index)}
                 >
                   Generate
                 </Button>

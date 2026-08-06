@@ -14,9 +14,9 @@
 
 use std::path::PathBuf;
 
-use trustvault_core::{FieldId, ItemId, ItemKind, KdfParams, Vault};
-use trustvault_lib::commands::{import, items, vault as vault_cmd};
-use trustvault_lib::dto::MASK;
+use trustvault_core::{CharSets, FieldId, ItemId, ItemKind, KdfParams, Vault};
+use trustvault_lib::commands::{generator, import, items, vault as vault_cmd};
+use trustvault_lib::dto::{Copied, MASK};
 use trustvault_lib::error::ErrorKind;
 use trustvault_lib::state::AppState;
 
@@ -170,6 +170,7 @@ fn every_command_names_its_arguments_in_snake_case() {
         ("settings.rs", include_str!("../src/commands/settings.rs")),
         ("strength.rs", include_str!("../src/commands/strength.rs")),
         ("import.rs", include_str!("../src/commands/import.rs")),
+        ("generator.rs", include_str!("../src/commands/generator.rs")),
     ];
 
     // `include_str!` needs a literal path, so the list above is written by hand — and a
@@ -287,6 +288,36 @@ fn reveal_returns_one_secret_and_copy_returns_none() {
     // has one field and it is an integer -- and that is asserted in the unit tests instead.
     // Named rather than silently skipped, because a check that quietly does not run is worse
     // than one that is documented as not running.
+}
+
+/// Check 2 again, for the fourth sanctioned command — R-10, D-44.
+///
+/// The generator is the one sanctioned command that returns a secret the vault has never seen,
+/// so the two things worth pinning are both about its *class*: exactly one secret in the
+/// response, and no vault required to get it. The second is why it is absent from the
+/// locked-state check below — a generator that refused while locked could not fill the
+/// password field of the first item in a brand-new vault.
+#[test]
+fn the_generator_returns_one_secret_and_needs_no_vault() {
+    let (state, _, _, _) = unlocked();
+    state.lock();
+
+    let generated = generator::generate_password_inner(24, CharSets::ALL, true).unwrap();
+    assert_eq!(generated.password.chars().count(), 24);
+
+    let encoded = serde_json::to_string(&generated).unwrap();
+    assert_eq!(
+        encoded.matches(&generated.password).count(),
+        1,
+        "exactly one secret per invocation (R-10)"
+    );
+
+    // `copy_generated` is not exercised for the same reason `copy_field` is not: it writes to
+    // the real system clipboard, which a CI runner may not have. What can be checked without
+    // one is that its response shape carries no value at all — `Copied` has a single integer
+    // field, so there is nowhere for the password it just copied to ride along.
+    let copied = serde_json::to_string(&Copied { clears_at: 0 }).unwrap();
+    assert_eq!(copied, r#"{"clears_at":0}"#);
 }
 
 /// Check 6 — every vault-class and sanctioned command answers `locked` when it is.

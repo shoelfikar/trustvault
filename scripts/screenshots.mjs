@@ -136,11 +136,13 @@ const SCENARIOS = {
 /**
  * The stub host, as a string injected before the app's module script.
  *
- * It answers `invoke` from the fixtures above. Two commands are answered with intent rather
+ * It answers `invoke` from the fixtures above. Three commands are answered with intent rather
  * than data: `reveal_field` returns a real-looking password because the whole point of the
- * detail pane is how a revealed secret is set, and `copy_field` returns only a timestamp,
- * because that absence is the product's central claim and a stub that returned a value would
- * make a screenshot of a leak look fine.
+ * detail pane is how a revealed secret is set; `copy_field` returns only a timestamp, because
+ * that absence is the product's central claim and a stub that returned a value would make a
+ * screenshot of a leak look fine; and `generate_password` returns a **fixed** string, because
+ * the real command returns a different one every time and a shot that never matches itself
+ * cannot become a baseline.
  */
 function harness(scenario, theme) {
   const { status, drive } = SCENARIOS[scenario];
@@ -164,6 +166,11 @@ function respond(cmd, args) {
     case 'reveal_field': return { value: 'tR7-vault-2026!qz', remask_at: Date.now() + 10000 };
     case 'copy_field': return { clears_at: Date.now() + 12000 };
     case 'score_password': return { score: 3, label: 'Strong', crack_time: 'centuries' };
+    // Fixed rather than random, because a screenshot that differs on every run cannot be
+    // compared against a baseline — and this is the value the generator dialog renders.
+    case 'generate_password':
+      return { password: 'k4Vq-7pXm-2Rtz-9Bhw', score: 4, label: 'Excellent', crack_time: 'centuries' };
+    case 'copy_generated': return { clears_at: Date.now() + 12000 };
     case 'calibrate_kdf': return { m_cost: 262144, t_cost: 3, p_cost: 1 };
     case 'default_vault_path': return '/home/shoel/Documents/personal.tvault';
     case 'lock': case 'unlock': return null;

@@ -18,10 +18,11 @@
   import Segmented from '../components/Segmented.svelte';
   import StrengthMeter from '../components/StrengthMeter.svelte';
   import Toggle from '../components/Toggle.svelte';
-  import { ALL_SETS, generatePassword } from '../passwords';
   import {
+    ALL_SETS,
     addItem,
     asIpcError,
+    generatePassword,
     scorePassword,
     type ItemKind,
     type NewField,
@@ -108,6 +109,25 @@
       });
     }, 180);
   });
+
+  /**
+   * Fills the password field with one minted by the host — D-44.
+   *
+   * The generator is `generate_password`, not a second one living in this window: two
+   * generators with one of them being "the real one" is a distinction that survives exactly as
+   * long as the person who remembers it. Revealed straight away, because a password the user
+   * cannot see is one they cannot decide to keep.
+   */
+  async function fillGenerated(index: number) {
+    try {
+      const generated = await generatePassword(20, ALL_SETS);
+      values[index] = generated.password;
+      revealed = true;
+      error = '';
+    } catch (thrown) {
+      error = asIpcError(thrown).message;
+    }
+  }
 
   const toggleTag = (tag: string) =>
     (chosen = chosen.includes(tag) ? chosen.filter((one) => one !== tag) : [...chosen, tag]);
@@ -214,11 +234,8 @@
                   <Button
                     variant="ghost"
                     icon="refresh"
-                    title="Generate a new password on this device"
-                    onclick={() => {
-                      values[index] = generatePassword(20, ALL_SETS);
-                      revealed = true;
-                    }}
+                    title="Generate a new password with the operating system's random source"
+                    onclick={() => void fillGenerated(index)}
                   >
                     Generate
                   </Button>

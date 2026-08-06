@@ -56,8 +56,8 @@ mod vault;
 pub use format::{HEADER_LEN, Header, WRAP_AAD_LEN};
 pub use kdf::KdfParams;
 pub use model::{
-    AuditEntry, Field, FieldId, FieldKind, HistoryEntry, Item, ItemId, ItemKind, ItemStatus,
-    VaultBody,
+    AuditEntry, Field, FieldEdit, FieldId, FieldKind, HistoryEntry, Item, ItemId, ItemKind,
+    ItemStatus, VaultBody,
 };
 pub use recovery::RecoveryCode;
 pub use secret::{SecretBytes, SecretString};

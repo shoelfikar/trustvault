@@ -5,11 +5,11 @@ use std::thread;
 use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager as _, State};
-use trustvault_core::{FieldId, ItemId};
+use trustvault_core::{FieldId, ItemId, ItemKind};
 
 use crate::clipboard;
-use crate::commands::with_vault;
-use crate::dto::{Copied, ItemDetail, ItemSummary, Revealed};
+use crate::commands::{save_open_vault, with_vault};
+use crate::dto::{AddedItem, Copied, EditField, ItemDetail, ItemSummary, NewField, Revealed};
 use crate::error::{ErrorKind, IpcError, IpcResult};
 use crate::state::{AppState, now_ms};
 
@@ -181,6 +181,122 @@ fn schedule_clear(
 pub fn clear_after(seconds: u64) {
     thread::sleep(Duration::from_secs(seconds));
     clipboard::clear();
+}
+
+/// **Vault-class.** Creates an item and saves the vault — R-17, `docs/ipc-contract.md` §6.4.
+///
+/// Returns the identifier and nothing else: the caller re-reads through [`get_item`], so there
+/// is one elision path in the application rather than two that can drift apart.
+#[tauri::command]
+pub fn add_item(
+    state: State<'_, AppState>,
+    kind: ItemKind,
+    title: String,
+    tags: Vec<String>,
+    fields: Vec<NewField>,
+) -> IpcResult<AddedItem> {
+    add_item_inner(&state, kind, title, tags, fields)
+}
+
+/// The body of [`add_item`], reachable without a Tauri runtime.
+pub fn add_item_inner(
+    state: &AppState,
+    kind: ItemKind,
+    title: String,
+    tags: Vec<String>,
+    fields: Vec<NewField>,
+) -> IpcResult<AddedItem> {
+    with_vault(state, |vault, inner| {
+        let item_id = vault.add_item(kind, title);
+        let Some(item) = vault.item_mut(item_id) else {
+            // Unreachable: the item was added one line ago. Reported rather than unwrapped
+            // because this crate's failure mode is a user's vault, not a stack trace.
+            return Err(IpcError::new(ErrorKind::Internal));
+        };
+        item.set_tags(tags);
+        for field in fields {
+            // `push_field`, not `set_field`: the item was created empty a moment ago, so
+            // there is nothing to merge with, and merging by label is the behaviour D-43
+            // took off this path entirely.
+            item.push_field(field.into_field());
+        }
+        save_open_vault(vault, inner)?;
+        Ok(AddedItem { item_id })
+    })
+}
+
+/// **Vault-class.** Rewrites an item from an edit form and saves — R-17, §6.4.
+///
+/// The three rules that are silent when they go wrong live in the core
+/// ([`trustvault_core::Item::apply_edits`]): a `null` value keeps the stored one, omission
+/// deletes, and the list is the display order.
+#[tauri::command]
+pub fn update_item(
+    state: State<'_, AppState>,
+    item_id: ItemId,
+    title: String,
+    tags: Vec<String>,
+    favourite: bool,
+    fields: Vec<EditField>,
+) -> IpcResult<()> {
+    update_item_inner(&state, item_id, title, tags, favourite, fields)
+}
+
+/// The body of [`update_item`], reachable without a Tauri runtime.
+pub fn update_item_inner(
+    state: &AppState,
+    item_id: ItemId,
+    title: String,
+    tags: Vec<String>,
+    favourite: bool,
+    fields: Vec<EditField>,
+) -> IpcResult<()> {
+    // Converted before the vault is touched, so a request the wire shape allows and the model
+    // has no meaning for — create a field whose value is unchanged — is refused with nothing
+    // written. It is `internal` because the only caller is our own webview: a request in that
+    // shape is a bug here, not something a user did.
+    let edits = fields
+        .into_iter()
+        .map(EditField::into_edit)
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| IpcError::new(ErrorKind::Internal))?;
+
+    with_vault(state, |vault, inner| {
+        let item = vault
+            .item_mut(item_id)
+            .ok_or_else(|| IpcError::new(ErrorKind::NoSuchItem))?;
+        // Fields first. `apply_edits` validates the whole list before writing anything, so a
+        // refused edit leaves the item exactly as it was — and that guarantee is only worth
+        // having if the title and tags have not already been written by then.
+        item.apply_edits(edits)?;
+        item.set_title(title);
+        item.set_tags(tags);
+        item.set_favourite(favourite);
+        save_open_vault(vault, inner)
+    })
+}
+
+/// **Vault-class.** Deletes an item and saves — R-17, R-18, §6.4.
+///
+/// The confirmation R-18 requires is in the **UI**, not here, and the contract says so
+/// explicitly: what it protects against is a mis-click, and the caller is the only user. The
+/// opposite case is `delete_vault`, which does verify, because there the typed name is the
+/// whole ceremony.
+#[tauri::command]
+pub fn delete_item(state: State<'_, AppState>, item_id: ItemId) -> IpcResult<()> {
+    delete_item_inner(&state, item_id)
+}
+
+/// The body of [`delete_item`], reachable without a Tauri runtime.
+pub fn delete_item_inner(state: &AppState, item_id: ItemId) -> IpcResult<()> {
+    with_vault(state, |vault, inner| {
+        // The removed item is dropped here, which zeroizes every value it held — including
+        // the history entries, which are as sensitive as the fields they came from.
+        if vault.remove_item(item_id).is_none() {
+            return Err(IpcError::new(ErrorKind::NoSuchItem));
+        }
+        save_open_vault(vault, inner)
+    })
 }
 
 /// Payload of `field-remasked` and `clipboard-cleared`.

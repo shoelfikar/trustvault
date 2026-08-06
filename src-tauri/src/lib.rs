@@ -63,6 +63,9 @@ pub fn run() {
             commands::items::list_items,
             commands::items::get_item,
             commands::items::copy_field,
+            commands::items::add_item,
+            commands::items::update_item,
+            commands::items::delete_item,
             // Sanctioned — exactly three, each returning exactly one secret.
             // Adding a fourth is a decision log entry, not a patch.
             commands::vault::create_vault,

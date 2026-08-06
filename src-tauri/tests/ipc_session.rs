@@ -1,4 +1,5 @@
-//! The instrumented session — Phase 2 gate line 4, `docs/ipc-contract.md` §9 check 5.
+//! The instrumented session — Phase 2 gate line 4 and part of Phase 3's first gate line,
+//! `docs/ipc-contract.md` §9 check 5.
 //!
 //! §9 listed this check as **not automated**, for an honest reason: it needs a shell to drive,
 //! and when the contract was written there was none. There is one now, so the check is here.
@@ -14,9 +15,12 @@
 //! * It drives the **command bodies**, not a live webview. It therefore proves what the host
 //!   sends, not what the frontend asks for; the second half is covered by `src/lib/ipc.ts`
 //!   being the only file that calls `invoke`, which CI greps for.
-//! * The item it reveals is **seeded through the core's API**, because Phase 2 ships no
-//!   mutation command (D-38). Creating an item through the UI and reading it back is the
-//!   Phase 3 gate.
+//! * It creates its item through `add_item`, quits, relaunches and reads it back — which is
+//!   the Phase 3 exit gate's first line **minus the human at the keyboard**. Phase 2 had to
+//!   seed through the core's API because it shipped no mutation command (D-38); that is no
+//!   longer true, and what remains un-automated is the UI half: that the dialog submits what
+//!   the user typed and the detail pane renders what came back. The gate still asks a person
+//!   to do it once on a real app.
 
 // An integration test is its own crate with no `#[cfg(test)]` module, so clippy's
 // `allow-unwrap-in-tests` does not reach it and the workspace's Tier-1 lints apply at full
@@ -27,9 +31,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use trustvault_core::{ItemKind, KdfParams, Vault};
+use trustvault_core::{FieldKind, ItemKind, KdfParams};
 use trustvault_lib::commands::{items, vault as vault_cmd};
-use trustvault_lib::dto::KdfSummary;
+use trustvault_lib::dto::{EditField, FieldSummary, KdfSummary, NewField};
 use trustvault_lib::state::AppState;
 
 /// The master password. It crosses **inbound** and must never come back out.
@@ -37,6 +41,9 @@ const MASTER: &str = "waltz-jumbled-fox-quiz-97";
 /// The stored secret. It may cross outbound exactly once per explicit reveal, and never
 /// otherwise.
 const SECRET: &str = "correct-horse-battery-staple";
+/// The replacement typed into the edit form. It crosses **inbound only** and is never
+/// revealed, so it must not appear anywhere in the transcript at all.
+const EDITED_SECRET: &str = "staple-battery-horse-correct";
 /// A field the user declared is not secret, which is allowed to cross freely.
 const USERNAME: &str = "octocat";
 
@@ -118,18 +125,39 @@ fn scratch_path() -> PathBuf {
     ))
 }
 
-/// Seeds one login with one secret and one public field, through the **core's** API.
+/// The login's two fields, as the New-item dialog submits them.
 ///
-/// Phase 2 has no `add_item` command by design, so there is no IPC path that could do this.
-/// The seeding happens against the file the session then opens, which keeps every subsequent
-/// step a genuine command call.
-fn seed_one_item(path: &Path) {
-    let mut vault = Vault::open_file(path, MASTER).expect("the session just created it");
-    let item = vault.add_item(ItemKind::Login, "GitHub");
-    let entry = vault.item_mut(item).expect("just added");
-    entry.set_field("Username", USERNAME, false);
-    entry.set_field("Password", SECRET, true);
-    vault.save_to(path).expect("writable scratch path");
+/// Built fresh per call because `NewField` owns its plaintext and is consumed on the way in.
+fn login_fields() -> Vec<NewField> {
+    vec![
+        NewField {
+            label: "Username".into(),
+            kind: FieldKind::Username,
+            value: USERNAME.into(),
+            secret: false,
+            custom: false,
+        },
+        NewField {
+            label: "Password".into(),
+            kind: FieldKind::Password,
+            value: SECRET.into(),
+            secret: true,
+            custom: false,
+        },
+    ]
+}
+
+/// The edit an untouched field submits: everything as the detail pane received it, and
+/// `value: None` — because the pane never received the value.
+fn untouched(field: &FieldSummary) -> EditField {
+    EditField {
+        id: Some(field.id),
+        label: field.label.clone(),
+        kind: field.kind,
+        value: None,
+        secret: field.secret,
+        custom: field.custom,
+    }
 }
 
 /// The whole session, start to finish, read back as a transcript.
@@ -166,6 +194,22 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
     log.record("create_vault", &created);
     let recovery_code = created.expect("a writable path").recovery_code;
 
+    // ---- The item is created through the command, not seeded through the core --------------
+    // Phase 2 had to seed it through `trustvault_core` because it shipped no mutation command
+    // (D-38); `add_item` lands in Phase 3, so the first line of this phase's exit gate — an
+    // item created, the app quit, relaunched, and the item read back — is scripted here rather
+    // than only demonstrated by hand. `add_item` saves before returning, which is what makes
+    // the next step (a relaunch) able to find it at all.
+    let added = items::add_item_inner(
+        &state,
+        ItemKind::Login,
+        "GitHub".into(),
+        vec!["Work/Clients".into(), "dev".into()],
+        login_fields(),
+    );
+    log.record("add_item", &added);
+    let created_id = added.expect("a vault is open").item_id;
+
     // ---- Quit and relaunch ---------------------------------------------------------------
     // A fresh AppState over the same file is what a relaunch is: the host keeps nothing in
     // memory, and the only way back in is a credential. What it *does* keep is the remembered
@@ -175,7 +219,6 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
         .with(|inner| inner.settings.last_vault_path.clone())
         .flatten();
     drop(state);
-    seed_one_item(&path);
 
     let state = AppState::default();
     state.with(|inner| inner.settings.last_vault_path = remembered);
@@ -208,7 +251,17 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
     let listed = items::list_items_inner(&state);
     log.record("list_items", &listed);
     let summaries = listed.expect("unlocked");
-    let item_id = summaries.first().expect("the seeded item").id;
+    let item_id = summaries.first().expect("the created item").id;
+    assert_eq!(
+        item_id, created_id,
+        "the item read back after a relaunch is the one `add_item` created — the first line \
+         of the Phase 3 gate, minus the human at the keyboard"
+    );
+    assert_eq!(
+        summaries[0].tags,
+        vec!["Work/Clients".to_owned(), "dev".to_owned()],
+        "a folder-shaped tag survives verbatim — D-43"
+    );
 
     let detail = items::get_item_inner(&state, item_id);
     log.record("get_item", &detail);
@@ -216,7 +269,15 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
     let secret_field = fields
         .iter()
         .find(|field| field.secret)
-        .expect("the seeded password");
+        .expect("the password submitted through add_item");
+    assert_eq!(
+        fields
+            .iter()
+            .find(|field| !field.secret)
+            .and_then(|field| field.value.as_deref()),
+        Some(USERNAME),
+        "the public field comes back as its value, the secret one as a mask"
+    );
 
     // The one explicit user action that may produce a secret.
     let revealed = items::reveal_field_inner(&state, item_id, secret_field.id).map(|(r, _)| r);
@@ -232,6 +293,84 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
     // and "the machine had no clipboard" must not become a hole in the transcript.
     let copied = items::copy_field_inner(&state, item_id, secret_field.id).map(|(c, _, _)| c);
     log.record("copy_field", &copied);
+
+    // ---- Edit: rename, replace one secret, leave the other field alone --------------------
+    // This is the shape of every real edit and the one that is silent when it goes wrong. The
+    // username carries `value: None` because the detail pane never received a value it could
+    // send back; if that meant "set it to nothing", the rename below would destroy it.
+    let public_field = fields
+        .iter()
+        .find(|field| !field.secret)
+        .expect("the username");
+    let edited = items::update_item_inner(
+        &state,
+        item_id,
+        "GitHub (work)".into(),
+        vec!["dev".into()],
+        true,
+        vec![
+            untouched(public_field),
+            EditField {
+                id: Some(secret_field.id),
+                label: "Password".into(),
+                kind: FieldKind::Password,
+                value: Some(EDITED_SECRET.into()),
+                secret: true,
+                custom: false,
+            },
+            EditField {
+                id: None,
+                label: "Recovery email".into(),
+                kind: FieldKind::Text,
+                value: Some("octocat@example.com".into()),
+                secret: false,
+                custom: true,
+            },
+        ],
+    );
+    log.record("update_item", &edited);
+    edited.expect("the item exists and the edits name real fields");
+
+    let after_edit = items::get_item_inner(&state, item_id);
+    log.record("get_item", &after_edit);
+    let after_edit = after_edit.expect("the item still exists");
+    assert_eq!(after_edit.summary.title, "GitHub (work)");
+    assert!(after_edit.summary.favourite);
+    assert_eq!(after_edit.summary.tags, vec!["dev".to_owned()]);
+    assert_eq!(
+        after_edit.fields[0].value.as_deref(),
+        Some(USERNAME),
+        "the untouched field kept its value — `value: null` means unchanged, not empty"
+    );
+    assert_eq!(after_edit.fields.len(), 3, "the new field was appended");
+    assert!(after_edit.fields[2].custom);
+
+    // The replacement is stored, and reading it back is still an explicit reveal — logged
+    // like every other crossing, because a step left out of the transcript is a hole in the
+    // evidence rather than a step that did not happen.
+    let re_revealed = items::reveal_field_inner(&state, item_id, secret_field.id).map(|(r, _)| r);
+    log.record("reveal_field", &re_revealed);
+    assert_eq!(
+        re_revealed.expect("revealable").value,
+        EDITED_SECRET,
+        "the edit landed in the vault, not just in the response"
+    );
+
+    // ---- Delete: the item goes, and so does every way of reading it ------------------------
+    let deleted = items::delete_item_inner(&state, item_id);
+    log.record("delete_item", &deleted);
+    deleted.expect("the item exists");
+
+    let after_delete = items::list_items_inner(&state);
+    log.record("list_items", &after_delete);
+    assert!(
+        after_delete.expect("unlocked").is_empty(),
+        "the deleted item is gone from the list"
+    );
+    let gone = items::get_item_inner(&state, item_id);
+    log.record("get_item", &gone);
+    assert!(gone.is_err(), "a deleted item cannot be opened");
+    log.record("delete_item", &items::delete_item_inner(&state, item_id));
 
     // ---- Lock, then prove the shell is closed --------------------------------------------
     state.lock();
@@ -280,6 +419,37 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
         vec!["reveal_field"],
         "the stored secret crossed somewhere other than a reveal"
     );
+
+    // The same for the value typed into the **edit** form, and it is the stronger statement of
+    // the two: it crossed inbound through `update_item`, so every response after that point —
+    // the read-back, the list, the deletion, the locked refusals — is a chance to echo it.
+    // Only the one explicit reveal may.
+    assert_eq!(
+        log.carrying(EDITED_SECRET),
+        vec!["reveal_field"],
+        "a value submitted through update_item came back outside a reveal"
+    );
+
+    // `add_item`, `update_item` and `delete_item` return an identifier or nothing at all. The
+    // check is by name, because what a later edit would change is the shape.
+    for crossing in log
+        .crossings
+        .iter()
+        .filter(|c| matches!(c.command, "add_item" | "update_item" | "delete_item"))
+    {
+        for secret in [SECRET, EDITED_SECRET, MASTER] {
+            assert!(
+                !crossing.payload.contains(secret),
+                "{} echoed a value it was given",
+                crossing.command
+            );
+        }
+        assert!(
+            !crossing.payload.contains(USERNAME),
+            "{} returns no field value of any kind",
+            crossing.command
+        );
+    }
 
     // Never more than one secret per invocation — R-10, over the whole session rather than
     // one response at a time.

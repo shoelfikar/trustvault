@@ -5,7 +5,9 @@
 //! is how "just send the whole item, it's simpler" gets implemented by accident.
 
 use serde::{Deserialize, Serialize};
-use trustvault_core::{Field, FieldId, FieldKind, Item, ItemId, ItemKind, ItemStatus};
+use trustvault_core::{
+    Field, FieldEdit, FieldId, FieldKind, Item, ItemId, ItemKind, ItemStatus, SecretString,
+};
 
 /// The mask stood in for a secret value in a list — `docs/ipc-contract.md` §6.2, D-32.
 ///
@@ -122,6 +124,98 @@ impl ItemDetail {
             fields: item.fields.iter().map(FieldSummary::elide).collect(),
         }
     }
+}
+
+/// One field of an item being created — `docs/ipc-contract.md` §6.4.
+///
+/// The one shape in this file that carries plaintext **inbound**. §5 already concedes that
+/// direction: a password the user typed is in the webview heap before any command is called,
+/// and nothing this layer does can take it back out. What this layer can do is not make a
+/// second copy — the `String` is *moved* into the core's `SecretString`, so the only plaintext
+/// this process holds after the conversion is one that zeroizes on drop.
+#[derive(Debug, Deserialize)]
+pub struct NewField {
+    /// The label.
+    pub label: String,
+    /// What the value is.
+    pub kind: FieldKind,
+    /// The value the user typed.
+    pub value: String,
+    /// Whether it is masked by default. Stored, never inferred (§6.3).
+    pub secret: bool,
+    /// Whether it is a user-added field rather than one of the type's own — D-43.
+    pub custom: bool,
+}
+
+impl NewField {
+    /// Builds the core field. Consumes `self` so the plaintext is moved, not cloned.
+    pub fn into_field(self) -> Field {
+        Field::new(self.label, self.value, self.secret)
+            .with_kind(self.kind)
+            .with_custom(self.custom)
+    }
+}
+
+/// One field as an edit form submits it — `docs/ipc-contract.md` §6.4.
+///
+/// Two nullable fields that mean different things, and both are load-bearing: `id: null`
+/// **creates**, and `value: null` means **unchanged**. The second is the one that destroys a
+/// vault when it is got wrong — the form never received the secret values, so an edit that
+/// treated `null` as "set it to nothing" would overwrite every password in the item with its
+/// own mask on a rename.
+#[derive(Debug, Deserialize)]
+pub struct EditField {
+    /// Which field, or `None` to create one.
+    pub id: Option<FieldId>,
+    /// The label, which may be renamed.
+    pub label: String,
+    /// What the value is.
+    pub kind: FieldKind,
+    /// The new value, or `None` to keep the stored one.
+    pub value: Option<String>,
+    /// Whether it is masked by default.
+    pub secret: bool,
+    /// Whether it is a user-added field — D-43.
+    pub custom: bool,
+}
+
+impl EditField {
+    /// Converts to the core's edit, or `None` if the request means nothing.
+    ///
+    /// The meaningless request is `id: null` with `value: null` — *create a field whose value
+    /// is unchanged*. [`FieldEdit`] cannot express it, which is why it is two variants rather
+    /// than one struct with two `Option`s, and this is where the wire shape's extra freedom is
+    /// refused rather than given an invented meaning.
+    pub fn into_edit(self) -> Option<FieldEdit> {
+        match self.id {
+            Some(id) => Some(FieldEdit::Existing {
+                id,
+                label: self.label,
+                kind: self.kind,
+                value: self.value.map(SecretString::new),
+                secret: self.secret,
+                custom: self.custom,
+            }),
+            None => self.value.map(|value| FieldEdit::New {
+                label: self.label,
+                kind: self.kind,
+                value: SecretString::new(value),
+                secret: self.secret,
+                custom: self.custom,
+            }),
+        }
+    }
+}
+
+/// What `add_item` returns: the identifier, and nothing else.
+///
+/// The caller re-reads through `get_item`, which keeps **one** elision path rather than two.
+/// A response that carried the item back would be a second place where the decision "what may
+/// cross" is made, and the two would drift.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct AddedItem {
+    /// The new item's identifier.
+    pub item_id: ItemId,
 }
 
 /// Whether a vault is open, and what can be said about it if it is not.

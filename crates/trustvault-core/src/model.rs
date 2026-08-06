@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::secret::SecretString;
+use crate::{Error, Result};
 
 /// Identifier of an item, stable for its lifetime.
 pub type ItemId = Uuid;
@@ -210,6 +211,63 @@ impl Field {
     }
 }
 
+/// One field as an edit form submits it — `docs/ipc-contract.md` §6.4.
+///
+/// Two variants rather than one struct carrying two `Option`s, and the reason is the shape a
+/// struct would also allow: *create a field whose value is unchanged*, which means nothing. A
+/// shape that can express a meaningless request is a shape something eventually sends, and the
+/// receiving code then has to invent an answer. Here the type refuses it instead.
+///
+/// **`value: None` on [`FieldEdit::Existing`] means unchanged, and it is the single most
+/// load-bearing detail in the edit path.** The form never received the secret values — they are
+/// elided on the way out — so a form that sent back what it is holding would be sending back
+/// masks. Without this variant, renaming an item would overwrite every password in it with
+/// `"••••••••••••"` and push the real values into [`Item::history`], where no v1 surface can
+/// reach them.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum FieldEdit {
+    /// Edit the field with this identifier, keeping its place in the item's history.
+    Existing {
+        /// Which field. Unknown identifiers are refused rather than created — the caller is
+        /// working from a list it was just given, so an unknown one is a stale form.
+        id: FieldId,
+        /// The label, which may be renamed.
+        label: String,
+        /// What the value is.
+        kind: FieldKind,
+        /// The new value, or `None` to keep the stored one.
+        value: Option<SecretString>,
+        /// Whether the value is masked by default.
+        secret: bool,
+        /// Whether this is a user- or import-added field — D-43.
+        custom: bool,
+    },
+    /// Create a field. It is appended where the edit list puts it, not at the end.
+    New {
+        /// The label.
+        label: String,
+        /// What the value is.
+        kind: FieldKind,
+        /// The value. Not optional: a field being created has nothing to leave unchanged.
+        value: SecretString,
+        /// Whether the value is masked by default.
+        secret: bool,
+        /// Whether this is a user- or import-added field — D-43.
+        custom: bool,
+    },
+}
+
+impl FieldEdit {
+    /// The field this edit addresses, if it addresses one.
+    fn target(&self) -> Option<FieldId> {
+        match self {
+            Self::Existing { id, .. } => Some(*id),
+            Self::New { .. } => None,
+        }
+    }
+}
+
 /// A previous value of a field, kept so an accidental overwrite is recoverable.
 ///
 /// As sensitive as the field itself, and therefore inside the sealed body like everything
@@ -341,6 +399,154 @@ impl Item {
     /// before this concept existed.
     pub fn custom_fields(&self) -> impl Iterator<Item = &Field> {
         self.fields.iter().filter(|field| field.custom)
+    }
+
+    /// Renames the item, bumping `updated_at` only if the title actually changed.
+    pub fn set_title(&mut self, title: impl Into<String>) {
+        let title = title.into();
+        if self.title != title {
+            self.title = title;
+            self.updated_at = now_ms();
+        }
+    }
+
+    /// Replaces the tags, trimmed and deduplicated, in the order given.
+    ///
+    /// Deduplication is exact rather than case-folded, and the whole string is kept: D-43 makes
+    /// a Bitwarden folder path a tag verbatim, so `Work/Clients` is one tag and not a hierarchy
+    /// this model pretends to understand.
+    pub fn set_tags(&mut self, tags: impl IntoIterator<Item = String>) {
+        let mut cleaned: Vec<String> = Vec::new();
+        for tag in tags {
+            let tag = tag.trim();
+            if !tag.is_empty() && !cleaned.iter().any(|kept| kept == tag) {
+                cleaned.push(tag.to_owned());
+            }
+        }
+        if self.tags != cleaned {
+            self.tags = cleaned;
+            self.updated_at = now_ms();
+        }
+    }
+
+    /// Pins or unpins the item.
+    pub fn set_favourite(&mut self, favourite: bool) {
+        if self.favourite != favourite {
+            self.favourite = favourite;
+            self.updated_at = now_ms();
+        }
+    }
+
+    /// Rewrites the item's fields from an edit form — `docs/ipc-contract.md` §6.4.
+    ///
+    /// Three rules, each of which is silent when it goes wrong:
+    ///
+    /// * **`value: None` keeps the stored value.** See [`FieldEdit`]; this is the rule that
+    ///   stops a rename from overwriting every password with its own mask.
+    /// * **Omission deletes.** A field the list does not mention is removed. The alternative —
+    ///   a separate remove command — makes an edit two round trips that can half-succeed.
+    /// * **The list is the order.** Fields are written in the order given, so reordering needs
+    ///   no command of its own.
+    ///
+    /// A changed value pushes the previous one onto [`Item::history`]. A *deleted* field does
+    /// not, and the asymmetry is deliberate rather than an oversight: an edit that overwrites
+    /// is usually a mistake worth recovering from, and a deletion is an explicit instruction to
+    /// stop holding that value.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NoSuchField`] if an edit names a field this item does not have, or names one
+    /// twice. Validated **before** anything is written, so a rejected edit leaves the item
+    /// exactly as it was — a half-applied edit is the worst outcome available here.
+    pub fn apply_edits(&mut self, edits: Vec<FieldEdit>) -> Result<()> {
+        let mut addressed: Vec<FieldId> = Vec::with_capacity(edits.len());
+        for id in edits.iter().filter_map(FieldEdit::target) {
+            if !self.fields.iter().any(|field| field.id == id) || addressed.contains(&id) {
+                return Err(Error::NoSuchField);
+            }
+            addressed.push(id);
+        }
+
+        let now = now_ms();
+        let order_before: Vec<FieldId> = self.fields.iter().map(|field| field.id).collect();
+        let mut pool = core::mem::take(&mut self.fields);
+        let mut rebuilt: Vec<Field> = Vec::with_capacity(edits.len());
+        let mut changed = false;
+
+        for edit in edits {
+            match edit {
+                FieldEdit::Existing {
+                    id,
+                    label,
+                    kind,
+                    value,
+                    secret,
+                    custom,
+                } => {
+                    // The validation pass above proved this position exists, so the lookup
+                    // cannot fail — but it is written as a search rather than an index because
+                    // `pool` shrinks as fields are taken out of it.
+                    let Some(position) = pool.iter().position(|field| field.id == id) else {
+                        continue;
+                    };
+                    let mut field = pool.remove(position);
+                    if let Some(value) = value
+                        && field.value != value
+                    {
+                        self.history.push(HistoryEntry {
+                            changed_at: now,
+                            field_id: field.id,
+                            value: core::mem::replace(&mut field.value, value),
+                        });
+                        changed = true;
+                    }
+                    changed |= field.label != label
+                        || field.kind != kind
+                        || field.secret != secret
+                        || field.custom != custom;
+                    field.label = label;
+                    field.kind = kind;
+                    field.secret = secret;
+                    field.custom = custom;
+                    rebuilt.push(field);
+                }
+                FieldEdit::New {
+                    label,
+                    kind,
+                    value,
+                    secret,
+                    custom,
+                } => {
+                    // Constructed rather than built through `Field::new`, so the value is
+                    // moved into place instead of copied out of one `SecretString` and into
+                    // another — the discarded copy would be zeroized, but it would exist.
+                    rebuilt.push(Field {
+                        id: Uuid::new_v4(),
+                        label,
+                        value,
+                        kind,
+                        secret,
+                        custom,
+                        unknown: Unknown::new(),
+                    });
+                    changed = true;
+                }
+            }
+        }
+
+        // Fields left in the pool were omitted, which deletes them. Dropping `pool` zeroizes
+        // their values.
+        changed |= !pool.is_empty();
+        changed |= rebuilt
+            .iter()
+            .map(|field| field.id)
+            .ne(order_before.iter().copied());
+
+        self.fields = rebuilt;
+        if changed {
+            self.updated_at = now;
+        }
+        Ok(())
     }
 
     /// Removes a field, returning whether one was there.
@@ -626,5 +832,232 @@ mod tests {
         assert_eq!(field.kind, FieldKind::Url);
         // `new` only guesses when nothing better is said.
         assert_eq!(Field::new("Password", "x", true).kind, FieldKind::Password);
+    }
+
+    /// A login with a public username and a secret password, in that order.
+    fn a_login() -> (Item, FieldId, FieldId) {
+        let mut item = Item::new(ItemKind::Login, "GitHub");
+        let username = item.set_field("Username", "octocat", false);
+        let password = item.set_field("Password", "correct-horse", true);
+        (item, username, password)
+    }
+
+    /// The edit an unchanged field submits: everything as it was, `value: None`.
+    fn unchanged(field: &Field) -> FieldEdit {
+        FieldEdit::Existing {
+            id: field.id,
+            label: field.label.clone(),
+            kind: field.kind,
+            value: None,
+            secret: field.secret,
+            custom: field.custom,
+        }
+    }
+
+    #[test]
+    fn a_none_value_keeps_the_stored_one() {
+        // The single most load-bearing rule in the edit path — §6.4. The form never held the
+        // secrets, so an edit that renames the item submits `None` for every value. If that
+        // meant "set it to nothing", renaming an item would destroy every password in it and
+        // push the real values into `history`, where no v1 surface can reach them.
+        let (mut item, _, password) = a_login();
+        let edits: Vec<FieldEdit> = item.fields.iter().map(unchanged).collect();
+
+        item.set_title("GitHub (work)");
+        item.apply_edits(edits).unwrap();
+
+        assert_eq!(
+            item.field(password).unwrap().value,
+            SecretString::new("correct-horse")
+        );
+        assert!(
+            item.history.is_empty(),
+            "an unchanged field is not a history entry"
+        );
+    }
+
+    #[test]
+    fn a_changed_value_pushes_the_previous_onto_history() {
+        let (mut item, username, password) = a_login();
+        let edits = vec![
+            unchanged(item.field(username).unwrap()),
+            FieldEdit::Existing {
+                id: password,
+                label: "Password".to_owned(),
+                kind: FieldKind::Password,
+                value: Some(SecretString::new("new-horse")),
+                secret: true,
+                custom: false,
+            },
+        ];
+        item.apply_edits(edits).unwrap();
+
+        assert_eq!(
+            item.field(password).unwrap().value,
+            SecretString::new("new-horse")
+        );
+        assert_eq!(item.history.len(), 1);
+        assert_eq!(item.history[0].field_id, password);
+        assert_eq!(item.history[0].value, SecretString::new("correct-horse"));
+    }
+
+    #[test]
+    fn submitting_the_same_value_again_is_not_history() {
+        let (mut item, username, password) = a_login();
+        let edits = vec![
+            unchanged(item.field(username).unwrap()),
+            FieldEdit::Existing {
+                id: password,
+                label: "Password".to_owned(),
+                kind: FieldKind::Password,
+                value: Some(SecretString::new("correct-horse")),
+                secret: true,
+                custom: false,
+            },
+        ];
+        item.apply_edits(edits).unwrap();
+        assert!(item.history.is_empty());
+    }
+
+    #[test]
+    fn omission_deletes_and_does_not_reach_history() {
+        // The asymmetry is deliberate: an overwrite is usually a mistake worth recovering
+        // from, a deletion is an instruction to stop holding the value.
+        let (mut item, username, password) = a_login();
+        let edits = vec![unchanged(item.field(username).unwrap())];
+        item.apply_edits(edits).unwrap();
+
+        assert!(item.field(password).is_none());
+        assert!(item.field(username).is_some());
+        assert!(item.history.is_empty());
+    }
+
+    #[test]
+    fn the_edit_list_is_the_display_order() {
+        // Reordering therefore needs no command of its own — §6.4.
+        let (mut item, username, password) = a_login();
+        let edits = vec![
+            unchanged(item.field(password).unwrap()),
+            unchanged(item.field(username).unwrap()),
+        ];
+        item.apply_edits(edits).unwrap();
+
+        let order: Vec<FieldId> = item.fields.iter().map(|field| field.id).collect();
+        assert_eq!(order, vec![password, username]);
+    }
+
+    #[test]
+    fn a_new_edit_creates_a_field_where_the_list_puts_it() {
+        let (mut item, username, password) = a_login();
+        let edits = vec![
+            unchanged(item.field(username).unwrap()),
+            FieldEdit::New {
+                label: "Recovery email".to_owned(),
+                kind: FieldKind::Text,
+                value: SecretString::new("octocat@example.com"),
+                secret: false,
+                custom: true,
+            },
+            unchanged(item.field(password).unwrap()),
+        ];
+        item.apply_edits(edits).unwrap();
+
+        assert_eq!(item.fields.len(), 3);
+        assert_eq!(item.fields[1].label, "Recovery email");
+        assert!(item.fields[1].custom);
+        assert_eq!(item.custom_fields().count(), 1);
+        assert!(item.history.is_empty());
+    }
+
+    #[test]
+    fn an_edit_naming_a_field_the_item_does_not_have_changes_nothing() {
+        // Validated before anything is written: a half-applied edit is the worst outcome
+        // available here, because the caller cannot tell which half landed.
+        let (mut item, username, _) = a_login();
+        let before = item.fields.clone();
+        let edits = vec![
+            FieldEdit::Existing {
+                id: username,
+                label: "Handle".to_owned(),
+                kind: FieldKind::Username,
+                value: Some(SecretString::new("someone-else")),
+                secret: false,
+                custom: false,
+            },
+            FieldEdit::Existing {
+                id: Uuid::new_v4(),
+                label: "Ghost".to_owned(),
+                kind: FieldKind::Text,
+                value: None,
+                secret: false,
+                custom: false,
+            },
+        ];
+
+        assert!(matches!(item.apply_edits(edits), Err(Error::NoSuchField)));
+        assert_eq!(item.fields, before);
+        assert!(item.history.is_empty());
+    }
+
+    #[test]
+    fn an_edit_naming_one_field_twice_is_refused() {
+        // Two edits for one field cannot both be applied, and choosing one silently is how a
+        // stale form overwrites what the user is looking at.
+        let (mut item, username, _) = a_login();
+        let before = item.fields.clone();
+        let edits = vec![
+            unchanged(item.field(username).unwrap()),
+            unchanged(item.field(username).unwrap()),
+        ];
+
+        assert!(matches!(item.apply_edits(edits), Err(Error::NoSuchField)));
+        assert_eq!(item.fields, before);
+    }
+
+    #[test]
+    fn an_edit_that_changes_nothing_leaves_updated_at_alone() {
+        // The list is sorted by `updated_at`, so a no-op edit that bumped it would reorder
+        // the item list every time a dialog was opened and cancelled.
+        let (mut item, _, _) = a_login();
+        let edits: Vec<FieldEdit> = item.fields.iter().map(unchanged).collect();
+        item.updated_at = 0;
+        item.apply_edits(edits).unwrap();
+        assert_eq!(item.updated_at, 0);
+    }
+
+    #[test]
+    fn a_rename_is_a_change_and_a_re_titling_to_the_same_string_is_not() {
+        let (mut item, _, _) = a_login();
+        item.updated_at = 0;
+        item.set_title("GitHub");
+        item.set_favourite(false);
+        assert_eq!(item.updated_at, 0, "nothing actually changed");
+
+        item.set_title("GitLab");
+        assert_ne!(item.updated_at, 0);
+        assert_eq!(item.title, "GitLab");
+
+        item.updated_at = 0;
+        item.set_favourite(true);
+        assert_ne!(item.updated_at, 0);
+        assert!(item.favourite);
+    }
+
+    #[test]
+    fn tags_are_trimmed_deduplicated_and_kept_verbatim() {
+        // Verbatim is the D-43 half: a Bitwarden folder path becomes one tag, because
+        // splitting `Work/Clients` in two would claim a hierarchy tags do not have.
+        let (mut item, _, _) = a_login();
+        item.set_tags([
+            "  Work/Clients  ".to_owned(),
+            "personal".to_owned(),
+            "Work/Clients".to_owned(),
+            "   ".to_owned(),
+        ]);
+        assert_eq!(item.tags, vec!["Work/Clients", "personal"]);
+
+        item.updated_at = 0;
+        item.set_tags(["Work/Clients".to_owned(), "personal".to_owned()]);
+        assert_eq!(item.updated_at, 0, "the same tags are not a change");
     }
 }

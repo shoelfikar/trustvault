@@ -47,6 +47,7 @@
 
 mod aead;
 mod format;
+mod generate;
 pub mod import;
 mod kdf;
 mod model;
@@ -55,6 +56,7 @@ mod secret;
 mod vault;
 
 pub use format::{HEADER_LEN, Header, WRAP_AAD_LEN};
+pub use generate::{CharSets, MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, PasswordRecipe};
 pub use import::{Converted, ImportReport, KindCount, Refusal};
 pub use kdf::KdfParams;
 pub use model::{

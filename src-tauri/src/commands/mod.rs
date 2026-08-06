@@ -5,9 +5,11 @@
 //! itself — eliding, guarding, and the two timers the frontend must not be trusted to run.
 //!
 //! Every command belongs to exactly one class from the contract's §2.1, and the class is
-//! written above it. There are **three** sanctioned commands, the ones that may return
-//! plaintext, and adding a fourth is a decision log entry rather than a patch.
+//! written above it. There are **four** sanctioned commands, the ones that may return
+//! plaintext, and the fourth arrived as a decision log entry rather than as a patch — D-44,
+//! `generate_password`. A fifth costs the same.
 
+pub mod generator;
 pub mod import;
 pub mod items;
 pub mod settings;

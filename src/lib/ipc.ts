@@ -5,8 +5,8 @@
  * That is not tidiness — it is the only place a reviewer has to read to answer "what can reach
  * plaintext from here", and a stray `invoke` elsewhere would make that answer wrong.
  *
- * The three functions that can return a secret are grouped and labelled at the bottom. If that
- * group grows, the contract's budget of three has been spent without anyone deciding to.
+ * The four functions that can return a secret are grouped and labelled at the bottom. If that
+ * group grows, the contract's budget of four has been spent without anyone deciding to.
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -138,6 +138,31 @@ export interface Strength {
   crackTime: string;
 }
 
+/** Which character classes a generated password may draw from — §7. */
+export interface CharSets {
+  lowercase: boolean;
+  uppercase: boolean;
+  digits: boolean;
+  symbols: boolean;
+}
+
+/** All four classes, which is what every surface asks for today. */
+export const ALL_SETS: CharSets = {
+  lowercase: true,
+  uppercase: true,
+  digits: true,
+  symbols: true,
+};
+
+/**
+ * What `generate_password` returns — §7.
+ *
+ * The score rides along rather than taking a second call to `score_password`, and that is a
+ * safety property rather than a convenience: re-scoring would send the value across the
+ * boundary a second time for a number the generating side already had the inputs for.
+ */
+export type Generated = Strength & { password: string };
+
 export type ErrorKind =
   | 'not_a_vault'
   | 'unsupported_version'
@@ -230,6 +255,18 @@ export const scorePassword = (password: string, inputs: string[] = []) =>
 
 export const calibrateKdf = () => call<KdfSummary>('calibrate_kdf');
 
+/**
+ * Copies a **not-yet-stored** password and schedules the clear — §5, D-37, D-44.
+ *
+ * The only function here that hands a secret outbound on purpose. It is safe for the reason
+ * the contract states: the host reads nothing and returns nothing, so it cannot disclose
+ * anything this side did not already hold — and what it buys is the one thing this side
+ * cannot do for itself, a clipboard clear scheduled in Rust. Copying a generated password
+ * with `navigator.clipboard` instead would leave it in the clipboard for good.
+ */
+export const copyGenerated = (password: string) =>
+  call<{ clearsAt: number }>('copy_generated', { password });
+
 export const getSettings = () => call<Settings>('get_settings');
 
 export const setSettings = (settings: Settings) => call<Settings>('set_settings', { settings });
@@ -279,7 +316,7 @@ export const updateItem = (
 export const deleteItem = (itemId: string) => call<void>('delete_item', { itemId });
 
 /* ---- Sanctioned — §7 ----------------------------------------------------- */
-/* Exactly three. A fourth entry in this group is a decision, not a patch.     */
+/* Exactly four. A fifth entry in this group is a decision, not a patch.       */
 
 export const createVault = (name: string, path: string, password: string, kdf: KdfSummary) =>
   call<{ recoveryCode: string }>('create_vault', { name, path, password, kdf });
@@ -289,6 +326,21 @@ export const unlockRecoveryKit = (path: string, code: string) =>
 
 export const revealField = (itemId: string, fieldId: string) =>
   call<{ value: string; remaskAt: number }>('reveal_field', { itemId, fieldId });
+
+/**
+ * Mints one password in the host and returns it with its score — R-15, D-44.
+ *
+ * The fourth sanctioned command, and the only one returning a secret the vault has never
+ * seen. It replaced a generator that ran here, in the webview: two generators with one of
+ * them being "the real one" is a distinction that survives exactly as long as the person who
+ * remembers it, and the host's is the one whose randomness sits on the path R-06 constrains.
+ *
+ * Held under the render-and-drop rule like the other three — the dialog holds it while it is
+ * open and drops it on close. Copying it goes through `copyGenerated`, never
+ * `navigator.clipboard`.
+ */
+export const generatePassword = (length: number, sets: CharSets, excludeAmbiguous = true) =>
+  call<Generated>('generate_password', { length, sets, excludeAmbiguous });
 
 /* ---- Events — §8 --------------------------------------------------------- */
 

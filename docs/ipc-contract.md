@@ -203,7 +203,7 @@ password — that is a small addition to the core, not something to reconstruct 
 from JS. A timing measured across the IPC boundary measures the IPC boundary.
 
 ```ts
-copy_generated({ password: string }): { clears_at: Millis }   // planned
+copy_generated({ password: string }): { clears_at: Millis }
 ```
 
 Writes a **not-yet-stored** password to the clipboard and schedules the same clear `copy_field`
@@ -224,6 +224,11 @@ Constraints:
   lock-state hole with no lock.
 - The clear interval is `clipboard_clear_seconds` from settings, the same one `copy_field` uses. Two
   clipboard timers with different durations is how one of them ends up wrong.
+- **No event follows the clear**, unlike `copy_field`'s. `clipboard-cleared` names an item and a
+  field (§8) and a generated password belongs to neither — it is not in the vault and may never be.
+  The response's `clears_at` is what the chip counts down from; an event carrying null identifiers,
+  invented so an existing listener could be reused, would put a shape on this boundary that means
+  nothing.
 
 ```ts
 totp_preview({ secret: string }): { code: string; expires_at: Millis; period: number; digits: number }   // planned
@@ -610,7 +615,7 @@ type CharSets = { lowercase: boolean; uppercase: boolean; digits: boolean; symbo
 
 type Generated = { password: Secret; score: 0|1|2|3|4; label: string; crack_time: string };
 
-generate_password({ length: number; sets: CharSets; exclude_ambiguous: boolean }): Generated   // planned
+generate_password({ length: number; sets: CharSets; exclude_ambiguous: boolean }): Generated
 ```
 
 **The fourth sanctioned command — D-44.** `length` is 8–64 and at least one set must be true, or the

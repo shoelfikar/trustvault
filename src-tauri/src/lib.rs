@@ -57,6 +57,7 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::set_settings,
             commands::strength::score_password,
+            commands::generator::copy_generated,
             // Vault-class — require an unlocked vault, return no secret.
             commands::vault::unlock,
             commands::vault::lock,
@@ -68,11 +69,12 @@ pub fn run() {
             commands::items::delete_item,
             commands::import::import_preview,
             commands::import::import_commit,
-            // Sanctioned — exactly three, each returning exactly one secret.
-            // Adding a fourth is a decision log entry, not a patch.
+            // Sanctioned — exactly four, each returning exactly one secret.
+            // The fourth arrived with D-44; a fifth is a decision log entry, not a patch.
             commands::vault::create_vault,
             commands::vault::unlock_recovery_kit,
             commands::items::reveal_field,
+            commands::generator::generate_password,
         ])
         .run(tauri::generate_context!())
         .expect("Tauri runtime failed to start");

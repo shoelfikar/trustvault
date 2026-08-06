@@ -34,7 +34,8 @@ pub enum ErrorKind {
     Clipboard,
     /// The file offered for import is not an unencrypted Bitwarden JSON export.
     NotImportable,
-    /// Reading or writing the vault file failed.
+    /// A file this application had to read or write would not. The vault file, or — since
+    /// `launch_at_login` — the OS's own login-time launcher entry.
     Io,
     /// A bug in this application or a broken machine.
     Internal,
@@ -85,7 +86,13 @@ impl IpcError {
             ErrorKind::NotImportable => {
                 "That file is not an unencrypted Bitwarden JSON export. In Bitwarden, choose                  Export vault and the .json format, without a password."
             }
-            ErrorKind::Io => "Could not read or write the vault file.",
+            // Said "the vault file" until 2026-08-06, when `launch_at_login` became the first
+            // `io` that has nothing to do with a vault: the write it fails on is a desktop
+            // entry or a registry value. A password manager telling a user their vault file
+            // could not be written, when the vault is fine and a login toggle is what failed,
+            // is the same class of wrong copy D-49 found in the delete dialog — one sentence,
+            // read at the moment it matters, describing something that did not happen.
+            ErrorKind::Io => "Could not read or write a file on this computer.",
             ErrorKind::Internal => "Something went wrong inside TrustVault.",
         };
         Self {

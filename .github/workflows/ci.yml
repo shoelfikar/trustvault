@@ -83,6 +83,20 @@ jobs:
             echo "::error::invoke() is called outside src/lib/ipc.ts — every IPC call goes through that file (R-10)"
             exit 1
           fi
+      # R-21 and D-57. `MASTER.md` §3 describes the UI Scale setting as "scaling the whole rem
+      # root"; tokens.css implements it as `--ui-scale` multiplying px `calc()`s instead, and
+      # the two are indistinguishable today only because nothing in this codebase uses `rem`.
+      # The first `rem` someone writes is the one the setting silently stops applying to — a
+      # control that scales most of a screen is harder to diagnose than one that scales none of
+      # it, because it looks like a layout bug rather than a broken setting.
+      - name: Assert nothing is sized in rem, which UI Scale does not reach (R-21, D-57)
+        run: |
+          strays=$(grep -rEn '[0-9.]+rem\b' src --include='*.css' --include='*.svelte' || true)
+          if [ -n "$strays" ]; then
+            echo "$strays"
+            echo "::error::a size is written in rem — every size comes from a token multiplied by --ui-scale (R-21, D-57)"
+            exit 1
+          fi
 
   nonce:
     name: Nonce discipline (R-06)

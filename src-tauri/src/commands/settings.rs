@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use tauri::{AppHandle, Manager, State};
 
-use crate::error::IpcResult;
+use crate::error::{ErrorKind, IpcError, IpcResult};
 use crate::state::{AppState, Settings};
 
 /// Where the settings file lives, or `None` if the platform will not say.
@@ -99,12 +99,24 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
 ///
 /// Takes the whole struct rather than a patch. A patch shape needs every field optional, and
 /// an optional boolean is how a setting gets silently reset by a caller that omitted it.
+///
+/// **One field can refuse to be set**, and it is handled before anything is stored:
+/// `launch_at_login` is a write to the OS, and the contract requires that a platform which
+/// will not take it yields `io` with the stored value untouched. Doing it first is what makes
+/// "untouched" true — persisting and then discovering the registration failed would leave a
+/// settings file claiming something about the machine that is not so.
 #[tauri::command(rename_all = "snake_case")]
 pub fn set_settings(
     app: AppHandle,
     state: State<'_, AppState>,
     settings: Settings,
 ) -> IpcResult<Settings> {
+    let current_autostart = state.with(|inner| inner.settings.launch_at_login);
+    if current_autostart != Some(settings.launch_at_login) {
+        crate::autostart::set(settings.launch_at_login)
+            .map_err(|_| IpcError::new(ErrorKind::Io))?;
+    }
+
     let stored = state
         .with(|inner| {
             inner.settings = merge_incoming(&inner.settings, settings.clone());
@@ -115,18 +127,66 @@ pub fn set_settings(
     Ok(stored)
 }
 
+/// Records the window's geometry so the next launch opens where this one closed — R-27.
+///
+/// Host-owned, and [`merge_incoming`] is what keeps it that way: the webview holds a copy of
+/// `Settings` taken when the screen opened, so a theme change after a resize would otherwise
+/// send the old dimensions back and undo this.
+///
+/// **Not persisted here.** This runs on every frame of a window drag, and a file write per
+/// frame is how a preferences file gets corrupted by a hard shutdown mid-resize. It is written
+/// out by [`persist_geometry`] when the window closes, and by any `set_settings` in between.
+pub fn record_geometry(state: &AppState, width: u32, height: u32, maximized: bool) {
+    state.with(|inner| {
+        inner.settings.window_maximized = maximized;
+        // A maximized window's own dimensions are the screen's, not the size to restore to
+        // when it is un-maximized. Keeping the last un-maximized size is the whole reason
+        // `window_maximized` sits beside the two numbers rather than replacing them.
+        if !maximized {
+            inner.settings.window_width = width;
+            inner.settings.window_height = height;
+        }
+    });
+}
+
+/// Writes the recorded geometry out. Called when the window is closing.
+pub fn persist_geometry(app: &AppHandle, state: &AppState) {
+    if let Some(settings) = state.with(|inner| inner.settings.clone()) {
+        persist(app, &settings);
+    }
+}
+
+/// Reconciles the stored `launch_at_login` with what the OS actually has registered.
+///
+/// Called at start-up. A user who removed the entry through their desktop's own
+/// startup-applications tool has said something, and a settings screen that goes on showing
+/// "on" over it is reporting this file's memory rather than the state of the machine. The
+/// world wins; the file is corrected to match it.
+pub fn reconcile_autostart(state: &AppState) {
+    let registered = crate::autostart::is_enabled();
+    state.with(|inner| inner.settings.launch_at_login = registered);
+}
+
 /// Applies the caller's settings over the stored ones, keeping the host-owned fields.
 ///
-/// Only one field is host-owned today, and it is the reason this function exists rather than
-/// an assignment: `last_vault_path` is in `Settings` because it shares the file, not because
-/// the webview may set it. `Settings` is `#[serde(default)]`, so a frontend that simply does
-/// not know about the field sends it as absent, serde reads that as `None`, and the app
-/// forgets the user's vault the first time they change the theme. The symptom would be
-/// intermittent and the cause invisible, which is why the rule is a named function with a
-/// test rather than a line inside a closure.
+/// **Four fields are host-owned**, and this function is the only thing that makes that true.
+/// `Settings` is `#[serde(default)]`, so a frontend that simply does not know about a field
+/// sends it absent, serde reads that as the default, and the host's value is gone — with a
+/// symptom that is intermittent and a cause that is invisible. Which is why this is a named
+/// function with a test rather than a line inside a closure.
+///
+/// - `last_vault_path` (D-40) is in `Settings` because it shares the file, not because the
+///   webview may set it. Lost, the app forgets the user's vault on the next theme change.
+/// - The three `window_*` values are measured by this process on every resize (R-27). The
+///   webview holds a copy of `Settings` taken when the screen it is on opened, so **resize the
+///   window and then change the theme** and the stale copy comes back — the window would snap
+///   to its old size on the next launch, having been resized in between.
 fn merge_incoming(current: &Settings, incoming: Settings) -> Settings {
     Settings {
         last_vault_path: current.last_vault_path.clone(),
+        window_width: current.window_width,
+        window_height: current.window_height,
+        window_maximized: current.window_maximized,
         ..incoming
     }
 }
@@ -197,6 +257,45 @@ mod tests {
         assert_eq!(
             merged.last_vault_path, current.last_vault_path,
             "and the host-owned field survives it"
+        );
+    }
+
+    #[test]
+    fn resizing_the_window_and_then_changing_a_setting_does_not_undo_the_resize() {
+        // The R-27 half of the same trap, and the one that actually bites in use: the webview
+        // is holding a `Settings` from when the settings screen opened. Resize the window,
+        // then flip a toggle, and without this the stale dimensions travel back and the next
+        // launch opens at the size the window had two changes ago.
+        let current = Settings {
+            window_width: 1600,
+            window_height: 900,
+            window_maximized: false,
+            ..Settings::default()
+        };
+        let from_webview = Settings {
+            theme: Theme::Dark,
+            ..Settings::default() // carrying the *default* 1360x864 it was handed at open
+        };
+
+        let merged = merge_incoming(&current, from_webview);
+        assert_eq!(merged.theme, Theme::Dark);
+        assert_eq!((merged.window_width, merged.window_height), (1600, 900));
+    }
+
+    #[test]
+    fn maximizing_keeps_the_size_to_restore_to() {
+        // A maximized window's own dimensions are the screen's. Recording them would mean
+        // un-maximizing lands on a window the size of the display, which is not a restore.
+        let state = AppState::default();
+        record_geometry(&state, 1600, 900, false);
+        record_geometry(&state, 3840, 2160, true);
+
+        let settings = state.with(|inner| inner.settings.clone()).unwrap();
+        assert!(settings.window_maximized);
+        assert_eq!(
+            (settings.window_width, settings.window_height),
+            (1600, 900),
+            "the last un-maximized size is what un-maximizing has to restore to"
         );
     }
 

@@ -57,6 +57,27 @@
       root.dataset.theme = settings.theme;
     }
   });
+
+  /**
+   * R-21 — the interface scale, applied to the root and nowhere else.
+   *
+   * `tokens.css` derives every size from `--ui-scale`, so setting one attribute here moves
+   * text, row heights, controls and spacing **together**. That is the whole point of it living
+   * in the tokens: a scale implemented by growing the type alone gives you large text in rows
+   * that did not grow with it, which is worse than not scaling at all.
+   *
+   * Set on `documentElement` rather than on the app's own root because the lock screen, the
+   * onboarding flow and every dialog are children of `<body>` — a scale that stopped at the
+   * shell would be a setting that only applies once you are inside.
+   */
+  $effect(() => {
+    const root = document.documentElement;
+    if (!settings || settings.uiScale === 'default') {
+      delete root.dataset.uiScale;
+    } else {
+      root.dataset.uiScale = settings.uiScale;
+    }
+  });
 </script>
 
 {#if !status}

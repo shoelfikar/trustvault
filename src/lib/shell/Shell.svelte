@@ -49,6 +49,8 @@
   let view = $state<View>({ kind: 'all' });
   let selectedId = $state<string | null>(null);
   let error = $state('');
+  /** A settings write the host refused. Only `launch_at_login` can produce one. */
+  let settingsError = $state('');
 
   /** Which overlay is up. One at a time — the prototype never stacks two. */
   let overlay = $state<
@@ -153,8 +155,21 @@
     target.addEventListener('pointerup', done);
   }
 
+  /**
+   * Saves a settings change, and shows the one that can be refused.
+   *
+   * `launch_at_login` writes outside this process — a desktop entry, a `LaunchAgent`, a
+   * registry value — so the host rejects with `io` and **stores nothing** when the platform
+   * will not take it. This side therefore does not update its own copy on failure either: the
+   * toggle snaps back to what the host still holds, which is the truth about the machine, and
+   * the sentence beside it says why it moved. Optimistically keeping the new value would leave
+   * a screen promising the app starts at login when nothing registered it.
+   */
   function saveSettings(next: Settings) {
-    void setSettings(next).then(onsettings);
+    settingsError = '';
+    void setSettings(next)
+      .then(onsettings)
+      .catch((thrown) => (settingsError = asIpcError(thrown).message));
   }
 
   /**
@@ -274,6 +289,7 @@
         {settings}
         {status}
         itemCount={items.length}
+        error={settingsError}
         onchange={saveSettings}
         ondeletevault={() => (overlay = 'deleteVault')}
       />

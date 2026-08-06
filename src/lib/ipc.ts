@@ -105,6 +105,9 @@ export interface EditField {
 
 export type Theme = 'system' | 'light' | 'dark';
 
+/** 92 % / 100 % / 115 % — R-21. The three steps `tokens.css` names, not a free percentage. */
+export type UiScale = 'compact' | 'default' | 'large';
+
 export interface Settings {
   theme: Theme;
   autoLockSeconds: number;
@@ -123,6 +126,33 @@ export interface Settings {
    * what makes a relaunch land on the lock screen instead of onboarding.
    */
   readonly lastVaultPath: string | null;
+  /**
+   * How large the whole interface draws — R-21.
+   *
+   * Applied by setting `data-ui-scale` on the root, which `tokens.css` turns into
+   * `--ui-scale`; every size token is derived from it, so this is the one setting that moves
+   * every measurement in the application at once.
+   */
+  uiScale: UiScale;
+  /**
+   * Whether the OS starts TrustVault at login — R-21.
+   *
+   * **The only setting whose write can fail.** It is a desktop entry, a `LaunchAgent` or a
+   * registry value depending on the platform, and `setSettings` rejects with `io` rather than
+   * storing a value the platform refused — so a caller must re-read from the resolved
+   * settings rather than assume its own optimistic value took.
+   */
+  launchAtLogin: boolean;
+  /**
+   * Window geometry — R-27, and **host-owned like `lastVaultPath`**.
+   *
+   * Only the host measures the window, and it does so on every resize. These ride in the
+   * struct because they share the settings file (D-33's one-store argument); sending changed
+   * values back here does nothing, because the host keeps its own.
+   */
+  readonly windowWidth: number;
+  readonly windowHeight: number;
+  readonly windowMaximized: boolean;
 }
 
 export interface KdfSummary {

@@ -7,25 +7,35 @@
    * goes to check what is true about their vault. The geometry is unchanged; the content is the
    * vault's own.
    *
-   * Two of the prototype's rows are absent rather than disabled: **UI scale** and **Launch at
-   * login** are settings the host does not store, and a control that forgets on relaunch is
-   * worse than one that is not there. Both are named in the session log so the gap is a task
-   * rather than an oversight.
+   * **UI scale** and **Launch at login** were absent rather than disabled until 2026-08-06,
+   * because the host had nowhere to keep them and a control that forgets on relaunch is worse
+   * than one that is not there. Both are here now, and the second is the only control in the
+   * application whose change can be **refused by the operating system** — see `error` below.
    */
   import Button from '../components/Button.svelte';
+  import Icon from '../icons/Icon.svelte';
   import Segmented from '../components/Segmented.svelte';
   import Toggle from '../components/Toggle.svelte';
-  import type { Settings, Theme, VaultStatus } from '../ipc';
+  import type { Settings, Theme, UiScale, VaultStatus } from '../ipc';
 
   interface Props {
     settings: Settings;
     status: VaultStatus;
     itemCount: number;
+    /** Rejected by the host — today only `launch_at_login`, which writes outside this process. */
+    error?: string;
     onchange: (next: Settings) => void;
     ondeletevault: () => void;
   }
 
-  const { settings, status, itemCount, onchange, ondeletevault }: Props = $props();
+  const {
+    settings,
+    status,
+    itemCount,
+    error = '',
+    onchange,
+    ondeletevault,
+  }: Props = $props();
 
   const fileName = $derived((status.path ?? '').split(/[/\\]/).pop() || 'vault.tvault');
 
@@ -61,6 +71,14 @@
     { value: 10, label: '10s' },
     { value: 12, label: '12s' },
     { value: 30, label: '30s' },
+  ];
+
+  /* The percentages are in the labels, not only in the names. "Compact" alone asks the user to
+     find out by trying it, and this is a control they change once. */
+  const scaleChoices: { value: UiScale; label: string }[] = [
+    { value: 'compact', label: 'Compact' },
+    { value: 'default', label: 'Default' },
+    { value: 'large', label: 'Large' },
   ];
 
   const patch = (next: Partial<Settings>) => onchange({ ...settings, ...next });
@@ -102,6 +120,24 @@
           options={themes}
           value={settings.theme}
           onchange={(next) => patch({ theme: next as Theme })}
+        />
+      </div>
+      <div class="row">
+        <div class="row-text">
+          <p class="row-label">Interface size</p>
+          <!-- The percentages belong in the description rather than in the chip labels: three
+               words read as three sizes, and "Compact 92%" in a 40px chip does not fit at
+               115% scale, which is exactly the setting that would break it. -->
+          <p class="row-desc">
+            Scales everything together — text, rows and controls. Compact 92 %, Default 100 %,
+            Large 115 %.
+          </p>
+        </div>
+        <Segmented
+          label="Interface size"
+          options={scaleChoices}
+          value={settings.uiScale}
+          onchange={(next) => patch({ uiScale: next as UiScale })}
         />
       </div>
     </div>
@@ -152,6 +188,34 @@
         />
       </div>
     </div>
+
+    <p class="group-label">System</p>
+    <div class="card">
+      <div class="row first">
+        <div class="row-text">
+          <p class="row-label">Start at login</p>
+          <!-- It says "locked" because that is what happens, and a user who expects to find
+               their vault open would otherwise read this as a security regression. -->
+          <p class="row-desc">
+            Open TrustVault when you sign in to this computer. It starts locked — you still
+            unlock it yourself.
+          </p>
+        </div>
+        <Toggle
+          label="Start at login"
+          checked={settings.launchAtLogin}
+          onchange={(next) => patch({ launchAtLogin: next })}
+        />
+      </div>
+    </div>
+
+    <!-- The only place in Settings a save can fail. It sits under the card whose toggle can
+         cause it, and it is announced: a toggle that snapped back with nothing said would read
+         as the app being broken rather than as the OS refusing. §2 — icon and text, never
+         colour alone. -->
+    {#if error}
+      <p class="error" role="alert"><Icon name="alert" size={13} />{error}</p>
+    {/if}
 
     <div class="danger">
       <div class="row-text">
@@ -294,6 +358,16 @@
     line-height: var(--text-sm-lh);
     color: var(--fg-muted);
     text-wrap: pretty;
+  }
+
+  /* Status is never colour alone — §2. The icon and the sentence carry it. */
+  .error {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: -14px 0 26px;
+    font-size: var(--text-sm);
+    color: var(--danger);
   }
 
   .danger {

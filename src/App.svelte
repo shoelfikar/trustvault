@@ -24,6 +24,18 @@
   let settings = $state<Settings | null>(null);
   let lockReason = $state<LockReason | null>(null);
 
+  /**
+   * The one screen the host cannot ask for — D-62.
+   *
+   * `vault_status` answers `no_vault` exactly once in a vault's life, so onboarding was
+   * unreachable ever after and the switcher's *New vault* had nowhere to go. This flag is the
+   * user having asked for that screen, and it is deliberately the **only** thing on this side
+   * that decides what is drawn: it can show the create flow, and it cannot show the shell. Lock
+   * state stays the host's — §9 check 6 — because creating a vault is a request, not a claim
+   * about whether one is open.
+   */
+  let creating = $state(false);
+
   async function refresh() {
     status = await vaultStatus();
   }
@@ -84,8 +96,17 @@
   <!-- One frame at most: vault_status is a memory read. No skeleton shimmer -- MASTER.md §5
        forbids theatre over a local read that finishes in microseconds. -->
   <div class="boot"></div>
-{:else if status.state === 'no_vault'}
-  <Onboarding ondone={refresh} />
+{:else if status.state === 'no_vault' || creating}
+  <!-- `oncancel` is passed only for the second case, which is what draws step 1's Cancel: at
+       first launch there is nothing to go back to, and a Cancel that lands on an empty window
+       is worse than no Cancel. -->
+  <Onboarding
+    ondone={() => {
+      creating = false;
+      void refresh();
+    }}
+    oncancel={creating ? () => (creating = false) : undefined}
+  />
 {:else if status.state === 'locked'}
   <LockScreen
     path={status.path ?? ''}
@@ -98,7 +119,13 @@
     }}
   />
 {:else if settings}
-  <Shell {status} {settings} onsettings={(next) => (settings = next)} onvaultchanged={refresh} />
+  <Shell
+    {status}
+    {settings}
+    onsettings={(next) => (settings = next)}
+    onvaultchanged={refresh}
+    oncreatevault={() => (creating = true)}
+  />
 {/if}
 
 <style>

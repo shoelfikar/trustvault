@@ -36,6 +36,8 @@ pub enum ErrorKind {
     NotImportable,
     /// The name typed into the vault-deletion dialog is not the vault's name — R-18.
     ConfirmationMismatch,
+    /// A vault was asked for at a path where a file already is — D-62.
+    PathInUse,
     /// A file this application had to read or write would not. The vault file, or — since
     /// `launch_at_login` — the OS's own login-time launcher entry.
     Io,
@@ -91,6 +93,15 @@ impl IpcError {
             // irreversible, so being unhelpful here has no upside.
             ErrorKind::ConfirmationMismatch => {
                 "That is not this vault's name. Type it exactly as it is shown above."
+            }
+            // The only refusal in the product that exists to protect a file the user is not
+            // looking at. Creating a vault writes the file whole, so a path that already holds
+            // one is a destroyed vault and an unrecoverable one — the master key of the thing
+            // being overwritten is not in memory to warn about. It names the way out rather
+            // than only the problem, because the commonest cause is the resolved default
+            // colliding with the vault the user already has.
+            ErrorKind::PathInUse => {
+                "There is already a file there. Choose another name or location for the new vault."
             }
             ErrorKind::NotImportable => {
                 "That file is not an unencrypted Bitwarden JSON export. In Bitwarden, choose                  Export vault and the .json format, without a password."

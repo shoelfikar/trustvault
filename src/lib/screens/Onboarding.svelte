@@ -21,6 +21,7 @@
     calibrateKdf,
     createVault,
     defaultVaultPath,
+    pickNewVaultPath,
     scorePassword,
     type KdfSummary,
     type Strength,
@@ -125,6 +126,25 @@
     step === 1 ? nameValid && pathValid : step === 2 ? canCreate : kitAcknowledged,
   );
 
+  /**
+   * The path field's "Change" — a native save dialog, D-60.
+   *
+   * `pathTouched` is set on the way **in**, before the dialog is awaited, and not only on the
+   * way out: opening the picker is the user taking the path over, and the name-watching
+   * `$effect` above would otherwise overwrite whatever they chose the next time the name
+   * changed. A cancelled dialog leaves the path alone, which is what a cancelled dialog means.
+   */
+  async function browse() {
+    pathTouched = true;
+    error = '';
+    try {
+      const chosen = await pickNewVaultPath(path.trim() || 'vault.tvault');
+      if (chosen) path = chosen;
+    } catch (thrown) {
+      error = asIpcError(thrown).message;
+    }
+  }
+
   async function toStepTwo() {
     error = '';
     step = 2;
@@ -154,7 +174,13 @@
       strength = null;
       step = 3;
     } catch (thrown) {
-      error = asIpcError(thrown).message;
+      const failure = asIpcError(thrown);
+      error = failure.message;
+      // The refusal is about a field on the *previous* step, so the flow goes back to it —
+      // D-62. An error naming a path, shown under a password field, is one the user reads
+      // twice and then re-types their password for nothing. `pathTouched` stays set, so the
+      // name no longer moves the path out from under them while they fix it.
+      if (failure.kind === 'path_in_use') step = 1;
     } finally {
       busy = false;
     }
@@ -236,16 +262,12 @@
             onenter={() => canAdvance && next()}
           >
             {#snippet trailing()}
-              <!-- R-08 asks for "name & location", which a resolved default and an editable
-                   path satisfies. A browse button means `tauri-plugin-dialog`, and a plugin
-                   arrives when a requirement needs one and not before. -->
-              <button
-                class="change"
-                type="button"
-                disabled
-                title="Type the path; a file picker
-                would mean adding a plugin to a process that holds decrypted secrets"
-              >
+              <!-- Drawn-and-disabled from D-36 until 2026-08-07, with "a file picker would mean
+                   adding a plugin" in its `title`. The plugin arrived with D-59 and that
+                   sentence died with it; D-60 is the third door, a save dialog, because the
+                   file being named does not exist yet. Typing the path still works — this is
+                   the surface, not the mechanism. -->
+              <button class="change" type="button" disabled={busy} onclick={() => void browse()}>
                 Change
               </button>
             {/snippet}
@@ -309,7 +331,7 @@
         {/if}
 
         {#if error}
-          <p class="note danger"><Icon name="alert" size={13} />{error}</p>
+          <p class="note danger" role="alert"><Icon name="alert" size={13} />{error}</p>
         {/if}
       </div>
 
@@ -487,6 +509,10 @@
     font-family: var(--font-sans);
     font-size: var(--text-sm);
     color: var(--fg-muted);
+  }
+  .change:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--fg);
   }
   .change:disabled {
     opacity: 0.45;

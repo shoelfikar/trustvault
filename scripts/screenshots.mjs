@@ -304,6 +304,9 @@ function respond(cmd, args) {
     // file chooser in a headless browser, so without this the surface is unphotographable.
     case 'pick_import_file': return '/home/shoel/Downloads/bitwarden_export.json';
     case 'pick_vault_file': return null;
+    // D-60's save dialog. Null, like a cancelled picker, so a shot of onboarding keeps the
+    // resolved default path in the field rather than one this harness chose.
+    case 'pick_new_vault_path': return null;
     // Both halves answer with the same report, which is what the real pair does for a file
     // nobody edited in between -- and the difference between them (commit re-reads, so it can
     // differ) is a race no screenshot can hold still anyway.

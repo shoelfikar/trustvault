@@ -59,6 +59,42 @@ pub async fn pick_vault_file(app: AppHandle) -> IpcResult<Option<String>> {
     ))
 }
 
+/// **Ambient.** Asks the user where a vault that does not exist yet should go — R-08, D-60.
+///
+/// The third door, and the only one that opens a **save** dialog. Onboarding's *Change* button
+/// has been drawn-and-disabled since D-36 with "a file picker would mean adding a plugin" in its
+/// `title`; the plugin arrived with D-59 and the reason died with it, which is what the D-36
+/// sweep is for. Typing an absolute path into a text field still works and is still the fallback
+/// — this is the surface, not the mechanism.
+///
+/// `suggested` pre-fills the file name, and it is the one argument any picker here takes. What
+/// D-59 made load-bearing is that **the frontend cannot change what a dialog is for**, and that
+/// still holds: the title and the filter are fixed in Rust, and the suggestion is reduced to its
+/// own `file_name` component, so a value like `../../etc/passwd` reaches the dialog as
+/// `passwd` and an absolute path reaches it as its last segment. It is a suggestion in a field
+/// the user reads and confirms, not a destination.
+///
+/// **The dialog may name a file that already exists**, and every platform's save dialog asks
+/// before it does. Nothing is overwritten here — this command returns a string — but
+/// `create_vault` does write it, so the confirmation the OS shows is the only one there is.
+/// That is unchanged from typing the same path by hand, which onboarding has always allowed.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn pick_new_vault_path(app: AppHandle, suggested: String) -> IpcResult<Option<String>> {
+    let name = std::path::Path::new(&suggested)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "vault.tvault".to_owned());
+
+    Ok(app
+        .dialog()
+        .file()
+        .set_title("Choose where the vault goes")
+        .add_filter("TrustVault vault", &["tvault"])
+        .set_file_name(name)
+        .blocking_save_file()
+        .and_then(|picked| picked.as_path().map(|path| path.display().to_string())))
+}
+
 /// Opens a single-file picker and returns the chosen path as a string.
 ///
 /// The filter is a hint, not a gate — every platform's dialog lets the user switch to "all

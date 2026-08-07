@@ -28,8 +28,14 @@
    * not unlock, and **Leave** is how it is undone — the same recoverable end state as a vault
    * whose file was moved outside TrustVault.
    *
-   * **New vault** is still disabled with a Phase 3 reason of its own — onboarding is the only
-   * surface that creates a vault, and reaching it from here means closing the one that is open.
+   * **New vault works from 2026-08-07** — D-62, and it is the last control the D-36 sweep found
+   * still disabled. Its `title` had said "creating a second vault means closing this one first",
+   * which described the missing flow rather than a constraint: onboarding is the only surface
+   * that creates a vault and it only appeared when there was none, so a user with one vault
+   * could never make a second — R-22's "multiple vaults" was reachable only by someone who
+   * already had another `.tvault` from somewhere else. The button hands the request to the
+   * shell, which hands it to the router; the host closes the open vault inside
+   * `create_vault_inner`, after the new file is written and not before.
    */
   import Button from '../components/Button.svelte';
   import Dialog from '../components/Dialog.svelte';
@@ -51,9 +57,11 @@
     onclose: () => void;
     /** A switch landed: the host is now locked and pointing elsewhere. */
     onswitched: () => void;
+    /** The user wants a second vault — the shell routes to onboarding. D-62. */
+    oncreate: () => void;
   }
 
-  const { openPath, itemCount, onclose, onswitched }: Props = $props();
+  const { openPath, itemCount, onclose, onswitched, oncreate }: Props = $props();
 
   let vaults = $state<VaultRef[]>([]);
   let error = $state('');
@@ -242,14 +250,7 @@
 
   {#snippet footer()}
     <Button icon="note" disabled={busy} onclick={() => void openFile()}>Open vault file…</Button>
-    <Button
-      variant="primary"
-      icon="plus"
-      disabled
-      title="Creating a second vault means closing this one first"
-    >
-      New vault
-    </Button>
+    <Button variant="primary" icon="plus" disabled={busy} onclick={oncreate}>New vault</Button>
   {/snippet}
 </Dialog>
 

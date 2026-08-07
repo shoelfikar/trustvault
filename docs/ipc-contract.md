@@ -101,17 +101,24 @@ type IpcError = {
   kind: "not_a_vault" | "unsupported_version" | "unreadable" | "malformed_recovery_code"
       | "locked" | "no_such_item" | "no_such_field" | "not_secret" | "clipboard" | "io" | "internal"
       // Phase 3
-      | "malformed_totp_secret" | "confirmation_mismatch" | "not_importable";
+      | "malformed_totp_secret" | "confirmation_mismatch" | "not_importable" | "path_in_use";
   message: string;   // already localized for display; never contains a secret or a field value
 };
 ```
 
-The three Phase 3 kinds are all safe to distinguish, and each for the same reason
+The four Phase 3 kinds are all safe to distinguish, and each for the same reason
 `malformed_recovery_code` is: they are decided **before** any key material or vault content is
 involved. `malformed_totp_secret` is a seed the user is typing that will not base32-decode;
 `confirmation_mismatch` is a name typed into a delete dialog, compared against a display name the
-UI is already showing; `not_importable` is a file that is not a Bitwarden JSON export. None of them
-tells the caller anything about a vault it could not open.
+UI is already showing; `not_importable` is a file that is not a Bitwarden JSON export;
+`path_in_use` is a `try_exists` on a path nobody has opened. None of them tells the caller anything
+about a vault it could not open.
+
+`path_in_use` is the only refusal here that protects a file the user is **not** looking at — D-62.
+`create_vault` writes the file whole, so a path already holding a vault is that vault destroyed,
+and destroyed with no key in memory to have warned about it. It answers before `Vault::create`
+runs, which also means it says nothing about whether the file it refused is a vault: it is a
+`try_exists`, and a path that cannot be stat'ed fails closed.
 
 `not_importable` is deliberately coarse — malformed JSON, wrong schema, and an encrypted export all
 return it. The `message` may say which, because an import is a file the user chose and none of it is
@@ -176,16 +183,25 @@ argument: a plugin is widened attack surface in a process holding decrypted secr
 arrives when a requirement needs it and not before. Two then did — R-29's import and R-22's "Open
 vault file…" — so `tauri-plugin-dialog` is now a dependency, and `pick_import_file` /
 `pick_vault_file` below are what it is for. `default_vault_path` is unchanged: onboarding still
-resolves a default and lets the user edit it, because naming a file that does not exist yet is a
-save dialog's job and a save dialog is not one of the two doors D-59 opened.
+resolves a default and lets the user edit it.
+
+**The save dialog is the third door, opened 2026-08-07 by D-60.** The paragraph above said "naming
+a file that does not exist yet is a save dialog's job and a save dialog is not one of the two doors
+D-59 opened", which was true and was a description of what had been built rather than a reason not
+to build it. The D-36 sweep is what came back for it: onboarding's *Change* button had carried "a
+file picker would mean adding a plugin" in its `title` since D-36, and that sentence stopped being
+true the day D-59 landed. The plugin is already in the tree; a third door on it costs no dependency
+and no capability.
 
 ```ts
 pick_import_file(): string | null
 pick_vault_file(): string | null
+pick_new_vault_path({ suggested: string }): string | null
 ```
 
-A native file-open dialog, filtered to `.json` and `.tvault` respectively. `null` means the user
-closed it, which is not an error.
+The first two are native file-**open** dialogs, filtered to `.json` and `.tvault` respectively. The
+third is a **save** dialog: it names a file that does not exist yet, which is why it is the only one
+that takes an argument. `null` means the user closed it, which is not an error.
 
 **Both return a path and never a byte of the file** — that is the reason they exist rather than an
 `<input type="file">`, and it is the same rule §2 states about vault data arriving one place from
@@ -196,11 +212,18 @@ host reads the file instead, in `import_preview` / `import_commit` (§6.8).
 A path is not a `Secret`: the user chose it in an OS dialog this process cannot script, the
 switcher and the settings pane already print it, and neither command opens what it points at.
 
-Neither takes an argument, and that is load-bearing. Each hard-codes its own title and filter, so
-there is no call the frontend can make that turns "choose an export" into "choose anything". The
-plugin's own `open`/`save`/`message` commands are **denied** — `capabilities/default.json` grants
-`core:default` alone — so these two are the only doors, and §9 check 8 asserts the capability has
-not grown.
+**What is load-bearing is that the frontend cannot change what a dialog is for**, not the argument
+count. Each hard-codes its own title and filter, so there is no call the frontend can make that
+turns "choose an export" into "choose anything". `pick_new_vault_path`'s `suggested` pre-fills the
+file-name field and nothing else: it is reduced to its own `file_name` component host-side, so
+`../../etc/passwd` arrives at the dialog as `passwd`, and the user reads and confirms the result
+either way. The plugin's own `open`/`save`/`message` commands are **denied** —
+`capabilities/default.json` grants `core:default` alone — so these three are the only doors, and §9
+check 8 asserts the capability has not grown.
+
+`pick_new_vault_path` returns a path and writes nothing. `create_vault` is what writes, and a save
+dialog naming an existing file means the OS has already asked about overwriting it — which is the
+only confirmation there is, and is unchanged from typing that path into the field by hand.
 
 `pick_vault_file` does not check that what came back is a vault. `unlock` is what finds out, and it
 fails closed for a file that is not one (R-03); a check here would be a second and weaker opinion
@@ -697,6 +720,14 @@ product: it must be read by a human, off a screen, and written down. Constraints
 - `password` crosses **inbound**, which is unavoidable — the user types it into the webview. Inbound
   is a different risk from outbound: it is already in the heap the moment the keystroke lands, and
   nothing this contract does changes that. The mitigation is that it is never sent back.
+
+**It refuses a `path` that already exists**, with `path_in_use` and before any key material is
+derived — §4. And **it may be called with a vault already open**, which it could not be until D-62
+gave the switcher's *New vault* somewhere to go. The order inside is the acceptance criterion, in
+two halves: everything that can fail runs first, so a path that cannot be written leaves the open
+vault exactly as it was; then the outgoing vault's audit tail is **flushed** and its key zeroized
+before the new vault is installed. The flush is the half that would go missing in silence — reveals
+buffer in memory (D-31), and a vault replaced without one loses the record that they happened.
 
 ```ts
 unlock({ path: string; password: string }): void

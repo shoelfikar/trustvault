@@ -213,6 +213,9 @@ export type ErrorKind =
   // the **host** verifies, so this side must be able to name it: narrowed to `internal`, the
   // dialog would tell a user who mistyped that something went wrong inside TrustVault.
   | 'confirmation_mismatch'
+  // A vault was asked for at a path that already holds a file — D-62. Reachable from onboarding
+  // only, and the one refusal in the product that protects a file the user is not looking at.
+  | 'path_in_use'
   | 'io'
   | 'internal';
 
@@ -355,15 +358,24 @@ export const setSettings = (settings: Settings) => call<Settings>('set_settings'
  * `null` means the user closed the dialog. That is the ordinary outcome of opening a picker and
  * must never be reported as an error.
  *
- * Neither takes an argument: the title and the filter are fixed in Rust, so there is no call
- * from here that turns "choose an export" into "choose anything". The plugin's own dialog
- * commands are **denied** to this webview by `capabilities/default.json`; these are the only
- * two doors, and `ipc_audit.rs` asserts that has not changed.
+ * The title and the filter are fixed in Rust, so there is no call from here that turns "choose
+ * an export" into "choose anything". The plugin's own dialog commands are **denied** to this
+ * webview by `capabilities/default.json`; these are the only three doors, and `ipc_audit.rs`
+ * asserts that has not changed.
  */
 export const pickImportFile = () => call<string | null>('pick_import_file');
 
 /** The switcher's "Open vault file…" — the path goes straight to `switchVault`. */
 export const pickVaultFile = () => call<string | null>('pick_vault_file');
+
+/**
+ * Onboarding's "Change" — a **save** dialog, because the vault does not exist yet — D-60.
+ *
+ * `suggested` only pre-fills the file-name field; the host reduces it to its own file name, and
+ * the user reads the result in the dialog before confirming it.
+ */
+export const pickNewVaultPath = (suggested: string) =>
+  call<string | null>('pick_new_vault_path', { suggested });
 
 /* ---- Import — §6.8, R-29, D-42 -------------------------------------------- */
 

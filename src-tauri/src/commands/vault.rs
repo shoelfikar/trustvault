@@ -21,11 +21,16 @@ pub fn build_info() -> BuildInfo {
 
 /// **Ambient.** Where a vault called `name` would go if the user does not say otherwise.
 ///
-/// Deliberately **not** a native file picker. A picker means `tauri-plugin-dialog`, and the
-/// manifest's rule is that a plugin is added when a requirement needs it and not before — a
-/// plugin is widened attack surface in a process that holds decrypted secrets. R-08 asks for
-/// "name & location", which a resolved default and an editable path satisfies. Revisit with a
-/// decision log entry if the typed path proves to be the thing users get wrong.
+/// A default is what this returns; the field is editable and, since D-60, *Change* opens a save
+/// dialog beside it. The reason there was no picker for two phases is in `docs/ipc-contract.md`
+/// §5 and it is still the reason a plugin arrives late, not the reason this command exists.
+///
+/// **The suffix is not tidiness — it is what keeps the default from naming a vault that already
+/// exists.** Since D-62 a second vault can be created from inside the shell, and the flow opens
+/// with the same default name it opened with the first time; without this loop, a user who kept
+/// "Personal Vault" would be handed the path of the vault they are currently using. Refusing to
+/// overwrite is `create_vault`'s job and it does it, but a default that walks into the refusal
+/// is a default that teaches the user the app is broken.
 #[tauri::command(rename_all = "snake_case")]
 pub fn default_vault_path(app: AppHandle, name: String) -> String {
     // A filename, not a path: everything that could traverse or escape is dropped rather than
@@ -49,10 +54,26 @@ pub fn default_vault_path(app: AppHandle, name: String) -> String {
         .or_else(|_| app.path().home_dir())
         .unwrap_or_else(|_| PathBuf::from("."));
 
-    directory
-        .join(format!("{}.{EXTENSION}", stem.to_lowercase()))
+    free_path(&directory, &stem.to_lowercase())
         .display()
         .to_string()
+}
+
+/// `<directory>/<stem>.tvault`, or the first `-2`, `-3`, … that is not taken.
+///
+/// Bounded rather than a `loop`: at a hundred vaults called the same thing the suffix has
+/// stopped being a convenience, and an unbounded search on a directory that answers "exists" to
+/// everything would not return. The last candidate is returned even if it is taken, because
+/// `create_vault` is what refuses — two places deciding that would be one too many.
+fn free_path(directory: &std::path::Path, stem: &str) -> PathBuf {
+    let mut candidate = directory.join(format!("{stem}.{EXTENSION}"));
+    for n in 2..=99 {
+        if !candidate.try_exists().unwrap_or(true) {
+            return candidate;
+        }
+        candidate = directory.join(format!("{stem}-{n}.{EXTENSION}"));
+    }
+    candidate
 }
 
 /// **Ambient.** Open, locked, or nothing chosen — the shape the whole frontend routes on.
@@ -81,6 +102,10 @@ pub fn calibrate_kdf() -> KdfSummary {
 /// The recovery code is the least avoidable secret in the product: it exists to be read by a
 /// human off a screen and written down, so it must cross. There is no command to fetch it
 /// again — the webview renders it on step 3 and drops it.
+///
+/// **A vault may already be open when this is called** — since 2026-08-07 and D-62, the
+/// switcher's *New vault* reaches onboarding from inside the shell. The outgoing vault is
+/// flushed and zeroized by `create_vault_inner`, in an order that matters and is tested there.
 #[tauri::command(rename_all = "snake_case")]
 pub fn create_vault(
     app: AppHandle,
@@ -99,7 +124,21 @@ pub fn create_vault(
 ///
 /// Split for the same reason `items.rs` splits its commands: `tests/ipc_session.rs` drives the
 /// **real** command bodies through a whole-shell session, and a harness that drove a
-/// reimplementation would prove only that the reimplementation is safe.
+/// reimplementation would prove only that the reimplementation is safe. Since D-62 the split
+/// carries something else too — the whole "close the old vault, open the new one" sequence is
+/// here rather than in the wrapper, which is `delete_vault`'s lesson applied before it bites:
+/// an ordering written into the `#[tauri::command]` layer is one no harness can read.
+///
+/// **The order is the acceptance criterion, and it has two halves.**
+///
+/// *Everything that can fail happens first.* `Vault::create` and `save_to` run before the open
+/// vault is touched, so a path that cannot be written leaves the user exactly where they were
+/// rather than locked out of a vault they had open because they mistyped a directory.
+///
+/// *Then the outgoing vault is flushed and dropped before the new one is installed.* The flush
+/// is the half that would go missing silently: reveals buffer in memory (D-31) and lock is what
+/// writes the tail, so replacing a vault without flushing discards its audit log — the one
+/// record whose absence looks exactly like nothing having happened.
 pub fn create_vault_inner(
     state: &AppState,
     name: String,
@@ -113,10 +152,21 @@ pub fn create_vault_inner(
         p_cost: kdf.p_cost,
     };
     let path = PathBuf::from(path);
+    // The one check in this command, and it guards a file this command is not otherwise about.
+    // `save_to` writes the vault whole, so a path that already holds one is a vault destroyed
+    // with no key in memory to have warned about it — the mirror of `delete_vault`, except that
+    // nobody asked for it and nothing said it was going to happen. It is `try_exists` rather
+    // than `exists` so that a path we cannot even stat fails closed instead of reading as free.
+    if path.try_exists().unwrap_or(true) {
+        return Err(IpcError::new(ErrorKind::PathInUse));
+    }
     let (mut vault, recovery) = Vault::create(name, &password, params)?;
     vault.save_to(&path)?;
 
     let code = recovery.display().to_string();
+    // Nothing below this line can fail, which is what makes the ordering safe to run at all.
+    flush_audit(state);
+    state.lock();
     // Every path that leaves a vault open goes through `Inner::opened`, which is where the
     // remembered path (D-40) and the known-vaults list (R-22) are both kept.
     state.with(|inner| inner.opened(vault, path));
@@ -225,20 +275,31 @@ pub fn lock(app: AppHandle, state: State<'_, AppState>) -> IpcResult<()> {
 /// password does not rewrite the vault file, and lock is the natural moment to write the tail.
 /// A crash before this point loses it, which the decision accepted.
 pub fn lock_now(app: &AppHandle, state: &AppState, reason: LockReason) {
-    state.with(|inner| {
-        if let (Some(vault), Some(path)) = (inner.vault.as_mut(), inner.path.as_ref())
-            && vault.has_unflushed_audit()
-        {
-            // Best effort. A failed flush must not prevent the lock: an unlockable vault is a
-            // worse outcome than a lost audit tail, and refusing to lock because a disk is
-            // full would leave the master key in memory.
-            let _ = vault.save_to(path);
-        }
-    });
+    flush_audit(state);
 
     if state.lock() {
         let _ = app.emit("vault-locked", LockEvent { reason });
     }
+}
+
+/// Writes the open vault's buffered audit tail, if it has one — the first half of [`lock_now`].
+///
+/// Factored out on 2026-08-07 because `create_vault_inner` needs it too and needs it without an
+/// `AppHandle` (D-62). Two copies would drift in the direction that costs: a second path that
+/// closes a vault and forgets the flush loses the audit tail silently, and a missing audit entry
+/// is indistinguishable from a reveal that never happened.
+///
+/// Best effort, deliberately. A failed flush must not prevent the vault closing: an unlockable
+/// vault is a worse outcome than a lost tail, and refusing to lock because a disk is full would
+/// leave the master key in memory.
+fn flush_audit(state: &AppState) {
+    state.with(|inner| {
+        if let (Some(vault), Some(path)) = (inner.vault.as_mut(), inner.path.as_ref())
+            && vault.has_unflushed_audit()
+        {
+            let _ = vault.save_to(path);
+        }
+    });
 }
 
 /// Payload of `vault-locked`.
@@ -646,5 +707,105 @@ mod tests {
         let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
         delete_vault_inner(&state, &key, &stem).expect("already gone is the desired state");
         assert!(list_vaults_inner(&state).is_empty());
+    }
+
+    /* ---- Creating a second vault — D-62 ----------------------------------- */
+
+    #[test]
+    fn creating_a_vault_never_writes_over_a_file_that_is_already_there() {
+        // The trap D-62 opened and this closes. Before it, a second vault could not be created
+        // at all; after it, the default name resolves to a default path, and a user who kept
+        // "Personal Vault" for both would have had the first one written over by the second --
+        // no confirmation, no undo, and no key in memory to have warned with.
+        let (state, path) = vault_at("no-overwrite");
+        let key = path.display().to_string();
+        let before = std::fs::read(&path).unwrap();
+
+        let refused = create_vault_inner(
+            &state,
+            "Second Vault".into(),
+            key,
+            "a different master password".into(),
+            testing_kdf(),
+        );
+
+        assert_eq!(refused.unwrap_err().kind, ErrorKind::PathInUse);
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "the file on disk is byte-for-byte what it was"
+        );
+        assert_eq!(
+            state.status().display_name,
+            "Personal Vault",
+            "and the vault that was open is still the one that is open -- a refusal must not \
+             cost the user the session they had"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn creating_a_second_vault_closes_the_first_one_before_it_opens_the_new_one() {
+        // The ordering `switch_vault` is tested for, in the other command that replaces the
+        // open vault. Reversed, there is a window in which the state names the new vault while
+        // the previous one's master key is still in memory.
+        let (state, first) = vault_at("second-vault");
+        let second = first.with_file_name("trustvault-second-vault-b.tvault");
+        let _ = std::fs::remove_file(&second);
+
+        create_vault_inner(
+            &state,
+            "Work Vault".into(),
+            second.display().to_string(),
+            "another master password entirely".into(),
+            testing_kdf(),
+        )
+        .expect("a writable path");
+
+        let status = state.status();
+        assert_eq!(status.state, crate::dto::VaultState::Unlocked);
+        assert_eq!(status.display_name, "Work Vault");
+        assert_eq!(
+            status.path.as_deref(),
+            Some(second.display().to_string()).as_deref()
+        );
+        assert!(
+            first.is_file(),
+            "the first vault's file is left where it is"
+        );
+        assert_eq!(
+            list_vaults_inner(&state).len(),
+            2,
+            "and it is still in the switcher, which is the whole point of having two"
+        );
+
+        let _ = std::fs::remove_file(&first);
+        let _ = std::fs::remove_file(&second);
+    }
+
+    #[test]
+    fn the_suggested_path_steps_around_a_vault_that_is_already_there() {
+        // `default_vault_path` resolves a directory this test cannot control, so what is tested
+        // is the part that decides: the same stem twice must not name the same file twice.
+        let directory = std::env::temp_dir().join(format!("tv-free-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+
+        let first = free_path(&directory, "personal-vault");
+        assert_eq!(first.file_name().unwrap(), "personal-vault.tvault");
+        std::fs::write(&first, b"occupied").unwrap();
+
+        let second = free_path(&directory, "personal-vault");
+        assert_eq!(second.file_name().unwrap(), "personal-vault-2.tvault");
+
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    fn testing_kdf() -> KdfSummary {
+        KdfSummary {
+            m_cost: KdfParams::TESTING.m_cost,
+            t_cost: KdfParams::TESTING.t_cost,
+            p_cost: KdfParams::TESTING.p_cost,
+        }
     }
 }

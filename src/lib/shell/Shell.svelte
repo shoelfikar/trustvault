@@ -52,9 +52,17 @@
      * to keep from existing.
      */
     onvaultchanged: () => void;
+    /**
+     * The user asked for a second vault from the switcher — R-22, D-62.
+     *
+     * Routed up to the router rather than handled here, for the reason above one line: this
+     * shell is what gets replaced by the onboarding flow, and a screen that swaps itself out
+     * would be deciding what is on screen instead of the state that owns it.
+     */
+    oncreatevault: () => void;
   }
 
-  const { status, settings, onsettings, onvaultchanged }: Props = $props();
+  const { status, settings, onsettings, onvaultchanged, oncreatevault }: Props = $props();
 
   let items = $state<ItemSummary[]>([]);
   let view = $state<View>({ kind: 'all' });
@@ -389,6 +397,10 @@
       itemCount={items.length}
       onclose={() => (overlay = 'none')}
       onswitched={onvaultchanged}
+      oncreate={() => {
+        overlay = 'none';
+        oncreatevault();
+      }}
     />
   {:else if overlay === 'deleteItem'}
     <DeleteDialog

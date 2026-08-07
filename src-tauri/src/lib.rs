@@ -100,6 +100,7 @@ pub fn run() {
             // rather than the file, which is the whole reason it is a host command.
             commands::picker::pick_import_file,
             commands::picker::pick_vault_file,
+            commands::picker::pick_new_vault_path,
             // Multi-vault — ambient, because the switcher's whole job is to be usable while
             // nothing is unlocked. None of the four returns anything from inside a vault.
             commands::vault::list_vaults,

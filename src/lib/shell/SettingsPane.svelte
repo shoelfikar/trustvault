@@ -98,7 +98,13 @@
           <p class="vault-name">{status.displayName}</p>
           <p class="vault-path">{status.path ?? ''}</p>
         </div>
-        <Button disabled title="Renaming arrives with the mutation commands">Rename vault</Button>
+        <!-- A "Rename vault" button sat here, drawn-and-disabled since D-36 with "renaming
+             arrives with the mutation commands" in its `title`. The mutation commands arrived
+             on 2026-08-06 and none of them renames a vault, which is what the D-36 sweep found
+             — D-61. It is removed rather than re-worded: the prototype draws no rename, no
+             requirement asks for one, and the display name a user sees is the file's own stem
+             whenever the vault is closed (`display_name_for`), so renaming inside the app would
+             change a label the file name goes on contradicting. -->
       </div>
       <div class="facts">
         {#each facts as fact, index (fact.k)}

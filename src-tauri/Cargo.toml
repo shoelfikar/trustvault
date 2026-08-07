@@ -21,6 +21,17 @@ tauri-build = { version = "2.6", features = [] }
 # holds decrypted secrets, so a plugin is added when a requirement needs it and not before.
 # Notably absent: tauri-plugin-opener — nothing in TrustVault opens arbitrary URLs.
 tauri = { version = "2.11", features = [] }
+# D-59, and the only plugin in the manifest. Two Phase 3 surfaces need a file chosen by the
+# user -- the Bitwarden import (R-29) and the switcher's "Open vault file..." -- and the
+# webview must not be the thing that reads it: an `<input type="file">` would put a foreign
+# vault's plaintext into the JS heap, which is the one thing CLAUDE.md says can never be
+# wiped. So the picker lives in the host and returns a **path**, never bytes.
+#
+# It is registered in Rust and granted to the webview **nowhere**: `capabilities/default.json`
+# is still `core:default` alone, so `dialog:allow-open` is denied and the plugin's own JS
+# commands are unreachable from the frontend. `ipc_audit.rs` asserts that, because the
+# widening this dependency makes cheap is a one-line edit to a JSON file.
+tauri-plugin-dialog = "2.7"
 trustvault-core = { path = "../crates/trustvault-core" }
 serde.workspace = true
 serde_json = "1"

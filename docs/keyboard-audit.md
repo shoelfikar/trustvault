@@ -93,12 +93,20 @@ same keystrokes and would swallow the first letter of every shortcut a later pha
 | 16 | Settings | Every control reachable in visual order; the segmented controls on ←/→; **UI scale changes do not move focus**; the **Start at login** toggle takes Space, and when the platform refuses the write the toggle returns to its old position with the reason announced — R-21 | [ ] |
 | 17 | Watchtower | The findings list is a list: ↑/↓ and Enter to the offending item | [ ] |
 | 18 | Edit-item dialog | Every field row Tab-reachable in display order; **Replace** on a secret row reachable without hover, and Tab from it lands in the input it just opened; Remove and Add field reachable; the **New tag** field takes Enter as "add this tag" — R-17 | [ ] |
+| 19 | Import dialog | Esc closes from the intro **and** from the report; Choose file… reachable and the **native picker takes over from there**, so the keyboard path leaves the app and must come back to a focused dialog; Import stays disabled until a preview is on screen; the report's refusal list scrolls with the keyboard alone, not only with a wheel — R-29 | [ ] |
 
-Row 18 was added 2026-08-06 with the dialog itself, and it is the reason this table's count is now
-**18 against the gate's 15**: the prototype draws no edit surface at all, so the surface exists
-because R-17 needs one and not because the design has a picture of it. That widens the
-reconciliation this section already owed rather than changing its shape — the source is right about
-what exists, and the gate line needs a list rather than a total.
+Rows 18 and 19 were added 2026-08-06 with the surfaces themselves, and they are why this table's
+count is now **19 against the gate's 15**: neither the edit dialog nor the import dialog is drawn
+in the prototype, so both exist because a requirement needs one and not because the design has a
+picture of it. That widens the reconciliation this section already owed rather than changing its
+shape — the source is right about what exists, and the gate line needs a list rather than a total.
+
+Row 19 carries the only line in this table that is **not about our own focus handling**. The native
+file dialog is the operating system's, not ours: it takes focus, it is keyboard-operable or not
+according to the platform, and what has to be checked here is the return — a dialog that comes back
+with focus on `body` leaves the user who just chose a file with nothing selected and no visible
+reason. It is also the first row that cannot be checked in the screenshot harness at all, because
+the harness has no file chooser to open.
 
 Row 18's "Tab from Replace lands in the input it just opened" is the finding waiting to happen:
 pressing Replace swaps a disabled input for an editable one in the same position, and the browser

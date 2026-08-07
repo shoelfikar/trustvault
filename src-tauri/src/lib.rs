@@ -31,6 +31,15 @@ use state::AppState;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // The only plugin in this application — D-59, and it is registered without being
+        // *granted*. `capabilities/default.json` lists `core:default` alone, so the three JS
+        // commands this adds (`open`, `save`, `message`) are denied to the webview and the two
+        // commands in `commands::picker` are the only way a dialog opens. Note what it does
+        // do to the frontend regardless of the ACL: its init script replaces `window.alert`
+        // and `window.confirm`, and the replacement `confirm` returns a **promise**, so
+        // `if (confirm(…))` would be true always. Nothing here calls either, and `ipc_audit.rs`
+        // keeps it that way.
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
         .setup(|app| {
             let handle = app.handle().clone();
@@ -87,6 +96,10 @@ pub fn run() {
             commands::strength::score_password,
             commands::generator::copy_generated,
             commands::totp::totp_preview,
+            // The picker — D-59. Ambient because it reads no vault, and it returns a path
+            // rather than the file, which is the whole reason it is a host command.
+            commands::picker::pick_import_file,
+            commands::picker::pick_vault_file,
             // Multi-vault — ambient, because the switcher's whole job is to be usable while
             // nothing is unlocked. None of the four returns anything from inside a vault.
             commands::vault::list_vaults,

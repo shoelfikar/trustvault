@@ -66,7 +66,16 @@
       : `${itemCount} items will be gone for good. The file is deleted from this computer and there is no copy anywhere else.`,
   );
 
-  async function confirm() {
+  /**
+   * Named `remove`, not `confirm`, since 2026-08-06 — D-59.
+   *
+   * `tauri-plugin-dialog`'s init script replaces `window.confirm` with an **async** function, so
+   * the global that this declaration used to shadow no longer means what its name says: a
+   * `if (confirm(…))` anywhere tests a promise and is therefore always true. The local shadow
+   * was safe, and that is the problem — it is safe until somebody moves the call, and the thing
+   * it guards is the irreversible one. `ipc_audit.rs` now forbids the identifier outright.
+   */
+  async function remove() {
     if (!confirmed || !canDelete || deleting) return;
     deleting = true;
     error = '';
@@ -111,7 +120,7 @@
       <Button
         variant="primary"
         disabled={!confirmed || !canDelete || deleting}
-        onclick={() => void confirm()}
+        onclick={() => void remove()}
       >
         {#if deleting}
           Deleting…

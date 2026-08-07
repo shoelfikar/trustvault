@@ -170,11 +170,41 @@ default_vault_path({ name: string }): string
 
 Where a vault called `name` would go if the user does not say otherwise — R-08.
 
-**Not a native file picker.** A picker means `tauri-plugin-dialog`, and a plugin is widened attack
-surface in a process holding decrypted secrets; the manifest's standing rule is that a plugin
-arrives when a requirement needs one and not before. A resolved default plus an editable path
-satisfies "name & location". Revisit with a decision log entry if the typed path turns out to be
-what users get wrong.
+**Not a native file picker** — and that sentence stood until **2026-08-06, D-59**, which is the
+revisit it asked for. It is left here rather than deleted because the argument in it is still the
+argument: a plugin is widened attack surface in a process holding decrypted secrets, and one
+arrives when a requirement needs it and not before. Two then did — R-29's import and R-22's "Open
+vault file…" — so `tauri-plugin-dialog` is now a dependency, and `pick_import_file` /
+`pick_vault_file` below are what it is for. `default_vault_path` is unchanged: onboarding still
+resolves a default and lets the user edit it, because naming a file that does not exist yet is a
+save dialog's job and a save dialog is not one of the two doors D-59 opened.
+
+```ts
+pick_import_file(): string | null
+pick_vault_file(): string | null
+```
+
+A native file-open dialog, filtered to `.json` and `.tvault` respectively. `null` means the user
+closed it, which is not an error.
+
+**Both return a path and never a byte of the file** — that is the reason they exist rather than an
+`<input type="file">`, and it is the same rule §2 states about vault data arriving one place from
+another direction. An `<input>` hands the *webview* the file's contents, and for
+`pick_import_file` those contents are a foreign vault's plaintext in a heap nothing can wipe. The
+host reads the file instead, in `import_preview` / `import_commit` (§6.8).
+
+A path is not a `Secret`: the user chose it in an OS dialog this process cannot script, the
+switcher and the settings pane already print it, and neither command opens what it points at.
+
+Neither takes an argument, and that is load-bearing. Each hard-codes its own title and filter, so
+there is no call the frontend can make that turns "choose an export" into "choose anything". The
+plugin's own `open`/`save`/`message` commands are **denied** — `capabilities/default.json` grants
+`core:default` alone — so these two are the only doors, and §9 check 8 asserts the capability has
+not grown.
+
+`pick_vault_file` does not check that what came back is a vault. `unlock` is what finds out, and it
+fails closed for a file that is not one (R-03); a check here would be a second and weaker opinion
+about the same question, and it would have to open the file to hold it.
 
 ```ts
 score_password({ password: string; inputs: string[] }): { score: 0|1|2|3|4; label: string; crack_time: string }
@@ -799,6 +829,15 @@ boundary in both directions:
 7. *(Phase 3)* `totp_code` and `search_items` return no field value: the first returns a code and
    never a seed (§6.6), the second returns summaries and never the text that matched (§6.5). Both
    are the shapes D-45 and D-46 chose over an easier one, so both are pinned rather than trusted.
+8. *(Phase 3, D-59)* **The webview's capability grants `core:default` and nothing else.** The
+   application now registers one plugin, and the entire argument for it is that the *frontend*
+   gains nothing — the picker is a host command. That argument is one line of JSON away from being
+   false, so it is asserted rather than described.
+9. *(Phase 3, D-59)* **Nothing in `src/` calls `window.alert` or `window.confirm`.** The dialog
+   plugin's init script replaces both. The replacement `confirm` is **async**, so `if (confirm(…))`
+   tests a promise and is always true — a confirmation written the ordinary way would confirm
+   itself. TrustVault has never used either; this is what keeps that true now that using one costs
+   something new.
 
 Check 6 is worth more than it looks. It is the regression test for a webview reload: reload leaves
 the frontend's stores empty and its lock state whatever the core says, and the bug it prevents is a
@@ -819,6 +858,8 @@ does not run is worse than one documented as not running:
 | 5 — scripted whole-shell session | automated in `tests/ipc_session.rs`. It scripts launch → onboarding → quit → relaunch → wrong password → unlock → list → open → reveal → copy → lock → recovery unlock, records every crossing, and reads the transcript. Two limits, named: it drives command bodies rather than a live webview, and the item it reveals is seeded through the core's API because Phase 2 ships no mutation command (D-38). The transcript is written to `target/ipc-session.log` as gate evidence |
 | 6 — every vault command refuses while locked | automated |
 | 7 — `totp_code` and `search_items` return no field value | automated, both halves. The seed now lives in the harness's shared fixture rather than in the TOTP test alone, so checks 2 and 4 assert against a vault holding one; the code half is pinned on the *absence of a `code` key in any list* rather than on the digits, because six digits occur inside a UUID by chance often enough to make a flaky check that someone eventually deletes |
+| 8 — the capability grants `core:default` alone | automated; parses `capabilities/default.json` |
+| 9 — no `alert` / `confirm` in `src/` | automated; walks every `.ts` and `.svelte` file under `src/` rather than a list of them, for the reason the `rename_all` check reads its own directory — a hand-written list of a directory's files goes stale on the day someone adds one |
 | N-07 — no wildcard origin in the CSP | automated |
 
 > **Resolved 2026-08-05 — D-39.** R-10's acceptance criterion read "enforced by a **core** test",

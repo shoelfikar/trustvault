@@ -15,18 +15,34 @@
    * a dialog that makes you type the name. Putting an irreversible action in the same row as a
    * reversible one is how the wrong one gets clicked.
    *
-   * **Open vault file…** is still disabled, and for the reason it always was: a picker means
-   * `tauri-plugin-dialog`, and the manifest's standing rule is that a plugin arrives when a
-   * requirement needs one and not before, because a plugin is widened attack surface in a
-   * process holding decrypted secrets. **New vault** is disabled with a Phase 3 reason of its
-   * own — onboarding is the only surface that creates a vault, and reaching it from here means
-   * closing the one that is open.
+   * **Open vault file… works from 2026-08-06** — D-59. It was disabled from D-36 until then for
+   * the reason the manifest still states: a picker means `tauri-plugin-dialog`, and a plugin is
+   * widened attack surface in a process holding decrypted secrets, so one arrives when a
+   * requirement needs it and not before. Two requirements then needed it at once, and the
+   * dependency was taken with the webview granted nothing — `pickVaultFile` is a host command
+   * that returns a **path**, and `switchVault` already accepts one it has never seen.
+   *
+   * Nothing checks the chosen file is a vault. `unlock` is what finds out, and it fails closed
+   * for a file that is not one (R-03); a check here would be a second and weaker opinion, and
+   * it would have to open the file to hold it. So a wrong pick lands on a lock screen that will
+   * not unlock, and **Leave** is how it is undone — the same recoverable end state as a vault
+   * whose file was moved outside TrustVault.
+   *
+   * **New vault** is still disabled with a Phase 3 reason of its own — onboarding is the only
+   * surface that creates a vault, and reaching it from here means closing the one that is open.
    */
   import Button from '../components/Button.svelte';
   import Dialog from '../components/Dialog.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import Icon from '../icons/Icon.svelte';
-  import { asIpcError, forgetVault, listVaults, switchVault, type VaultRef } from '../ipc';
+  import {
+    asIpcError,
+    forgetVault,
+    listVaults,
+    pickVaultFile,
+    switchVault,
+    type VaultRef,
+  } from '../ipc';
 
   interface Props {
     /** The open vault's path, so the row for it can be marked without a second lookup. */
@@ -106,6 +122,37 @@
   }
 
   /**
+   * Open a vault file the app has never seen — R-22, D-59.
+   *
+   * The picked path goes straight to `switchVault`, which locks and zeroizes the outgoing vault
+   * before it moves and adds the new path to the list. A cancelled picker returns `null` and is
+   * the ordinary outcome, so it does nothing rather than reporting anything.
+   *
+   * Re-picking the vault that is already open is allowed and is not a no-op the way clicking its
+   * row is: it goes through `switchVault` and therefore **locks**. That is the honest reading of
+   * "open this file" and it is recoverable in one unlock — guarding it here would mean this
+   * surface holding an opinion about paths, which is what `openPath` comparison already costs
+   * the row list.
+   */
+  async function openFile() {
+    if (busy) return;
+    busy = true;
+    error = '';
+    try {
+      const picked = await pickVaultFile();
+      if (picked === null) {
+        busy = false;
+        return;
+      }
+      await switchVault(picked);
+      onswitched();
+    } catch (thrown) {
+      error = asIpcError(thrown).message;
+      busy = false;
+    }
+  }
+
+  /**
    * Leave: the row goes, the file stays.
    *
    * No confirmation, and that is the point of the split — this is the reversible one. The vault
@@ -171,12 +218,19 @@
     {#if vaults.length === 0 && !error}
       <!-- Unreachable in practice — any vault the app has opened is listed, and a session that
            reaches this dialog has opened one. Drawn anyway: an empty box with no words in it
-           reads as a failed load. It carries **no action**, which is the one honest gap in the
-           R-19 sweep: both footer buttons are disabled for reasons of their own, and an action
-           here would have to be a third path to a file this build cannot pick. -->
+           reads as a failed load.
+
+           It **carried no action** until 2026-08-06, and the comment here said why: both footer
+           buttons were disabled, so an action would have been a third path to a file this build
+           could not pick. D-59 made that false, which is the sweep the empty-state pass asked
+           for — a state written around a limitation has to be re-read when the limitation goes,
+           and nothing prompts you to. -->
       <EmptyState
         icon="vault"
         message="No vaults yet — the one you create at setup appears here."
+        actionLabel="Open vault file…"
+        actionDisabled={busy}
+        onaction={() => void openFile()}
         quiet
       />
     {/if}
@@ -187,9 +241,7 @@
   </div>
 
   {#snippet footer()}
-    <Button icon="note" disabled title="Opening another vault file needs the native file picker">
-      Open vault file…
-    </Button>
+    <Button icon="note" disabled={busy} onclick={() => void openFile()}>Open vault file…</Button>
     <Button
       variant="primary"
       icon="plus"

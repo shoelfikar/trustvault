@@ -183,6 +183,7 @@ fn every_command_names_its_arguments_in_snake_case() {
         ("settings.rs", include_str!("../src/commands/settings.rs")),
         ("strength.rs", include_str!("../src/commands/strength.rs")),
         ("import.rs", include_str!("../src/commands/import.rs")),
+        ("picker.rs", include_str!("../src/commands/picker.rs")),
         ("generator.rs", include_str!("../src/commands/generator.rs")),
         ("search.rs", include_str!("../src/commands/search.rs")),
         ("totp.rs", include_str!("../src/commands/totp.rs")),
@@ -570,6 +571,94 @@ fn the_csp_has_no_wildcard_origin() {
     assert!(
         csp.contains("style-src 'self' 'unsafe-inline'"),
         "the one relaxation is on style-src and nowhere else"
+    );
+}
+
+/// N-07 again, from the side a plugin widens — the webview is granted nothing but `core:default`.
+///
+/// D-59 added the first plugin in this application, and the argument for it was that the
+/// *webview* gains nothing: `tauri-plugin-dialog` is registered in `lib.rs` so that
+/// `commands::picker` can open a native dialog from the host, and the plugin's own `open`,
+/// `save` and `message` commands stay denied because no capability names them.
+///
+/// That argument is one line of JSON away from being false, which is exactly why it is a test
+/// and not a comment. An `dialog:allow-open` added here would let anything running in the
+/// webview open a file dialog and read what came back — and the second plugin somebody adds
+/// will arrive with a `permissions` line in a pull request that looks like configuration.
+#[test]
+fn the_webview_is_granted_no_plugin_permission() {
+    let capability: serde_json::Value =
+        serde_json::from_str(include_str!("../capabilities/default.json"))
+            .expect("valid capability");
+    let granted: Vec<&str> = capability["permissions"]
+        .as_array()
+        .expect("a permission list")
+        .iter()
+        .map(|entry| entry.as_str().expect("permissions are strings"))
+        .collect();
+
+    assert_eq!(
+        granted,
+        ["core:default"],
+        "the webview's capability has grown beyond core:default — a plugin permission here is \
+         reachable by anything running in the page, and D-59's whole argument is that the \
+         picker is a host command instead"
+    );
+}
+
+/// The dialog plugin rewrites two webview globals, and nothing in the frontend may use them.
+///
+/// Its init script replaces `window.alert` and `window.confirm` with calls to
+/// `plugin:dialog|message` and `plugin:dialog|confirm`. Both are denied by the capability
+/// above, so both now fail — but the sharper problem is `confirm`, which upstream replaces
+/// with an **async** function. `if (confirm("Delete this?"))` tests a Promise, which is always
+/// truthy, so a guard written the way every web tutorial writes it would delete without asking.
+///
+/// TrustVault has never used either; this is what keeps that true now that the cost of using
+/// one has changed. The `Dialog` component is the app's own and is unaffected.
+#[test]
+fn the_frontend_calls_neither_alert_nor_confirm() {
+    let mut offenders = Vec::new();
+    let mut stack = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src")];
+    while let Some(directory) = stack.pop() {
+        for entry in std::fs::read_dir(&directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let is_source = matches!(
+                path.extension().and_then(|extension| extension.to_str()),
+                Some("ts" | "svelte")
+            );
+            if !is_source {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).unwrap();
+            for (number, line) in source.lines().enumerate() {
+                let line = line.trim();
+                // Comment lines are skipped, and the reason is that this test's own first run
+                // flagged one: the note in `DeleteDialog.svelte` that *explains* why the name
+                // was changed has to spell the call out to be worth reading. A rule that
+                // forbids describing itself is one that gets deleted rather than obeyed. What
+                // is left unchecked is a call hiding behind a `//` on a line of its own, which
+                // is not a call.
+                if line.starts_with("//") || line.starts_with('*') || line.starts_with("/*") {
+                    continue;
+                }
+                // `window.`-prefixed or bare, called rather than merely named.
+                if line.contains("confirm(") || line.contains("alert(") {
+                    offenders.push(format!("{}:{}", path.display(), number + 1));
+                }
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "window.alert / window.confirm are replaced by tauri-plugin-dialog (D-59) and denied \
+         by the capability, and the replacement `confirm` returns a promise that is always \
+         truthy: {offenders:?}"
     );
 }
 

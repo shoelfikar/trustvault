@@ -342,6 +342,80 @@ export const getSettings = () => call<Settings>('get_settings');
  */
 export const setSettings = (settings: Settings) => call<Settings>('set_settings', { settings });
 
+/* ---- The picker — §5, D-59 ------------------------------------------------ */
+
+/**
+ * Asks the host to open a native file dialog, and gets back a **path**.
+ *
+ * Not an `<input type="file">`, and that is the whole reason these two exist. An `<input>`
+ * hands *this heap* the file's contents, and for an import those contents are another password
+ * manager's plaintext — the one thing `CLAUDE.md` says can never be wiped once it is here. The
+ * host opens the file itself; nothing but a string crosses.
+ *
+ * `null` means the user closed the dialog. That is the ordinary outcome of opening a picker and
+ * must never be reported as an error.
+ *
+ * Neither takes an argument: the title and the filter are fixed in Rust, so there is no call
+ * from here that turns "choose an export" into "choose anything". The plugin's own dialog
+ * commands are **denied** to this webview by `capabilities/default.json`; these are the only
+ * two doors, and `ipc_audit.rs` asserts that has not changed.
+ */
+export const pickImportFile = () => call<string | null>('pick_import_file');
+
+/** The switcher's "Open vault file…" — the path goes straight to `switchVault`. */
+export const pickVaultFile = () => call<string | null>('pick_vault_file');
+
+/* ---- Import — §6.8, R-29, D-42 -------------------------------------------- */
+
+/**
+ * One field that could not be imported at all, named but **never quoted** — §6.8.
+ *
+ * `field` is the label, not the value. A report that carried the values it failed to understand
+ * would be a plaintext dump of exactly the parts of the foreign vault we understood least.
+ */
+export interface Refusal {
+  itemTitle: string;
+  field: string;
+  reason: string;
+}
+
+/** A field that landed with a shape change worth telling the user about. Also never quoted. */
+export interface Converted {
+  itemTitle: string;
+  field: string;
+  note: string;
+}
+
+/**
+ * What an import would do, or did — §6.8.
+ *
+ * Three outcomes and not two: **mapped** (counted in `perKind`, listed nowhere), **converted**,
+ * and **refused**. R-29 is met only when every field in the export is one of the three, so the
+ * surface has to show `refusals` in full rather than as a count — a truncated refusal list is
+ * the silent drop the requirement exists to forbid, one indirection further out.
+ */
+export interface ImportReport {
+  total: number;
+  perKind: { kind: ItemKind; count: number }[];
+  tagsCreated: string[];
+  tagsMerged: string[];
+  converted: Converted[];
+  refusals: Refusal[];
+}
+
+/** Reports what an import would do. **Writes nothing** — §6.8. */
+export const importPreview = (path: string) => call<ImportReport>('import_preview', { path });
+
+/**
+ * Imports the export as one transaction, then saves — R-29.
+ *
+ * It **re-reads and re-parses the file** rather than taking the preview's result, so a file
+ * edited between the two calls imports as it is now, not as it was previewed. That is why this
+ * returns a report of its own, and why the report shown *after* an import is the authoritative
+ * one — the surface must display this one, not keep the preview on screen.
+ */
+export const importCommit = (path: string) => call<ImportReport>('import_commit', { path });
+
 /* ---- Multi-vault — §6.7, R-22 -------------------------------------------- */
 
 /**

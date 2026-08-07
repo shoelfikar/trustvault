@@ -20,6 +20,7 @@
   import DetailPane from './DetailPane.svelte';
   import EditItemDialog from './EditItemDialog.svelte';
   import GeneratorDialog from './GeneratorDialog.svelte';
+  import ImportDialog from './ImportDialog.svelte';
   import ItemList from './ItemList.svelte';
   import NewItemDialog from './NewItemDialog.svelte';
   import SettingsPane from './SettingsPane.svelte';
@@ -64,7 +65,15 @@
 
   /** Which overlay is up. One at a time — the prototype never stacks two. */
   let overlay = $state<
-    'none' | 'palette' | 'generator' | 'add' | 'edit' | 'vaults' | 'deleteItem' | 'deleteVault'
+    | 'none'
+    | 'palette'
+    | 'generator'
+    | 'add'
+    | 'edit'
+    | 'import'
+    | 'vaults'
+    | 'deleteItem'
+    | 'deleteVault'
   >('none');
 
   /** Epoch-ms the clipboard is scheduled to clear at. Owned here; see DetailPane's note. */
@@ -302,6 +311,7 @@
         error={settingsError}
         onchange={saveSettings}
         ondeletevault={() => (overlay = 'deleteVault')}
+        onimport={() => (overlay = 'import')}
       />
     {:else}
       <div class="pane" style="width: {listWidth}px">
@@ -367,6 +377,12 @@
       onclose={() => (overlay = 'none')}
       onsaved={itemChanged}
     />
+  {:else if overlay === 'import'}
+    <!-- The dialog stays open after a successful import and shows the commit's report; only
+         `mutations` moves here, so the list and the tag sidebar re-read behind it. Closing on
+         success would take the refusal list off screen at the moment it becomes permanent —
+         it is the one record of what did *not* come across. -->
+    <ImportDialog onclose={() => (overlay = 'none')} onimported={() => (mutations += 1)} />
   {:else if overlay === 'vaults'}
     <VaultSwitcher
       openPath={status.path}

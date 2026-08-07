@@ -26,9 +26,18 @@
     error?: string;
     onchange: (next: Settings) => void;
     ondeletevault: () => void;
+    onimport: () => void;
   }
 
-  const { settings, status, itemCount, error = '', onchange, ondeletevault }: Props = $props();
+  const {
+    settings,
+    status,
+    itemCount,
+    error = '',
+    onchange,
+    ondeletevault,
+    onimport,
+  }: Props = $props();
 
   const fileName = $derived((status.path ?? '').split(/[/\\]/).pop() || 'vault.tvault');
 
@@ -199,6 +208,28 @@
           checked={settings.launchAtLogin}
           onchange={(next) => patch({ launchAtLogin: next })}
         />
+      </div>
+    </div>
+
+    <!-- Import lives in Settings because the prototype draws it nowhere (D-42 postdates the
+         design) and this is the screen that already answers "what is true about my vault".
+         It is a **row with a button**, matching the shape every other row on this screen has,
+         rather than a card of its own competing with the vault card at the top.
+
+         Export is not here and is not disabled-with-a-reason either: `trustvault-project.md`
+         puts it out of scope for v1, so a greyed control would be a promise the product has
+         decided not to make. A group named "Import" says what it is. -->
+    <p class="group-label">Import</p>
+    <div class="card">
+      <div class="row first">
+        <div class="row-text">
+          <p class="row-label">Import from Bitwarden</p>
+          <p class="row-desc">
+            Reads an unencrypted JSON export. You see exactly what will be added — and what cannot
+            be — before anything is written.
+          </p>
+        </div>
+        <Button icon="note" onclick={onimport}>Import…</Button>
       </div>
     </div>
 

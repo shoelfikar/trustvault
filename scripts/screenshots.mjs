@@ -166,6 +166,66 @@ const SCENARIOS = {
     items: [],
   },
   trash: { status: UNLOCKED, drive: `clickText('button', 'Trash')` },
+  // Both steps of the import (D-59), and they are two scenarios rather than one because they
+  // are two different arguments. The first is what the user reads *before* choosing a file —
+  // the warning that the export is plaintext and stays plaintext — and the second is the
+  // report, whose refusal list is the whole of R-29's acceptance criterion rendered.
+  //
+  // This surface is the one that most needs the harness. It cannot be reached without a native
+  // file dialog, which means it cannot be reached in a browser at all: the picker is stubbed
+  // here, so these are the only two shots of it that will ever exist outside a real desktop.
+  importIntro: {
+    status: UNLOCKED,
+    drive: `click('[title="Settings"]'); await sleep(150);
+            clickText('button', 'Import…'); await sleep(300)`,
+  },
+  importPreview: {
+    status: UNLOCKED,
+    hold: 1600,
+    drive: `click('[title="Settings"]'); await sleep(150);
+            clickText('button', 'Import…'); await sleep(300);
+            clickText('button', 'Choose file…'); await sleep(500)`,
+  },
+  // The state after the import, which is a *different* screen and not a toast: the report on it
+  // is the commit's, and its refusal list is the only record of what did not come across. It is
+  // shot because it is seen once per user and is therefore the copy most likely to rot.
+  importDone: {
+    status: UNLOCKED,
+    hold: 2200,
+    drive: `click('[title="Settings"]'); await sleep(150);
+            clickText('button', 'Import…'); await sleep(300);
+            clickText('button', 'Choose file…'); await sleep(500);
+            clickText('button', 'Import 34'); await sleep(400)`,
+  },
+};
+
+/**
+ * What `import_preview` and `import_commit` answer with — D-59.
+ *
+ * Written to exercise the parts of the pane that are easy to get wrong and impossible to see by
+ * accident: a **merged** tag beside a created one, a conversion, and more than one refusal. A
+ * fixture with an empty refusal list would photograph the happy path and leave the list that
+ * carries R-29 untested by the only tool that looks at it.
+ *
+ * No field *values* anywhere in it, which is not a fixture style choice — §6.8 forbids the real
+ * report from carrying one, and a fixture that quoted values would put a shape on screen that
+ * the product cannot produce.
+ */
+const IMPORT_REPORT = {
+  total: 34,
+  per_kind: [
+    { kind: 'login', count: 27 },
+    { kind: 'card', count: 3 },
+    { kind: 'note', count: 3 },
+    { kind: 'identity', count: 1 },
+  ],
+  tags_created: ['Banking', 'Shopping'],
+  tags_merged: ['Work'],
+  converted: [{ item_title: 'Fastmail', field: 'Requires 2FA', note: 'stored as the text "true"' }],
+  refusals: [
+    { item_title: 'Dropbox', field: 'recovery-codes.txt', reason: 'attachments are not imported' },
+    { item_title: 'Chase', field: 'Linked account', reason: 'a card has nowhere to hold it' },
+  ],
 };
 
 /* ---- The injected page ---------------------------------------------------- */
@@ -193,6 +253,7 @@ const STATUS = ${JSON.stringify(status)};
 const ITEMS = ${JSON.stringify(items)};
 const FIELDS = ${JSON.stringify(FIELDS)};
 const SETTINGS = ${JSON.stringify(SETTINGS)};
+const IMPORT_REPORT = ${JSON.stringify(IMPORT_REPORT)};
 
 let listener = 0;
 function respond(cmd, args) {
@@ -237,6 +298,16 @@ function respond(cmd, args) {
     case 'update_item': case 'delete_item': return null;
     case 'create_vault': case 'unlock_recovery_kit':
       return { recovery_code: 'K7QX-2MRE-9WVT-4HDP-6SNA-3JFB' };
+    // The picker (D-59). A fixed path, because the name is on screen in the dialog header and a
+    // shot whose header changes per machine cannot be a baseline. This is also the one stub in
+    // the harness that stands in for a **native** dialog rather than for a command: there is no
+    // file chooser in a headless browser, so without this the surface is unphotographable.
+    case 'pick_import_file': return '/home/shoel/Downloads/bitwarden_export.json';
+    case 'pick_vault_file': return null;
+    // Both halves answer with the same report, which is what the real pair does for a file
+    // nobody edited in between -- and the difference between them (commit re-reads, so it can
+    // differ) is a race no screenshot can hold still anyway.
+    case 'import_preview': case 'import_commit': return IMPORT_REPORT;
     default:
       // Tauri's event plugin rides the same channel. Anything else is a command the harness
       // has not been taught, and it is loud rather than silently undefined.
@@ -310,11 +381,18 @@ async function serve() {
     const url = new URL(request.url, 'http://localhost');
 
     // The load-event hold. Firefox waits for images, so this is what buys `drive` its time.
+    //
+    // Per-scenario since 2026-08-06, because the import flow is the first drive with **three**
+    // clicks in it and the default hold expired mid-sequence — the shot came out as the step
+    // before, which is the worst way for this to fail: a screenshot of the wrong state still
+    // looks like a screenshot. A scenario declares its own `hold` rather than the default
+    // rising for all thirty-odd, most of which need none of it.
     if (url.pathname === '/__hold__') {
+      const hold = SCENARIOS[url.searchParams.get('scenario')]?.hold ?? HOLD_MS;
       setTimeout(() => {
         response.writeHead(200, { 'content-type': 'image/svg+xml' });
         response.end('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>');
-      }, HOLD_MS);
+      }, hold);
       return;
     }
 
@@ -323,7 +401,10 @@ async function serve() {
       const theme = url.searchParams.get('theme') ?? 'light';
       const page = template
         .replace('<head>', `<head>${harness(scenario, theme)}`)
-        .replace('</body>', '<img src="/__hold__" alt="" width="1" height="1"></body>');
+        .replace(
+          '</body>',
+          `<img src="/__hold__?scenario=${encodeURIComponent(scenario)}" alt="" width="1" height="1"></body>`,
+        );
       response.writeHead(200, { 'content-type': TYPES['.html'] });
       response.end(page);
       return;

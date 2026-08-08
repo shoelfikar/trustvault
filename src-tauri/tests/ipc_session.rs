@@ -194,6 +194,26 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
     log.record("create_vault", &created);
     let recovery_code = created.expect("a writable path").recovery_code;
 
+    // D-69: `create_vault` stops at memory, so nothing is on disk yet and no vault is open. The
+    // session asserts both, because the whole point of the split is a window closed here leaving
+    // no half-made vault behind — and an assertion is the only thing that keeps it true.
+    assert!(
+        !path.exists(),
+        "create_vault must not write the file; the acknowledgement on step 3 does"
+    );
+    assert!(
+        matches!(
+            state.status().state,
+            trustvault_lib::dto::VaultState::NoVault
+        ),
+        "a pending vault is neither open nor locked — it must not reach VaultState"
+    );
+
+    let committed = vault_cmd::commit_vault_inner(&state);
+    log.record_infallible("commit_vault", &committed.is_ok());
+    committed.expect("the pending vault is written on acknowledgement");
+    assert!(path.exists(), "commit_vault writes the file");
+
     // ---- The item is created through the command, not seeded through the core --------------
     // Phase 2 had to seed it through `trustvault_core` because it shipped no mutation command
     // (D-38); `add_item` lands in Phase 3, so the first line of this phase's exit gate — an

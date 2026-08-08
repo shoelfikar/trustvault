@@ -722,12 +722,40 @@ product: it must be read by a human, off a screen, and written down. Constraints
   nothing this contract does changes that. The mitigation is that it is never sent back.
 
 **It refuses a `path` that already exists**, with `path_in_use` and before any key material is
-derived — §4. And **it may be called with a vault already open**, which it could not be until D-62
-gave the switcher's *New vault* somewhere to go. The order inside is the acceptance criterion, in
-two halves: everything that can fail runs first, so a path that cannot be written leaves the open
-vault exactly as it was; then the outgoing vault's audit tail is **flushed** and its key zeroized
-before the new vault is installed. The flush is the half that would go missing in silence — reveals
-buffer in memory (D-31), and a vault replaced without one loses the record that they happened.
+derived — §4.
+
+**Since D-69 it writes nothing.** The vault is created in memory and waits in `Inner::pending`;
+`commit_vault` below is what puts it on disk, and onboarding step 3's acknowledgement is what calls
+it. Before the split, the file was written at the end of step 2 — so a user who closed the window
+while reading their recovery kit owned a vault whose kit had never been recorded. R-07 shows it
+exactly once, there is no command to fetch it again, and the remembered path (D-40) sent the next
+launch to a lock screen with no recovery route out of it. **A pending vault is neither open nor
+locked and MUST NOT reach `VaultState`** — the shell would be routed at a file that does not exist.
+It holds a decrypted key, so `AppState::lock` drops it: a lock during onboarding discards the
+half-made vault, which is the right end for one whose kit was never written down.
+
+```ts
+commit_vault({}): void
+```
+
+**Not sanctioned** — it returns nothing at all, which is what keeps the budget at four. The secret
+crossed on the way in; this is the acknowledgement coming back.
+
+It may be called with **a vault already open**, which `create_vault` could not be until D-62 gave
+the switcher's *New vault* somewhere to go. The order inside is the acceptance criterion and it
+moved here with the write, in the same two halves: everything that can fail runs first — the
+existence check is taken **again**, against the TOCTOU window the user's own reading time opens —
+so a path that cannot be written leaves the open vault exactly as it was; then the outgoing vault's
+audit tail is **flushed** and its key zeroized before the new vault is installed. The flush is the
+half that would go missing in silence — reveals buffer in memory (D-31), and a vault replaced
+without one loses the record that they happened.
+
+The second thing the split buys is that abandoning onboarding now leaves the user in the vault they
+were already in. `create_vault` used to close it before the new one was certain.
+
+Calling it with nothing pending answers `internal`, not a kind of its own: the only ways to get
+there are a webview that never called `create_vault`, or one calling it after a lock discarded the
+pending vault. Both are bugs here rather than conditions a user can be told anything useful about.
 
 ```ts
 unlock({ path: string; password: string }): void

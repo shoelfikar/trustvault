@@ -314,6 +314,10 @@ function respond(cmd, args) {
     case 'update_item': case 'delete_item': return null;
     case 'create_vault': case 'unlock_recovery_kit':
       return { recovery_code: 'K7QX-2MRE-9WVT-4HDP-6SNA-3JFB' };
+    // D-69 split the write off create_vault. Answered here so a drive that reaches step 3's
+    // acknowledgement completes instead of erroring, and answered with null because the real
+    // one returns nothing -- a stub that invented a payload would let a caller start reading one.
+    case 'commit_vault': return null;
     // The picker (D-59). A fixed path, because the name is on screen in the dialog header and a
     // shot whose header changes per machine cannot be a baseline. This is also the one stub in
     // the harness that stands in for a **native** dialog rather than for a command: there is no

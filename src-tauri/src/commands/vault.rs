@@ -7,7 +7,7 @@ use trustvault_core::{EXTENSION, FORMAT_VERSION, KdfParams, RecoveryCode, Vault}
 
 use crate::dto::{BuildInfo, KdfSummary, VaultStatus};
 use crate::error::{ErrorKind, IpcError, IpcResult};
-use crate::state::{AppState, LockReason};
+use crate::state::{AppState, LockReason, PendingVault};
 
 /// **Ambient.** Build and format information, for the About surface and bug reports.
 #[tauri::command(rename_all = "snake_case")]
@@ -97,27 +97,43 @@ pub fn calibrate_kdf() -> KdfSummary {
     }
 }
 
-/// **Sanctioned.** Creates a vault and returns its recovery code, once (R-07, R-08).
+/// **Sanctioned.** Creates a vault **in memory** and returns its recovery code, once (R-07, R-08).
 ///
 /// The recovery code is the least avoidable secret in the product: it exists to be read by a
 /// human off a screen and written down, so it must cross. There is no command to fetch it
 /// again — the webview renders it on step 3 and drops it.
 ///
+/// **Nothing is written and nothing is opened here — D-69.** The vault waits in
+/// `Inner::pending` until [`commit_vault`], which is onboarding step 3's acknowledgement. Until
+/// this was split, the file was written at the end of step 2 and a user who closed the window
+/// while reading the kit owned a vault whose kit had never been recorded: shown exactly once,
+/// no command to fetch it again, and the remembered path (D-40) sending the next launch to a
+/// lock screen it had no recovery route out of.
+///
 /// **A vault may already be open when this is called** — since 2026-08-07 and D-62, the
-/// switcher's *New vault* reaches onboarding from inside the shell. The outgoing vault is
-/// flushed and zeroized by `create_vault_inner`, in an order that matters and is tested there.
+/// switcher's *New vault* reaches onboarding from inside the shell. It stays open, and that is
+/// the second thing the split buys: abandoning onboarding now leaves the user in the vault they
+/// were already in, where it used to close it before the new one was certain.
 #[tauri::command(rename_all = "snake_case")]
 pub fn create_vault(
-    app: AppHandle,
     state: State<'_, AppState>,
     name: String,
     path: String,
     password: String,
     kdf: KdfSummary,
 ) -> IpcResult<RecoveryKit> {
-    let kit = create_vault_inner(&state, name, path.clone(), password, kdf)?;
+    create_vault_inner(&state, name, path, password, kdf)
+}
+
+/// Writes the vault [`create_vault`] left pending, and opens it — R-08, D-69.
+///
+/// **Not sanctioned**: it returns nothing at all, which is what keeps the budget at four. The
+/// secret crossed on the way in; this is the acknowledgement coming back.
+#[tauri::command(rename_all = "snake_case")]
+pub fn commit_vault(app: AppHandle, state: State<'_, AppState>) -> IpcResult<()> {
+    commit_vault_inner(&state)?;
     crate::commands::settings::remember_vault(&app, &state);
-    Ok(kit)
+    Ok(())
 }
 
 /// The body of [`create_vault`], reachable without a Tauri runtime.
@@ -152,18 +168,68 @@ pub fn create_vault_inner(
         p_cost: kdf.p_cost,
     };
     let path = PathBuf::from(path);
-    // The one check in this command, and it guards a file this command is not otherwise about.
-    // `save_to` writes the vault whole, so a path that already holds one is a vault destroyed
-    // with no key in memory to have warned about it — the mirror of `delete_vault`, except that
-    // nobody asked for it and nothing said it was going to happen. It is `try_exists` rather
-    // than `exists` so that a path we cannot even stat fails closed instead of reading as free.
+    // Checked here **and** again in `commit_vault_inner`, which is not redundant: this one is so
+    // the user is sent back to step 1 before being shown a recovery kit for a vault that cannot
+    // be saved, and that one is the check that actually guards the file, at the moment of
+    // writing. It is `try_exists` rather than `exists` so that a path we cannot even stat fails
+    // closed instead of reading as free.
     if path.try_exists().unwrap_or(true) {
         return Err(IpcError::new(ErrorKind::PathInUse));
     }
-    let (mut vault, recovery) = Vault::create(name, &password, params)?;
-    vault.save_to(&path)?;
-
+    let (vault, recovery) = Vault::create(name, &password, params)?;
     let code = recovery.display().to_string();
+
+    // The vault waits here. Nothing is written, the open vault is untouched, and a lock at any
+    // point from now until the acknowledgement drops it — D-69, and `AppState::lock`.
+    state.with(|inner| inner.pending = Some(PendingVault { vault, path }));
+
+    Ok(RecoveryKit {
+        recovery_code: code,
+    })
+}
+
+/// The body of [`commit_vault`], reachable without a Tauri runtime.
+///
+/// **The order is the acceptance criterion, and it has the same two halves it always had** —
+/// they have simply moved to the command that writes.
+///
+/// *Everything that can fail happens first.* The existence check and `save_to` run before the
+/// open vault is touched, so a path that cannot be written leaves the user exactly where they
+/// were rather than locked out of a vault they had open because a directory went away while
+/// they were reading their recovery kit.
+///
+/// *Then the outgoing vault is flushed and dropped before the new one is installed.* The flush
+/// is the half that would go missing silently: reveals buffer in memory (D-31) and lock is what
+/// writes the tail, so replacing a vault without flushing discards its audit log — the one
+/// record whose absence looks exactly like nothing having happened.
+///
+/// A missing pending vault is `Internal` rather than a kind of its own: the only way to reach it
+/// is a frontend that called this without having called `create_vault`, or one that called it
+/// after a lock discarded the pending vault — both of which are bugs here, not conditions a user
+/// can be told something useful about.
+///
+/// **A failed write puts the pending vault back.** Taking it out and dropping it on the way past
+/// would leave the user on step 3 holding the one and only rendering of a recovery kit for a
+/// vault that no longer exists anywhere, with a button that answers `internal` from then on.
+/// This is exactly the window the split opened: the user is now sitting on this screen for as
+/// long as it takes to write a code down, and a directory can go away inside it.
+pub fn commit_vault_inner(state: &AppState) -> IpcResult<()> {
+    let pending = state
+        .with(|inner| inner.pending.take())
+        .flatten()
+        .ok_or_else(|| IpcError::new(ErrorKind::Internal))?;
+
+    let PendingVault { mut vault, path } = pending;
+    let written = if path.try_exists().unwrap_or(true) {
+        Err(IpcError::new(ErrorKind::PathInUse))
+    } else {
+        vault.save_to(&path).map_err(IpcError::from)
+    };
+    if let Err(error) = written {
+        state.with(|inner| inner.pending = Some(PendingVault { vault, path }));
+        return Err(error);
+    }
+
     // Nothing below this line can fail, which is what makes the ordering safe to run at all.
     flush_audit(state);
     state.lock();
@@ -171,9 +237,7 @@ pub fn create_vault_inner(
     // remembered path (D-40) and the known-vaults list (R-22) are both kept.
     state.with(|inner| inner.opened(vault, path));
 
-    Ok(RecoveryKit {
-        recovery_code: code,
-    })
+    Ok(())
 }
 
 /// The one-time recovery kit. The only field is the secret.
@@ -536,6 +600,10 @@ mod tests {
 
     /// A real vault file on disk, opened. `KdfParams::TESTING` because these tests are about
     /// bookkeeping, not about the KDF.
+    ///
+    /// **Two calls since D-69**, and the second is the point of the split: `create_vault_inner`
+    /// leaves the vault in memory and `commit_vault_inner` is what writes it and opens it. Every
+    /// test below is about a vault that exists, so every one of them needs both.
     fn vault_at(name: &str) -> (AppState, PathBuf) {
         let path = std::env::temp_dir().join(format!(
             "trustvault-{name}-{}-{:?}.tvault",
@@ -555,6 +623,7 @@ mod tests {
             },
         )
         .expect("the test parameters are valid");
+        commit_vault_inner(&state).expect("the pending vault is writable");
         (state, path)
     }
 
@@ -746,10 +815,103 @@ mod tests {
     }
 
     #[test]
+    fn a_commit_that_cannot_write_keeps_the_pending_vault_for_a_second_try() {
+        // D-69 opened a window that did not exist before: the user now sits on step 3 for as
+        // long as it takes to copy a recovery code down, and the directory can go away inside
+        // it. If a failed commit dropped the pending vault, the user would be holding the one
+        // and only rendering of a kit for a vault that exists nowhere, with a button that
+        // answers `internal` from then on. The retry is the whole point of the window.
+        let (state, occupied) = vault_at("commit-retry");
+
+        // A path that is already taken is the reachable way to make `save_to` refuse without
+        // depending on permissions, which differ per platform and per CI runner.
+        create_vault_inner(
+            &state,
+            "Doomed Vault".into(),
+            occupied.display().to_string(),
+            "a different master password".into(),
+            testing_kdf(),
+        )
+        .expect_err("create refuses an occupied path up front");
+
+        // So drive it the other way: create at a free path, then occupy that path behind it.
+        let free = occupied.with_file_name("trustvault-commit-retry-b.tvault");
+        let _ = std::fs::remove_file(&free);
+        create_vault_inner(
+            &state,
+            "Second Vault".into(),
+            free.display().to_string(),
+            "another master password entirely".into(),
+            testing_kdf(),
+        )
+        .expect("a free path");
+        std::fs::write(&free, b"something else got here first").unwrap();
+
+        let refused = commit_vault_inner(&state);
+        assert_eq!(refused.unwrap_err().kind, ErrorKind::PathInUse);
+        assert_eq!(
+            std::fs::read(&free).unwrap(),
+            b"something else got here first",
+            "the refusal must not have written over what was there"
+        );
+        assert_eq!(
+            state.status().display_name,
+            "Personal Vault",
+            "and the open vault is untouched by a failed commit"
+        );
+
+        // The retry: clear the obstruction and commit the same pending vault again.
+        std::fs::remove_file(&free).unwrap();
+        commit_vault_inner(&state).expect("the pending vault survived the refusal");
+        assert_eq!(state.status().display_name, "Second Vault");
+
+        let _ = std::fs::remove_file(&occupied);
+        let _ = std::fs::remove_file(&free);
+    }
+
+    #[test]
+    fn a_lock_discards_a_pending_vault_rather_than_leaving_a_key_alive() {
+        // The security half of D-69. A pending vault holds a decrypted key exactly like an open
+        // one, so a lock has to reach it; otherwise onboarding is a way to keep a key alive
+        // behind a lock screen. The user-visible consequence is deliberate: the half-made vault
+        // is gone and onboarding starts again, which is the right end for a vault whose kit was
+        // never written down.
+        let state = AppState::default();
+        let path = std::env::temp_dir().join(format!(
+            "trustvault-pending-lock-{}-{:?}.tvault",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        create_vault_inner(
+            &state,
+            "Abandoned Vault".into(),
+            path.display().to_string(),
+            "correct horse battery staple".into(),
+            testing_kdf(),
+        )
+        .expect("a free path");
+
+        state.lock();
+
+        assert_eq!(
+            commit_vault_inner(&state).unwrap_err().kind,
+            ErrorKind::Internal,
+            "the pending vault is gone, so there is nothing to commit"
+        );
+        assert!(!path.exists(), "and nothing was ever written");
+    }
+
+    #[test]
     fn creating_a_second_vault_closes_the_first_one_before_it_opens_the_new_one() {
         // The ordering `switch_vault` is tested for, in the other command that replaces the
         // open vault. Reversed, there is a window in which the state names the new vault while
         // the previous one's master key is still in memory.
+        //
+        // Since D-69 the replacement happens on **commit**, not on create, and the assertion
+        // between the two is the half that is new: the first vault is still open while the
+        // second one is only pending, so abandoning onboarding costs the user nothing.
         let (state, first) = vault_at("second-vault");
         let second = first.with_file_name("trustvault-second-vault-b.tvault");
         let _ = std::fs::remove_file(&second);
@@ -762,6 +924,16 @@ mod tests {
             testing_kdf(),
         )
         .expect("a writable path");
+
+        assert_eq!(
+            state.status().display_name,
+            "Personal Vault",
+            "a pending vault must not displace the open one -- abandoning onboarding here used \
+             to leave the user with no vault open at all"
+        );
+        assert!(!second.exists(), "and nothing is on disk until the commit");
+
+        commit_vault_inner(&state).expect("a writable path");
 
         let status = state.status();
         assert_eq!(status.state, crate::dto::VaultState::Unlocked);

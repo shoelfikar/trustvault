@@ -138,6 +138,7 @@ pub fn run() {
             // Sanctioned — exactly four, each returning exactly one secret.
             // The fourth arrived with D-44; a fifth is a decision log entry, not a patch.
             commands::vault::create_vault,
+            commands::vault::commit_vault,
             commands::vault::unlock_recovery_kit,
             commands::items::reveal_field,
             commands::generator::generate_password,

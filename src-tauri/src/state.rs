@@ -173,11 +173,34 @@ pub struct KnownVault {
     pub last_opened_at: Option<i64>,
 }
 
+/// A vault that has been created but not yet written to disk — R-07, R-08, D-69.
+///
+/// Onboarding used to write the file at the end of step 2 and show the recovery kit on step 3,
+/// which meant a user who closed the window while reading the kit owned a `.tvault` whose kit
+/// had never been recorded. R-07 shows it **exactly once**, there is no command to fetch it
+/// again, and the remembered path (D-40) sent the next launch to a lock screen — so the vault
+/// had no recovery path at all and nothing in the product knew.
+///
+/// So creation stops at memory and step 3's acknowledgement is what writes. This struct is that
+/// gap made explicit. It holds a decrypted vault, so it is dropped by [`AppState::lock`] exactly
+/// like the open one: abandoning onboarding must not leave a key alive behind a lock screen.
+#[derive(Debug)]
+pub struct PendingVault {
+    pub vault: Vault,
+    pub path: PathBuf,
+}
+
 /// Everything the host process knows.
 #[derive(Debug, Default)]
 pub struct Inner {
     /// The open vault. `None` is the locked state, and it is the only representation of it.
     pub vault: Option<Vault>,
+    /// A created-but-unwritten vault, between onboarding steps 2 and 3 — D-69.
+    ///
+    /// Deliberately **not** part of [`AppState::status`]: a pending vault is not open and not
+    /// locked, and letting it reach `VaultState` would route the shell at a file that does not
+    /// exist yet.
+    pub pending: Option<PendingVault>,
     /// The vault file, remembered across a lock so the lock screen knows what to unlock.
     pub path: Option<PathBuf>,
     /// Settings, loaded at start-up.
@@ -259,6 +282,12 @@ impl AppState {
     pub fn lock(&self) -> bool {
         self.with(|inner| {
             inner.generation = inner.generation.wrapping_add(1);
+            // A vault created but not yet written (D-69) holds a decrypted key exactly like an
+            // open one, so it is dropped here too. The consequence is deliberate: a lock during
+            // onboarding discards the half-made vault, and the user starts again — which is the
+            // right end for a vault whose recovery kit was never recorded, and the whole reason
+            // the file is not written until it has been.
+            inner.pending = None;
             // Dropping the Vault zeroizes the master key. The path is kept: the lock screen
             // needs to know what it is about to unlock.
             inner.vault.take().is_some()

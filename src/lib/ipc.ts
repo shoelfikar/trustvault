@@ -548,8 +548,24 @@ export const totpCode = (itemId: string) => call<TotpCode>('totp_code', { itemId
 /* ---- Sanctioned — §7 ----------------------------------------------------- */
 /* Exactly four. A fifth entry in this group is a decision, not a patch.       */
 
+/**
+ * Creates the vault **in memory** and returns its recovery code, once.
+ *
+ * Nothing is on disk when this resolves — D-69. `commitVault` below is what writes, and it is
+ * onboarding step 3's acknowledgement that calls it.
+ */
 export const createVault = (name: string, path: string, password: string, kdf: KdfSummary) =>
   call<{ recoveryCode: string }>('create_vault', { name, path, password, kdf });
+
+/**
+ * Writes the vault `createVault` left pending, and opens it — D-69.
+ *
+ * **Not sanctioned**, and it belongs beside `createVault` rather than in the group above only
+ * because the two are one operation split across a screen: it returns nothing at all, which is
+ * what keeps the sanctioned budget at four. The secret crossed on the way in; this is the
+ * acknowledgement going back.
+ */
+export const commitVault = () => call<void>('commit_vault', {});
 
 export const unlockRecoveryKit = (path: string, code: string) =>
   call<{ recoveryCode: string }>('unlock_recovery_kit', { path, code });

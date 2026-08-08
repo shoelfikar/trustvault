@@ -19,6 +19,7 @@
   import {
     asIpcError,
     calibrateKdf,
+    commitVault,
     createVault,
     defaultVaultPath,
     pickNewVaultPath,
@@ -123,7 +124,7 @@
   const canCreate = $derived(passwordsMatch && !busy && Boolean(kdf));
 
   const canAdvance = $derived(
-    step === 1 ? nameValid && pathValid : step === 2 ? canCreate : kitAcknowledged,
+    step === 1 ? nameValid && pathValid : step === 2 ? canCreate : kitAcknowledged && !busy,
   );
 
   /**
@@ -189,19 +190,44 @@
   function next() {
     if (step === 1) void toStepTwo();
     else if (step === 2) void create();
-    else finish();
+    else void finish();
   }
 
   function back() {
     if (step === 1) oncancel?.();
     else if (step === 2) step = 1;
-    // Step 3 has no way back: the vault exists and the kit is on screen. The button is hidden.
+    // Step 3 still has no way back, and since D-69 the reason has changed: the vault does not
+    // exist yet, so going back is now *possible* — but the kit on screen belongs to the vault
+    // that would be discarded, and R-07 shows it once. A back button here would have to say it
+    // throws the kit away, which is a decision rather than a hidden button.
   }
 
-  function finish() {
-    // Cleared before routing, not after: the next screen must not be able to observe it.
-    recoveryCode = '';
-    ondone();
+  /**
+   * The acknowledgement is what writes the vault — D-69.
+   *
+   * Until this was split, `create_vault` wrote the file at the end of step 2, so closing the
+   * window while reading the kit left a `.tvault` whose kit had never been recorded: shown
+   * exactly once (R-07), no command to fetch it again, and the remembered path sending the next
+   * launch to a lock screen with no recovery route out of it. Nothing is on disk until here.
+   *
+   * The code is cleared **after** the write rather than before, and only on success: a failed
+   * commit leaves the user on step 3 with the kit still on screen, which is the only screen it
+   * will ever be on. A failure here is a real possibility rather than a formality — the
+   * directory can have gone away, or filled up, while the kit was being read.
+   */
+  async function finish() {
+    if (busy) return;
+    busy = true;
+    error = '';
+    try {
+      await commitVault();
+      recoveryCode = '';
+      ondone();
+    } catch (thrown) {
+      error = asIpcError(thrown).message;
+    } finally {
+      busy = false;
+    }
   }
 
   /** Six groups of four, which is how R-07 says it is transcribed. */
@@ -220,9 +246,17 @@
    *
    * **Enter.** `onenter` lives on the input inside `TextField`, so a step with no text field had
    * no Enter path at all — the row's "Enter finishes" was never implemented rather than broken.
-   * It is handled here on the step rather than globally, and it **ignores Enter on a button**,
-   * because Enter already activates a focused button: without that guard, Enter on *Print* would
-   * print and finish, and finishing clears the recovery code the print dialog is still holding.
+   *
+   * Once focus lands in the step, *most* of Enter is native and wants no handler: Enter on Print
+   * prints, and Enter on the CTA finishes, which is the row's clause satisfied by a button being
+   * a button. The one place it was still dead is the acknowledgement checkbox — a checkbox
+   * toggles on **Space** and does nothing on Enter, in every browser, and that is the control the
+   * whole step exists to collect. Reported twice from the walk, which is what it looks like when
+   * a key does nothing: correct by the row's letter and wrong at the keyboard.
+   *
+   * So Enter toggles it, exactly as Space does. Row 3 is unchanged and is now more true rather
+   * than less: Space still toggles, and Enter still finishes — from the CTA, which is where Tab
+   * lands the moment the box is ticked and the button stops being disabled.
    */
   let kitStep = $state<HTMLDivElement | null>(null);
 
@@ -232,11 +266,13 @@
   });
 
   function onKitKeydown(event: KeyboardEvent) {
+    const target = event.target;
     if (event.key !== 'Enter') return;
-    if ((event.target as HTMLElement | null)?.tagName === 'BUTTON') return;
-    if (!kitAcknowledged) return;
+    if (!(target instanceof HTMLInputElement) || target.type !== 'checkbox') return;
+    // Not `finish()` even when the box is already ticked: the same key on the same control doing
+    // two different things depending on state is worse than the dead key this replaces.
     event.preventDefault();
-    finish();
+    kitAcknowledged = !kitAcknowledged;
   }
 </script>
 
@@ -379,7 +415,9 @@
              `Importing…`, `Deleting…`) rather than a spinner, because §5 bans the theatre and a
              present participle says which operation is running where a spinner does not. -->
         <Button variant="primary" tall disabled={!canAdvance} onclick={next}>
-          {busy && step === 2 ? 'Creating vault…' : copy[step].cta}
+          {#if busy && step === 2}Creating vault…{:else if busy && step === 3}Saving vault…{:else}{copy[
+              step
+            ].cta}{/if}
         </Button>
         {#if step !== 3 && (step !== 1 || oncancel)}
           <Button tall onclick={back}>{copy[step].back}</Button>

@@ -299,6 +299,40 @@ sharing a screen, and the row fails on either one alone.
    against markup that no longer exists, and the clause it never exercised is the one that
    changed.
 
+8. **The vault existed before its recovery kit had been recorded.** Reported while walking row 3,
+   and like finding 5 it is not a keyboard defect — it is a hole in **R-07**, found because
+   somebody was reading the screen rather than the code.
+
+   `create_vault` wrote the file at the end of step 2 and `remember_vault` ran immediately, so a
+   user who closed the window while reading the kit on step 3 owned a `.tvault` whose kit had
+   never been written down. R-07 shows it exactly once, the command's own comment says there is
+   no command to fetch it again, and the remembered path (D-40) sent the next launch to a lock
+   screen. That vault has no recovery route for the rest of its life, and nothing in the product
+   knew — the one requirement whose whole purpose is *what happens when the password is gone*,
+   defeated by closing a window.
+
+   **Fixed 2026-08-08 as D-69**: `create_vault` stops at memory and a new `commit_vault` is what
+   writes, called by step 3's acknowledgement. Nothing is on disk until the box is ticked.
+   **Row 3 stays unticked** — the row now exercises a write as well as a keypress.
+
+9. **Enter did not tick the acknowledgement checkbox.** Recorded first as a question rather than
+   a defect, because row 3 asks for the opposite in its own words — *"the acknowledgement
+   checkbox toggles with **Space**; **Enter** finishes"* — and a checkbox that toggles on Space
+   and ignores Enter is native behaviour in every browser. **Reported twice from the walk, which
+   is the answer**: correct by the row's letter, and a dead key at the keyboard, on the one
+   control the whole step exists to collect.
+
+   **Fixed 2026-08-08.** Enter toggles it, exactly as Space does. It does **not** finish when the
+   box is already ticked: the same key on the same control doing two different things depending
+   on state is worse than the dead key it replaces.
+
+   **Row 3 is unchanged**, and this is the case where that is the right outcome rather than the
+   lazy one. Both its clauses are now more true than before: Space still toggles, and Enter still
+   finishes — from the CTA, which is where Tab lands the moment the box is ticked and the button
+   stops being disabled. Nothing about the row needed re-wording, unlike row 6 (D-67) and row 12,
+   because the row was describing a keyboard that works and the implementation was the half that
+   did not.
+
 _Rows other than 3, 6, 7, 8, 9 and part of 11 have not been run. They need the pointer physically
 unplugged and the app in front of a person, which is what S-08 asks for and what nothing here can
 stand in for._
@@ -339,7 +373,7 @@ different focus stories, and only the second can strand you — it is a dialog o
 
 | Row | Result | What was observed |
 |---|---|---|
-| 3 Onboarding step 3 — recovery kit | **FAIL, fixed, awaiting re-walk** | Neither Tab nor Enter operates the screen. Finding 4 — two causes, one per clause: there is no Enter path on a step without a text field, and the step transition leaves focus on `document.body`. The row's third clause ("Enter finishes") was never implemented rather than broken. Fixed 2026-08-08 (**D-68**) and **not re-walked** |
+| 3 Onboarding step 3 — recovery kit | **FAIL, fixed, awaiting re-walk** | Neither Tab nor Enter operates the screen. Finding 4 — two causes, one per clause: there is no Enter path on a step without a text field, and the step transition leaves focus on `document.body`. The row's third clause ("Enter finishes") was never implemented rather than broken. Fixed 2026-08-08 (**D-68**) and **not re-walked**. The same walk then found finding 8 on this screen, which is not a keyboard defect at all |
 | 6 Sidebar | **passed, then re-opened** | Passed on the walk — Tab entered and Enter selected. Finding 7 then showed the middle clause had never been implemented, and the fix (**D-67**) changed the surface underneath the tick, so the row goes back to unwalked. A row ticked against code that no longer exists is worse than an empty one |
 | 7 Item list | **PASS** | ↑/↓, Home/End, Enter opens in the detail pane |
 | 8 Detail pane | **PASS** | Fields Tab through; Reveal and Copy reachable without hover; Edit and Delete in the toolbar |

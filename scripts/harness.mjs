@@ -103,6 +103,20 @@ const FIELDS = [
   },
 ];
 
+/**
+ * Every field of `Settings` in `src-tauri/src/state.rs`, at its default.
+ *
+ * `ui_scale` and `launch_at_login` were **missing** until 2026-08-08 — both added by D-56 and
+ * D-57 and neither backfilled here — so every screenshot and every a11y run of the Settings
+ * screen had been taken against a settings object the host cannot produce. It was not cosmetic:
+ * `Segmented` marks the option equal to `value` as its tab stop, so an absent `ui_scale` matched
+ * no option and left **all three** Interface-size buttons at `tabindex="-1"`, which is a control
+ * missing from the tab order entirely. The audits could not see it — `element.focus()` reaches a
+ * `tabindex="-1"` button perfectly well, and that is the difference this fixture was hiding.
+ *
+ * Keep it exhaustive. A field added to `Settings` and not added here does not fail anything; it
+ * quietly changes what every Settings surface is measured against.
+ */
 const SETTINGS = {
   theme: 'system',
   auto_lock_seconds: 300,
@@ -111,6 +125,8 @@ const SETTINGS = {
   sidebar_width: 232,
   list_width: 300,
   last_vault_path: '/home/shoel/Documents/personal.tvault',
+  ui_scale: 'default',
+  launch_at_login: false,
 };
 
 /* ---- Scenarios ------------------------------------------------------------ */

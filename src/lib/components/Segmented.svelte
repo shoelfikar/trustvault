@@ -23,6 +23,26 @@
   // svelte-ignore non_reactive_update
   let { options, value, label, disabled = false, onchange }: Props<unknown> = $props();
 
+  /**
+   * Which option carries the group's single tab stop.
+   *
+   * The obvious form of this — `tabindex={option.value === value ? 0 : -1}` — has a failure mode
+   * that is silent and total: when `value` matches **no** option, every button is `-1` and the
+   * whole control drops out of the tab order while still being visible, still being clickable,
+   * and still passing a focus audit, because `element.focus()` reaches a `-1` button perfectly
+   * well. It is not hypothetical. The screenshot/a11y fixture was missing `ui_scale`, so Interface
+   * size had been unreachable by keyboard in every harness run since D-57, and no tool noticed.
+   *
+   * Falling back to the first option is what ARIA prescribes for a radiogroup with nothing
+   * checked, so the group stays reachable and the arrows still work from there.
+   */
+  const tabStop = $derived(
+    Math.max(
+      0,
+      options.findIndex((option) => option.value === value),
+    ),
+  );
+
   function onkeydown(event: KeyboardEvent, index: number) {
     const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
     if (!step) return;
@@ -41,7 +61,7 @@
       type="button"
       role="radio"
       aria-checked={option.value === value}
-      tabindex={option.value === value ? 0 : -1}
+      tabindex={index === tabStop ? 0 : -1}
       class:on={option.value === value}
       {disabled}
       onclick={() => onchange(option.value)}

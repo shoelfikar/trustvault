@@ -110,10 +110,10 @@ lock screen exists to receive a password and has one field. Everywhere else, aut
 | # | Surface | Must be operable by | Done |
 |---|---------|--------------------|------|
 | 6 | Sidebar — views, tags, vault switcher trigger | Tab in, ↑/↓ between entries, Enter selects | [ ] |
-| 7 | Item list | ↑/↓ move selection, Home/End jump, Enter opens in the detail pane, type-ahead is **not** implemented (⌘K is the search) | [ ] |
-| 8 | Detail pane — fields and toolbar | Tab through fields; per-field Reveal and Copy reachable **without hover**; Edit and Delete in the toolbar | [ ] |
+| 7 | Item list | ↑/↓ move selection, Home/End jump, Enter opens in the detail pane, type-ahead is **not** implemented (⌘K is the search) | [x] |
+| 8 | Detail pane — fields and toolbar | Tab through fields; per-field Reveal and Copy reachable **without hover**; Edit and Delete in the toolbar | [x] |
 | 8a | Detail pane — one-time code row | The **Copy code** button is a Tab stop like every other copy in the box, and the remaining seconds are readable as text rather than only as the arc — a countdown drawn in colour and geometry alone is unreadable to the people this audit is for | [ ] |
-| 9 | Empty states — every list | The primary action is focusable and is the first stop after the list itself | [ ] |
+| 9 | Empty states — every list | The primary action is focusable and is the first stop after the list itself | [x] |
 | 10 | Titlebar / toolbar chrome | Search trigger, New item, and the lock button all Tab-reachable | [ ] |
 
 Row 7 says what is **not** built as well as what is: type-ahead in a list competes with ⌘K for the
@@ -197,8 +197,117 @@ says something about how it was missed, and the manual pass below has not run ye
    ring that is not drawn. Fixed in the tool, and it is the reason the tool now collapses an
    unpainted outline before comparing.
 
-_The per-surface rows have not been run. They need the pointer physically unplugged and the app
-in front of a person, which is what S-08 asks for and what nothing here can stand in for._
+**One found on 2026-08-08, in the manual pass, on the first surface walked.** It is two defects
+sharing a screen, and the row fails on either one alone.
+
+4. **Step 3 of onboarding has no Enter path and receives no focus.** Reported by the author
+   walking row 3 with the pointer unplugged: neither Tab nor Enter does what the row asks.
+   Reading the source gives two independent causes, and the second is the one that generalises.
+
+   *Enter finishes nothing.* `onenter` is implemented in `TextField.svelte:88` as an `onkeydown`
+   on the input itself, so Enter advances a step **only where a text field is focused**. Steps 1
+   and 2 have one; step 3 has none — it is a key, two print buttons, a checkbox and the CTA. There
+   is no `<form>` and no keydown handler on the screen, so on step 3 Enter reaches nothing at all.
+   The row's "Enter finishes" was never implemented; it reads as satisfied because the two steps
+   before it satisfy it by accident of having an input.
+
+   *Focus is on `document.body`.* Steps 1 and 2 each carry `autofocus`
+   (`Onboarding.svelte:250`, `:281`); step 3 carries none. When `step` becomes 3 the focused
+   password field is removed from the DOM, and focus falls to `body` — so the first Tab restarts
+   from the top of the document rather than from the kit the user is reading. This is **finding 1
+   in a second place**: `Dialog.svelte` was fixed on 2026-08-07 for exactly this, and the fix was
+   made to the dialog rather than to the pattern, so the step transition kept the bug.
+
+   Neither is reachable by `scripts/a11y.mjs`, and the reason is worth keeping: the tool asks
+   whether every focusable element *can* take focus, and both of these are about what happens
+   **between** two renders. Step 3's elements are all perfectly focusable. Nothing focuses them.
+
+   **Fixed 2026-08-08 as D-68.** Focus lands on the step's first control when `step` becomes 3,
+   which is where `autofocus` puts it on the two steps before; and Enter is handled on the step,
+   ignoring Enter on a `<button>` so that Enter on *Print* prints instead of printing **and**
+   finishing — finishing clears the recovery code while the print dialog still holds it. **Row 3
+   stays unticked**: the fix has not been walked, and the row is what says whether it worked.
+
+5. **Every palette command that opens an overlay is cancelled by the palette closing.** Reported
+   by the author as "New item from the search does nothing". It is not a keyboard defect and does
+   not belong to this audit's subject at all — **the mouse path is identically broken** — which is
+   why it is written up here as the walk that found it rather than as a row that failed.
+
+   `Shell.svelte` holds one `overlay` state for every overlay in the application, and the palette's
+   command row runs `command.run()` and then `onclose()` back to back
+   (`CommandPalette.svelte:167-170`). For *New item* that is `overlay = 'add'` immediately
+   overwritten by `overlay = 'none'`: two synchronous assignments to the same state, last write
+   wins, and the dialog the user asked for never renders. **Generate password** is broken the same
+   way (`overlay = 'generator'`). *Lock vault*, *Watchtower* and *Settings* are not, and that is
+   the reason it survived: they route through `onlock` and `onview`, which do not touch `overlay`,
+   so three of the five command rows work and the palette looks alive.
+
+   The empty-state action has the same two lines in the same order
+   (`CommandPalette.svelte:266-269`), and it is the worse of the two: its comment explains that it
+   exists because a query matching no item has also filtered the *New item* command row away, so
+   it is **the only way** to act on something just found missing. The only way was also the
+   broken way.
+
+   **Fixed 2026-08-08 as D-66**, in `Shell.svelte` rather than in either call site: `closeOverlay`
+   clears the overlay only when it is still the one on screen, so a handler that navigated
+   somewhere keeps where it went. Reordering the two calls would have fixed these two rows and
+   left ordering as the thing that decides. **Row 11 is still unticked** — its own four clauses
+   have not been walked, and the fix needs the walk to confirm it in the app.
+
+   How it was missed is the part worth keeping. `⌘N` and `⌘G` reach the same dialogs through the
+   shell's shortcut handler without going near the palette, so both dialogs work everywhere a
+   person would normally open them. The screenshot harness photographs each overlay by setting
+   `overlay` directly, so it has a picture of a dialog that cannot be opened this way — the same
+   shape as **D-47**, where `ipc_session.rs` drove command bodies past the argument decoding that
+   was broken. A harness that constructs the state under test cannot see a transition that
+   destroys it.
+
+6. **`Segmented` leaves the tab order entirely when its `value` matches no option.** Written as
+   `tabindex={option.value === value ? 0 : -1}`, so a value outside the list marks **no** option
+   as the tab stop and all of them as `-1`: the control stays visible, stays clickable, still
+   passes the focus audit — `element.focus()` reaches a `-1` button perfectly well — and cannot be
+   tabbed to. Found by measuring the tab order rather than by reading, and it was **already
+   happening**: `scripts/harness.mjs`'s settings fixture was missing `ui_scale` and
+   `launch_at_login` (added by D-57 and D-56, never backfilled), so Interface size had been
+   keyboard-unreachable in every screenshot and every a11y run since. Both fixed 2026-08-08 — the
+   fixture is exhaustive with a note saying to keep it so, and the component falls back to the
+   first option, which is what ARIA prescribes for a radiogroup with nothing checked.
+
+   The fixture half is the more useful lesson: the Settings surface had been measured against a
+   settings object **the host cannot produce**, and nothing said so. It is the third member of
+   the D-47 family in this phase.
+
+7. **The sidebar is thirteen consecutive tab stops, and row 6 says it should be one.** Measured
+   in the `settings` scenario: 24 tab stops, of which 0–2 are the titlebar, **3–15 are sidebar
+   rows**, and 16–23 are the Settings pane. So reaching the first Settings control from the
+   titlebar's Settings button takes **fifteen Tab presses, thirteen of them through the sidebar**
+   — which is what "Tab never gets into Settings" looks like from a chair.
+
+   Row 6 reads *"Tab in, ↑/↓ between entries, Enter selects"*, which describes one tab stop with
+   arrows moving inside it — the pattern `Segmented` uses. `Sidebar.svelte` has **no keydown
+   handler at all**, so the arrow half is not implemented and every row is its own stop. Row 6
+   is recorded as passed above because Tab does enter and Enter does select; the clause between
+   them was never exercised.
+
+   **This was a wording-or-implementation decision and it was the author's**, the same shape as
+   D-64 and as row 12's generator clause. **Decided 2026-08-08 as D-67: the implementation
+   changes and row 6 stands as written.** The sidebar is one roving tab stop, ↑/↓ move focus
+   without selecting, Enter selects. Re-measured: **13 tab stops in the whole window, down from
+   24**, and the first Settings control is four Tab presses from the titlebar rather than fifteen.
+
+   Row 6 is **un-ticked** as a consequence, and that is the point rather than a cost: it passed
+   against markup that no longer exists, and the clause it never exercised is the one that
+   changed.
+
+_Rows other than 3, 6, 7, 8, 9 and part of 11 have not been run. They need the pointer physically
+unplugged and the app in front of a person, which is what S-08 asks for and what nothing here can
+stand in for._
+
+**On findings 6 and 7 both**: they come from a throwaway script that enumerates what the browser
+would treat as a tab stop, in document order. That is **not** pressing Tab and does not supersede
+this table — it cannot see a focus trap, and it runs against the harness, which stubs `invoke`.
+What it can do is answer "is this control in the tab order at all", which is the one question the
+two audits already here are structurally unable to ask.
 
 ## Manual pass — in progress
 
@@ -226,11 +335,34 @@ fresh: ⌘G from the shell and the generator opened from **inside** the New-item
 different focus stories, and only the second can strand you — it is a dialog over a dialog, and
 `Dialog.svelte`'s restore was written for one opener, then fixed on 2026-08-07 (finding 1 above).
 
+### Rows walked
+
+| Row | Result | What was observed |
+|---|---|---|
+| 3 Onboarding step 3 — recovery kit | **FAIL, fixed, awaiting re-walk** | Neither Tab nor Enter operates the screen. Finding 4 — two causes, one per clause: there is no Enter path on a step without a text field, and the step transition leaves focus on `document.body`. The row's third clause ("Enter finishes") was never implemented rather than broken. Fixed 2026-08-08 (**D-68**) and **not re-walked** |
+| 6 Sidebar | **passed, then re-opened** | Passed on the walk — Tab entered and Enter selected. Finding 7 then showed the middle clause had never been implemented, and the fix (**D-67**) changed the surface underneath the tick, so the row goes back to unwalked. A row ticked against code that no longer exists is worse than an empty one |
+| 7 Item list | **PASS** | ↑/↓, Home/End, Enter opens in the detail pane |
+| 8 Detail pane | **PASS** | Fields Tab through; Reveal and Copy reachable without hover; Edit and Delete in the toolbar |
+| 8a One-time code row | *not yet walked* | Separate box from row 8, and only visible on an item that carries a one-time code — the row most likely to be skipped by walking the detail pane of an item that has none |
+| 9 Empty states | **PASS** | The primary action is focusable and is the first stop after the list |
+| 11 Command palette | **partial — FAIL on the command rows** | ⌘K opens ✓. Selecting **New item** does nothing — finding 5. The row's own four remaining clauses (Esc, ↑/↓, Enter copies, ⇧Enter opens) are still unwalked |
+
+Row 3 failing on the first surface walked is the argument for the whole manual pass. Both causes
+are plain in the source and neither was found by reading it in three phases, because both are
+about the moment **between** two renders — the screen is correct in every static reading of it.
+
 ## Result
 
 | | |
 |---|---|
 | S-08 target | 100 % of surfaces operable with no pointer |
 | Global rules | **7 of 7**, measured 2026-08-07 — `npm run a11y`, 68 surface-audits, no findings |
-| Surfaces | **0 of 19** — the manual pass opened 2026-08-08 and is in progress. The four global shortcuts are confirmed working, which opens rows 11, 12 and 14 without ticking any of them |
+| Surfaces | **3 passed of 20** — rows 7, 8, 9. Row 6 passed and was **re-opened** by D-67, which changed the surface under it. Walked and failed: row 3 (finding 4) and row 11 in part (finding 5, not a keyboard defect). Row 8a is not walked and is easy to miss: it needs an item carrying a one-time code on screen |
 | Date | 2026-08-07 (global rules); manual pass opened 2026-08-08, not complete |
+
+**The total is 20 boxes, not 19**, and the number above is corrected rather than carried: the rows
+are numbered 1–19 and row 8a is a twentieth alongside row 8, so every "0 of 19" written before
+2026-08-08 was counting the highest row number instead of the rows. It changes no work and no
+row's wording. It is corrected here because the gate line is the one that has to survive it, and
+that line was already re-worded to need **a list rather than a total** — this is the second time
+this table's count has been wrong in the direction of a total, which is the argument for the list.

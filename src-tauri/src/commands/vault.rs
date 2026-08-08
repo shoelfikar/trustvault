@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager as _, State};
 use trustvault_core::{EXTENSION, FORMAT_VERSION, KdfParams, RecoveryCode, Vault};
 
+use crate::commands::{save_open_vault, with_vault};
 use crate::dto::{BuildInfo, KdfSummary, VaultStatus};
 use crate::error::{ErrorKind, IpcError, IpcResult};
 use crate::state::{AppState, LockReason, PendingVault};
@@ -80,6 +81,36 @@ fn free_path(directory: &std::path::Path, stem: &str) -> PathBuf {
 #[tauri::command(rename_all = "snake_case")]
 pub fn vault_status(state: State<'_, AppState>) -> VaultStatus {
     state.status()
+}
+
+/// **Vault-class.** Labels the vault with its owner's name and e-mail, and saves — D-70.
+///
+/// The two strings go **inside the sealed body**, which is what makes them worth storing rather
+/// than inventing on screen: they identify a person, and the file whose whole purpose is being
+/// unreadable without a key is the right place for that. It is not an account. Nothing
+/// authenticates against them, nothing is sent anywhere (D-03), and the recovery kit and the
+/// sidebar footer are the only things that read them.
+///
+/// Vault-class rather than ambient because it writes to the body, so it goes through
+/// [`with_vault`] like every other mutation and fails `locked` when nothing is open.
+#[tauri::command(rename_all = "snake_case")]
+pub fn set_profile(state: State<'_, AppState>, name: String, email: String) -> IpcResult<()> {
+    set_profile_inner(&state, name, email)
+}
+
+/// The body of [`set_profile`], reachable without a Tauri runtime.
+///
+/// **A profile that did not change is not saved**, and that is the whole reason `set_profile`
+/// returns a bool down in the core: the Edit-profile dialog's Save is pressed whether or not
+/// anything was typed, and writing on every press would rewrite — re-encrypt, re-nonce, and
+/// atomically replace — the entire vault file to store the strings it already held.
+pub fn set_profile_inner(state: &AppState, name: String, email: String) -> IpcResult<()> {
+    with_vault(state, |vault, inner| {
+        if vault.set_profile(&name, &email) {
+            save_open_vault(vault, inner)?;
+        }
+        Ok(())
+    })
 }
 
 /// **Ambient.** Measures this machine and returns Argon2id parameters for a new vault (R-02).

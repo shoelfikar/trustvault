@@ -162,6 +162,7 @@ vault_status(): {
   path: string | null;         // absolute path of the vault file
   display_name: string;        // see below
   item_count: number | null;   // null unless unlocked
+  profile: { name: string; email: string } | null;   // null unless unlocked — D-70
 }
 ```
 
@@ -170,6 +171,17 @@ real name lives inside the sealed body**, so while the vault is locked it cannot
 `state` is `locked`, `display_name` is the file stem — `personal.tvault` shows as "personal". When
 `unlocked` it is `Vault::name()`. The lock screen must not imply it is showing the name the user
 typed at onboarding, because until they unlock, it isn't.
+
+`profile` is the same wrinkle one step further — **D-70**. It is a label the user typed for their own
+benefit, it lives in the sealed body (`vault-format.md` §6.6), and it is therefore `null` while
+locked for exactly the reason `item_count` is: there is no key to read it with. It is **not an
+account**: nothing authenticates against it, nothing is sent anywhere (D-03), and it is not a
+`Secret` in R-10's sense any more than `display_name` is.
+
+`null` and `{ name: "", email: "" }` are different answers and the UI draws them differently. `null`
+is "locked, so unknown", and the footer falls back to the vault's own name. The empty pair is
+"unlocked, and nobody has filled it in" — every vault starts there, because the design's three
+onboarding steps are vault name, master password and recovery kit, and none of them asks.
 
 ```ts
 default_vault_path({ name: string }): string
@@ -438,6 +450,34 @@ Two more rules with the same shape:
 Stated rather than left implicit: a confirmation the host does not verify is a confirmation, because
 the thing it protects against is a mis-click, not a hostile caller — the caller is the only user.
 `delete_vault` is the opposite case and §6.7 says why.
+
+```ts
+set_profile({ name: string; email: string }): void
+```
+
+Labels the vault with its owner — **D-70**. The read path is `profile` on `vault_status` (§5); this
+is the write, and it is vault-class rather than ambient because it writes to the sealed body.
+
+The design's sidebar footer and Settings card draw a person: an avatar of initials, a name, an
+e-mail. TrustVault has no account (D-03), so for two phases those were the *vault's* initials, name
+and file — honest, and a different thing from what the design drew. This command is the third
+option: store the two strings, so the person on screen is a person the user actually named.
+
+Three properties, because each is the kind that goes wrong quietly:
+
+- **It is not a credential.** Nothing authenticates against these strings, nothing validates them,
+  and nothing sends them anywhere. `email` is not checked for an `@` — it labels a recovery kit, and
+  refusing a string the user chose for their own label would be the app inventing a rule.
+- **Both strings are trimmed**, because the only thing this data does is render, and a trailing
+  space in a name is invisible everywhere it appears.
+- **An unchanged profile is not a save.** The Edit-profile dialog's Save is pressed whether or not
+  anything was typed; writing unconditionally would re-encrypt, re-nonce and atomically replace the
+  entire vault file to store the strings it already held. The core's `set_profile` returns whether
+  anything changed, and that return is what this command branches on.
+
+There is no `get_profile`. It rides on `vault_status` instead, for the reason `item_count` does:
+both come out of the same body, both are `null` in exactly the same state, and both are wanted by
+the first render after an unlock — a second command would be a second round trip for one moment.
 
 ### 6.5 Search and tags — R-16
 

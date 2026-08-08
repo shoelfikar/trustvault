@@ -132,12 +132,26 @@ same keystrokes and would swallow the first letter of every shortcut a later pha
 | 17 | Watchtower | The findings list is a list: ↑/↓ and Enter to the offending item | [ ] |
 | 18 | Edit-item dialog | Every field row Tab-reachable in display order; **Replace** on a secret row reachable without hover, and Tab from it lands in the input it just opened; Remove and Add field reachable; the **New tag** field takes Enter as "add this tag" — R-17 | [ ] |
 | 19 | Import dialog | Esc closes from the intro **and** from the report; Choose file… reachable and the **native picker takes over from there**, so the keyboard path leaves the app and must come back to a focused dialog; Import stays disabled until a preview is on screen; the report's refusal list scrolls with the keyboard alone, not only with a wheel — R-29 | [ ] |
+| 20 | Profile popover | Enter or Space on the footer row opens it and focus lands on the **first row, not the header**; ↑/↓ wrap between the four rows; Esc closes and focus returns to the footer row that opened it; the ⌘, printed beside *Settings* actually reaches Settings — D-70 | [ ] |
+| 21 | Edit-profile dialog | Focus lands in **Full name**; Tab reaches Email, Cancel and Save in that order; Enter in either field saves rather than doing nothing; Esc cancels and focus returns to whatever opened it — the popover row **or** the Settings card's button, which are two different return paths — D-70 | [ ] |
 
-Rows 18 and 19 were added 2026-08-06 with the surfaces themselves, and they are why this table's
-count is now **19 against the gate's 15**: neither the edit dialog nor the import dialog is drawn
-in the prototype, so both exist because a requirement needs one and not because the design has a
-picture of it. That widens the reconciliation this section already owed rather than changing its
-shape — the source is right about what exists, and the gate line needs a list rather than a total.
+Rows 18 and 19 were added 2026-08-06 with the surfaces themselves, and rows 20 and 21 on
+2026-08-08 with D-70's, which is why this table's count is now **21 against the gate's 15**. None
+of the four is drawn in the prototype as a surface we then built: 18 and 19 exist because a
+requirement needed them, and 20 and 21 because D-70 gave the design's own profile pixels something
+to be. That widens the reconciliation this section already owed rather than changing its shape —
+the source is right about what exists, and the gate line needs a list rather than a total.
+
+Row 20's "first row, not the header" is the finding it is written against. The header is a `div`
+with an avatar and two lines of text and takes no focus at all, so a menu that opened with focus
+on the container would leave ↑/↓ doing nothing until Tab was pressed first — the failure looks
+exactly like a menu that does not respond to the keyboard.
+
+Row 21's two return paths are the reason it is a row rather than a clause on row 13. The same
+dialog is opened from the popover and from Settings, and the popover **is gone by the time the
+dialog closes** — so the restore has a dead trigger on one of the two paths and a live one on the
+other. `Dialog.svelte`'s `isConnected` guard is what makes the dead one fall back rather than
+silently focus `<body>`, and this row is where somebody checks that it does.
 
 Row 19 carries the only line in this table that is **not about our own focus handling**. The native
 file dialog is the operating system's, not ours: it takes focus, it is keyboard-operable or not
@@ -391,12 +405,13 @@ about the moment **between** two renders — the screen is correct in every stat
 |---|---|
 | S-08 target | 100 % of surfaces operable with no pointer |
 | Global rules | **7 of 7**, measured 2026-08-07 — `npm run a11y`, 68 surface-audits, no findings |
-| Surfaces | **3 passed of 20** — rows 7, 8, 9. Row 6 passed and was **re-opened** by D-67, which changed the surface under it. Walked and failed: row 3 (finding 4) and row 11 in part (finding 5, not a keyboard defect). Row 8a is not walked and is easy to miss: it needs an item carrying a one-time code on screen |
+| Surfaces | **3 passed of 22** — rows 7, 8, 9. Row 6 passed and was **re-opened** by D-67, which changed the surface under it. Walked and failed: row 3 (finding 4) and row 11 in part (finding 5, not a keyboard defect). Row 8a is not walked and is easy to miss: it needs an item carrying a one-time code on screen |
 | Date | 2026-08-07 (global rules); manual pass opened 2026-08-08, not complete |
 
-**The total is 20 boxes, not 19**, and the number above is corrected rather than carried: the rows
-are numbered 1–19 and row 8a is a twentieth alongside row 8, so every "0 of 19" written before
-2026-08-08 was counting the highest row number instead of the rows. It changes no work and no
-row's wording. It is corrected here because the gate line is the one that has to survive it, and
-that line was already re-worded to need **a list rather than a total** — this is the second time
-this table's count has been wrong in the direction of a total, which is the argument for the list.
+**The total is 22 boxes**, and the number above is corrected rather than carried: the rows are
+numbered 1–21, row 8a is a box alongside row 8, so the count is 21 + 1. Every "0 of 19" written
+before 2026-08-08 was counting the highest row number instead of the rows, and the "of 20" written
+earlier that day predates rows 20 and 21 (D-70). It changes no work and no row's wording. It is
+corrected here because the gate line is the one that has to survive it, and that line was already
+re-worded to need **a list rather than a total** — this is now the third time this table's count
+has been wrong in the direction of a total, which is the argument for the list.

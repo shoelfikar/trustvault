@@ -136,16 +136,39 @@ const UNLOCKED = {
   path: '/home/shoel/Documents/personal.tvault',
   display_name: 'Personal Vault',
   item_count: ITEMS.length,
+  // D-70. Empty, not absent, and not filled in: this is the state **every** vault is in until
+  // somebody types a name, so it is what the twenty-odd existing surfaces should be measured
+  // against. `NAMED` below is the other half, and it exists as a separate status for the three
+  // scenarios that are about the profile rather than merely containing it.
+  profile: { name: '', email: '' },
+};
+
+/** The same vault with an owner named — the state the design's mockups are all drawn in. */
+const NAMED = {
+  ...UNLOCKED,
+  profile: { name: 'Budi Santoso', email: 'budi@warungpintar.id' },
 };
 
 export const SCENARIOS = {
-  onboarding: { status: { state: 'no_vault', path: null, display_name: '', item_count: null } },
+  onboarding: {
+    status: {
+      state: 'no_vault',
+      path: null,
+      display_name: '',
+      item_count: null,
+      profile: null,
+    },
+  },
   lock: {
     status: {
       state: 'locked',
       path: '/home/shoel/Documents/personal.tvault',
       display_name: 'personal',
       item_count: null,
+      // `null` rather than empty, and it is the assertion the lock screen is worth having: a
+      // locked vault cannot read its own profile, so a surface that drew one here would be
+      // drawing something the host can never send — D-70.
+      profile: null,
     },
   },
   shell: { status: UNLOCKED },
@@ -173,6 +196,23 @@ export const SCENARIOS = {
             fill('#new-totp', 'GEZDGNBVGY3TQOJQ'); await sleep(600)`,
   },
   editItem: { status: UNLOCKED, drive: `clickText('button', 'Edit')` },
+  // The three profile surfaces — D-70. Driven off `[aria-haspopup="menu"]` rather than a class,
+  // because Svelte hashes component classes and there is exactly one popup trigger in the shell.
+  //
+  // `profileMenu` and `editProfile` run against `NAMED`, which is the state they are drawn for.
+  // `settings` above keeps `UNLOCKED`, so the Settings shot stays the **empty** profile card —
+  // what a user sees on their first visit, and the one state nobody remembers to look at
+  // because whoever built it always has a profile. `settingsProfile` is the filled-in half.
+  profileMenu: {
+    status: NAMED,
+    drive: `click('[aria-haspopup="menu"]'); await sleep(300)`,
+  },
+  editProfile: {
+    status: NAMED,
+    drive: `click('[aria-haspopup="menu"]'); await sleep(200);
+            clickText('button', 'Edit profile…'); await sleep(300)`,
+  },
+  settingsProfile: { status: NAMED, drive: `click('[title="Settings"]')` },
   deleteItem: { status: UNLOCKED, drive: `click('[title="Delete item"]')` },
   // The two empty states R-19 is actually about, and the only two a screenshot can reach: the
   // vault with nothing in it, and Trash — which is empty by construction and stays that way
@@ -312,6 +352,10 @@ function respond(cmd, args) {
     // (No backticks in this block: it lives inside the template literal that builds the page.)
     case 'add_item': return { item_id: ITEMS[0]?.id ?? 'new' };
     case 'update_item': case 'delete_item': return null;
+    // D-70. Null because the real one returns nothing, and the shell re-reads vault_status
+    // afterwards -- which here answers with the static STATUS, so a driven save shows the
+    // dialog closing rather than the name changing. That is the honest limit of a stub.
+    case 'set_profile': return null;
     case 'create_vault': case 'unlock_recovery_kit':
       return { recovery_code: 'K7QX-2MRE-9WVT-4HDP-6SNA-3JFB' };
     // D-69 split the write off create_vault. Answered here so a drive that reaches step 3's

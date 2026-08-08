@@ -215,8 +215,15 @@ VaultBody {
   created_at: int,           // Unix milliseconds, UTC
   updated_at: int,           // Unix milliseconds, UTC
   items:      [Item],
+  profile:    Profile,       // §6.6; absent entirely when empty
   audit:      [AuditEntry],  // §6.4; absent entirely when empty
   ...unknown                 // §6.2
+}
+
+Profile {
+  name:       text,          // §6.6; may be empty
+  email:      text,          // §6.6; may be empty, never used to sign in
+  ...unknown
 }
 
 Item {
@@ -338,6 +345,36 @@ is not — so a `folder` key would be a second taxonomy over the same items, wit
 owing two filters that mean nearly the same thing. On import a folder becomes a tag, and a **nested
 path is kept verbatim as one tag string** (`Work/Clients`, not `Clients`): flattening to the leaf
 name collides across parents, and splitting into two tags claims a hierarchy that tags do not have.
+
+### 6.6 The profile is a label, not an account — D-70
+
+`profile` holds a name and an e-mail address, and it exists because the design draws a person in two
+places: the sidebar footer and the Settings card, both with an avatar of initials. TrustVault has no
+account and no sync (D-03), so there was nothing behind those pixels — for two phases they carried
+the *vault's* initials, name and file instead, which is honest and is a different thing from what
+was drawn. D-70 chose the third option: store the two strings, so that the person on screen is one
+the user actually named.
+
+Four properties, and a second implementation must match all four:
+
+1. **It is not a credential and it is not validated.** Nothing authenticates against these strings.
+   `email` is not checked for an `@` — its job is to label a profile and a printed recovery kit, and
+   refusing a string the user chose for their own label would be the format inventing a rule.
+2. **Absent when empty.** A profile whose `name`, `email` and unknown keys are all empty writes no
+   `profile` key at all, so a vault that predates this field encodes exactly as it did before — the
+   same rule `custom` (§6.5) and `audit` (§6.4) follow, and the reason the vectors in §10 stay valid
+   without being regenerated. A reader MUST treat an absent `profile` as two empty strings.
+3. **Empty is the starting state.** Onboarding's three steps are vault name, master password and
+   recovery kit; none of them asks. Every vault begins with no owner named, and the UI treats that
+   as an invitation rather than as missing data.
+4. **It is inside the sealed body, and that is the point.** A name and an e-mail identify a person,
+   so they belong in the part of the file that is unreadable without a key — not beside the settings
+   (D-33), which are plaintext JSON in a config directory. The cost is that they cannot be read while
+   locked, which is why the lock screen names the vault and never its owner.
+
+`unknown` on `Profile` counts toward "empty" in the N-09 direction: a profile holding only a key this
+build does not recognize is **not** empty, and skipping it on write would drop what a newer version
+stored.
 
 ## 7. Reading a vault
 

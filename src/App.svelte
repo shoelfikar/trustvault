@@ -125,6 +125,7 @@
     onsettings={(next) => (settings = next)}
     onvaultchanged={refresh}
     oncreatevault={() => (creating = true)}
+    onstatuschanged={refresh}
   />
 {/if}
 

@@ -6,13 +6,17 @@
    * Asking the host again would be a second source of truth for the same number, and the two
    * would disagree the first time a filter changed.
    *
-   * The footer is the prototype's profile row with honest content. There is no account and no
-   * sync (D-03), so an avatar and an email would be invented; it carries the *vault* instead —
-   * initials, name, file and item count — and opens the vault switcher, which is what a footer
-   * in that position is for.
+   * The footer is the prototype's profile row, and **as of D-70 it carries a profile again**.
+   * For two phases it carried the vault instead — there was no account and no sync (D-03), so
+   * an avatar and an e-mail would have been invented. What changed is not that argument but
+   * what is behind the pixels: a name and an e-mail now live in the sealed body, so the row
+   * shows a person when the user has named one and falls back to the vault when they have not.
+   * Clicking it opens `ProfileMenu` rather than jumping straight to the vault switcher, which
+   * is the prototype's own behaviour and the one thing the old footer got wrong.
    */
   import Icon, { type IconName } from '../icons/Icon.svelte';
-  import type { ItemKind, ItemSummary } from '../ipc';
+  import type { ItemKind, ItemSummary, Profile } from '../ipc';
+  import { initialsOf } from './profile';
   import { isFlagged, sameView, tagColour, type View } from './views';
 
   interface Props {
@@ -20,11 +24,16 @@
     view: View;
     vaultName: string;
     vaultFile: string;
+    /** Who the vault belongs to, or `null` — D-70. Never `null` here: the shell is unlocked. */
+    profile: Profile | null;
+    /** Whether the popover is open, so the row can hold its pressed background. */
+    menuOpen: boolean;
     onview: (next: View) => void;
-    onvaults: () => void;
+    /** Opens the popover. The element is passed up because the menu is positioned from it. */
+    onmenu: (trigger: HTMLElement) => void;
   }
 
-  const { items, view, vaultName, vaultFile, onview, onvaults }: Props = $props();
+  const { items, view, vaultName, vaultFile, profile, menuOpen, onview, onmenu }: Props = $props();
 
   /** The three types the design's sidebar names. The other four live under All Items. */
   const types: { type: ItemKind; label: string; icon: IconName }[] = [
@@ -42,15 +51,17 @@
   const countOf = (type: ItemKind) => items.filter((item) => item.kind === type).length;
   const countTag = (tag: string) => items.filter((item) => item.tags.includes(tag)).length;
 
-  const initials = $derived(
-    vaultName
-      .trim()
-      .split(/\s+/)
-      .map((word) => word[0] ?? '')
-      .slice(0, 2)
-      .join('')
-      .toUpperCase() || 'TV',
-  );
+  /**
+   * The person if one is named, the vault otherwise — D-70.
+   *
+   * Three derivations rather than one, because the fallback is not the same shape on both
+   * lines: with no profile the row reads exactly as it did before this existed (vault initials,
+   * vault name, file and count), and with one it reads as the design drew it. The file and
+   * count stay on the second line in both cases — the prototype puts "Synced 2 min ago" there,
+   * which D-03 makes a lie, and the vault's own file is the true thing worth that space.
+   */
+  const initials = $derived(initialsOf(profile?.name ?? '', initialsOf(vaultName, 'TV')));
+  const primary = $derived(profile?.name || vaultName);
 
   /**
    * The three groups as data, so every entry has an index across the whole sidebar.
@@ -222,10 +233,16 @@
   <div class="spacer"></div>
 
   <div class="footer">
-    <button class="vault" onclick={onvaults} title="Switch vault">
+    <button
+      class="vault"
+      class:open={menuOpen}
+      aria-haspopup="menu"
+      aria-expanded={menuOpen}
+      onclick={(event) => onmenu(event.currentTarget)}
+    >
       <span class="avatar">{initials}</span>
       <span class="lines">
-        <span class="vault-name">{vaultName}</span>
+        <span class="vault-name">{primary}</span>
         <span class="vault-meta">{vaultFile} · {items.length} items</span>
       </span>
       <span class="chev"><Icon name="chev" size={13} /></span>
@@ -353,6 +370,12 @@
     border-radius: 0;
     gap: var(--space-3);
   }
+  /* Held while the popover is up, so the row reads as the thing the menu belongs to. It is
+     `--bg-hover` and not `--accent-wash`: this is a pressed control, not a selected view. */
+  .vault.open,
+  .vault.open:hover {
+    background: var(--bg-hover);
+  }
   .avatar {
     display: grid;
     place-items: center;
@@ -361,7 +384,25 @@
     flex: none;
     /* §4: --radius-full is for avatars only, and this is the one. */
     border-radius: var(--radius-full);
-    background: var(--accent-wash);
+    /*
+     * **Opaque, unlike the other two avatars, and that is a contrast fix rather than a style.**
+     *
+     * `--accent-wash` is translucent, so whatever is behind it changes the colour the initials
+     * are read against — and this is the one avatar whose backdrop moves: the row tints to
+     * `--bg-hover` on hover and while the popover is open. Measured 2026-08-08 by
+     * `npm run a11y`: brass over the wash over `--bg-hover` is **4.09:1** in dark, under §9's
+     * 4.5. On the sidebar's own `--bg-base` it is comfortably over.
+     *
+     * The defect predates the popover — the row has tinted on hover since Phase 2 — and it took
+     * D-70's `.open` to expose it, because `element.focus()` can reach a state the audit cannot
+     * hover into. Mixing against `--bg-base` freezes the avatar at the colour it always had on
+     * the untinted row, so the row can tint underneath it without moving it.
+     *
+     * The token carries the flattened value per theme; `color-mix` was tried first and cannot
+     * be used here, because it computes to `color(srgb …)` and the audit's parser reads that as
+     * `rgb(1, 1, 1)` — which turned one finding into eighteen false ones.
+     */
+    background: var(--accent-chip);
     font-size: var(--text-micro);
     font-weight: var(--weight-semibold);
     color: var(--accent);
@@ -385,9 +426,15 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /*
+   * Rotated to point **up**, which is the prototype's own `rotate(-90deg)` and is also the
+   * direction the menu opens. A right-pointing chevron on a control that opens upward reads as
+   * "goes to another screen" — which is what this row used to do, and no longer does.
+   */
   .chev {
     display: flex;
     flex: none;
+    transform: rotate(-90deg);
     color: var(--fg-subtle);
   }
 </style>

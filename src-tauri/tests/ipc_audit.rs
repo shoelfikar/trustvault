@@ -473,6 +473,40 @@ fn every_vault_command_refuses_while_locked() {
             .kind,
         ErrorKind::Locked
     );
+    // D-70. It writes to the sealed body, so it is vault-class like every other mutation — a
+    // profile that could be set while locked would be a write to a vault with no key open.
+    assert_eq!(
+        vault_cmd::set_profile_inner(&state, "Budi".to_owned(), "budi@example.com".to_owned())
+            .unwrap_err()
+            .kind,
+        ErrorKind::Locked
+    );
+}
+
+/// `vault_status` reports no profile at all while locked — D-70.
+///
+/// The distinction `Option` carries. "Locked, so unknown" and "unlocked, and nobody has filled
+/// it in" are different facts, and the sidebar footer draws them differently: the first falls
+/// back to the vault's own name, the second is an invitation to fill it in. Collapsing them
+/// into an empty `Profile` would have made the footer claim a nameless owner on the lock
+/// screen, which is the one place it cannot know. The write half — that it persists, and that
+/// it is trimmed — is in `ipc_session.rs`, because setting it saves the file.
+#[test]
+fn a_profile_is_none_while_locked_and_empty_on_a_fresh_vault() {
+    let (state, _, _, _) = unlocked();
+
+    let fresh = state.status().profile.expect("a vault is open");
+    assert_eq!(
+        fresh.name, "",
+        "onboarding does not ask, so it starts empty"
+    );
+    assert_eq!(fresh.email, "");
+
+    state.lock();
+    assert!(
+        state.status().profile.is_none(),
+        "there is no key to read the body with"
+    );
 }
 
 /// A reload does not unlock anything, and nothing the frontend does can change that.

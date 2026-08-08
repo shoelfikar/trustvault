@@ -12,7 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use trustvault_core::Vault;
 
-use crate::dto::{VaultState, VaultStatus};
+use crate::dto::{Profile, VaultState, VaultStatus};
 
 /// Milliseconds since the Unix epoch, UTC. The same clock the vault body uses.
 pub fn now_ms() -> i64 {
@@ -316,6 +316,13 @@ impl AppState {
                 path: inner.path.as_ref().map(|p| p.display().to_string()),
                 display_name,
                 item_count: inner.vault.as_ref().map(|v| v.items().count()),
+                // Out of the body, so `None` while locked for the same reason `item_count` is
+                // — D-70. There is no key to read it with, and an empty profile would read as
+                // "nobody has filled this in" rather than "you cannot know yet".
+                profile: inner.vault.as_ref().map(|v| Profile {
+                    name: v.profile().name.clone(),
+                    email: v.profile().email.clone(),
+                }),
             }
         })
         .unwrap_or_else(|| VaultStatus {
@@ -323,6 +330,7 @@ impl AppState {
             path: None,
             display_name: String::new(),
             item_count: None,
+            profile: None,
         })
     }
 }

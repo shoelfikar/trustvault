@@ -16,12 +16,32 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 export type VaultState = 'no_vault' | 'locked' | 'unlocked';
 
+/**
+ * Who the vault belongs to, as a label — §5, D-70.
+ *
+ * **Not an account.** Nothing authenticates against these two strings and nothing is sent
+ * anywhere (D-03); they label the sidebar footer, the Settings card and the recovery kit. Both
+ * are empty until the user fills them in, because onboarding's three steps do not ask.
+ */
+export interface Profile {
+  name: string;
+  email: string;
+}
+
 export interface VaultStatus {
   state: VaultState;
   path: string | null;
   /** While locked this is the **file stem**, not the name typed at onboarding — §5. */
   displayName: string;
   itemCount: number | null;
+  /**
+   * Who the vault belongs to, or `null` while locked — §5, D-70.
+   *
+   * `null` and `{ name: '', email: '' }` are different answers and the footer draws them
+   * differently: `null` is "locked, so unknown" and falls back to the vault's own name, while
+   * the empty pair is "unlocked, and nobody has filled it in". Do not collapse them.
+   */
+  profile: Profile | null;
 }
 
 export type FieldKind =
@@ -479,6 +499,19 @@ export const deleteVault = (path: string, confirmName: string) =>
 export const unlock = (path: string, password: string) => call<void>('unlock', { path, password });
 
 export const lock = () => call<void>('lock');
+
+/**
+ * Labels the vault with its owner and saves — §6.4, D-70.
+ *
+ * There is no `getProfile`: the read path is `profile` on `vaultStatus`, because both come out
+ * of the same body and are `null` in exactly the same state.
+ *
+ * Both strings are trimmed by the host, and **an unchanged profile is not a save** — the dialog
+ * calls this whether or not anything was typed, and the host is what decides not to rewrite the
+ * file. Nothing here needs to compare before calling.
+ */
+export const setProfile = (name: string, email: string) =>
+  call<void>('set_profile', { name, email });
 
 export const listItems = () => call<ItemSummary[]>('list_items');
 

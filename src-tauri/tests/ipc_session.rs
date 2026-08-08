@@ -513,6 +513,77 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
     let _ = fs::remove_file(&path);
 }
 
+/// The profile survives a lock and a relaunch, and an unchanged one does not rewrite the file.
+///
+/// D-70. Driven against a real file rather than in `ipc_audit.rs`, because setting a profile
+/// **saves**, and the point of the test is what is on disk afterwards. Two properties, and the
+/// second is the one that would go wrong silently: the Edit-profile dialog's Save is pressed
+/// whether or not anything was typed, so a `set_profile` that wrote unconditionally would
+/// re-encrypt and atomically replace the whole vault file on every open-and-cancel.
+#[test]
+fn a_profile_persists_across_a_relaunch_and_an_unchanged_one_writes_nothing() {
+    let path = scratch_path();
+    let state = AppState::default();
+
+    vault_cmd::create_vault_inner(
+        &state,
+        "Session Vault".into(),
+        path.display().to_string(),
+        MASTER.into(),
+        KdfSummary {
+            m_cost: KdfParams::TESTING.m_cost,
+            t_cost: KdfParams::TESTING.t_cost,
+            p_cost: KdfParams::TESTING.p_cost,
+        },
+    )
+    .expect("a writable path");
+    vault_cmd::commit_vault_inner(&state).expect("the pending vault is written");
+
+    assert_eq!(
+        state.status().profile.expect("open").name,
+        "",
+        "onboarding's three steps do not ask, so a new vault has no owner named"
+    );
+
+    vault_cmd::set_profile_inner(
+        &state,
+        "  Budi Santoso  ".into(),
+        "budi@warungpintar.id".into(),
+    )
+    .expect("an open vault takes a profile");
+
+    let stored = state.status().profile.expect("still open");
+    assert_eq!(stored.name, "Budi Santoso", "trimmed on the way in");
+    assert_eq!(stored.email, "budi@warungpintar.id");
+
+    // Submitting the same values again must not touch the file. Compared by modification time
+    // rather than by bytes, because every save draws a fresh nonce — identical content
+    // re-encrypts to different ciphertext, so equal bytes could never have been the assertion.
+    let before = fs::metadata(&path)
+        .expect("the vault exists")
+        .modified()
+        .ok();
+    vault_cmd::set_profile_inner(&state, "Budi Santoso".into(), "budi@warungpintar.id".into())
+        .expect("still open");
+    let after = fs::metadata(&path).expect("still there").modified().ok();
+    assert_eq!(before, after, "an unchanged profile is not a save");
+
+    // Quit, relaunch, unlock: the profile came off disk, not out of memory.
+    drop(state);
+    let state = AppState::default();
+    assert!(
+        state.status().profile.is_none(),
+        "nothing is open, so nothing is knowable"
+    );
+    vault_cmd::unlock_inner(&state, path.display().to_string(), MASTER.into()).expect("opens");
+
+    let reopened = state.status().profile.expect("open again");
+    assert_eq!(reopened.name, "Budi Santoso");
+    assert_eq!(reopened.email, "budi@warungpintar.id");
+
+    let _ = fs::remove_file(&path);
+}
+
 /// The transcript is written, and it is written where the gate can find it.
 ///
 /// Separate from the assertions above so that a failure here reads as "the evidence is

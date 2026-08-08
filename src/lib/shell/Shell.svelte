@@ -19,10 +19,12 @@
   import DeleteDialog from './DeleteDialog.svelte';
   import DetailPane from './DetailPane.svelte';
   import EditItemDialog from './EditItemDialog.svelte';
+  import EditProfileDialog from './EditProfileDialog.svelte';
   import GeneratorDialog from './GeneratorDialog.svelte';
   import ImportDialog from './ImportDialog.svelte';
   import ItemList from './ItemList.svelte';
   import NewItemDialog from './NewItemDialog.svelte';
+  import ProfileMenu from './ProfileMenu.svelte';
   import SettingsPane from './SettingsPane.svelte';
   import Sidebar from './Sidebar.svelte';
   import VaultSwitcher from './VaultSwitcher.svelte';
@@ -36,6 +38,7 @@
     type Settings,
     type VaultStatus,
   } from '../ipc';
+  import { initialsOf } from './profile';
   import { isFullWidth, matches, viewTitle, type View } from './views';
 
   interface Props {
@@ -60,9 +63,21 @@
      * would be deciding what is on screen instead of the state that owns it.
      */
     oncreatevault: () => void;
+    /**
+     * Something inside the vault body that `vault_status` reports has changed — today only the
+     * profile (D-70).
+     *
+     * Separate from `onvaultchanged`, which means *this vault is gone* and tears the shell
+     * down. This one only asks the router to re-read: the state stays `unlocked`, the shell
+     * keeps rendering, and the new values arrive as props. Re-reading rather than being handed
+     * the values is the same rule the mutation commands follow — the host is the source, and a
+     * frontend that patched its own copy would be a second one.
+     */
+    onstatuschanged: () => void;
   }
 
-  const { status, settings, onsettings, onvaultchanged, oncreatevault }: Props = $props();
+  const { status, settings, onsettings, onvaultchanged, oncreatevault, onstatuschanged }: Props =
+    $props();
 
   let items = $state<ItemSummary[]>([]);
   let view = $state<View>({ kind: 'all' });
@@ -77,13 +92,25 @@
     | 'generator'
     | 'add'
     | 'edit'
+    | 'editProfile'
     | 'import'
     | 'vaults'
+    | 'profileMenu'
     | 'deleteItem'
     | 'deleteVault';
 
   /** Which overlay is up. One at a time — the prototype never stacks two. */
   let overlay = $state<Overlay>('none');
+
+  /**
+   * The footer button the profile popover is placed against — D-70.
+   *
+   * Kept beside `overlay` rather than inside `Sidebar.svelte` because the popover is rendered
+   * here: the sidebar scrolls, so a menu parented inside it would be clipped by its own
+   * overflow. The element arrives from the click that opened the menu, and is what the menu
+   * measures and gives focus back to.
+   */
+  let profileAnchor = $state<HTMLElement | null>(null);
 
   /**
    * Close an overlay only if it is still the one on screen.
@@ -143,6 +170,11 @@
   );
 
   const selectedTitle = $derived(items.find((item) => item.id === selectedId)?.title ?? '');
+
+  /** The popover's avatar: the person's initials, or the vault's when nobody is named — D-70. */
+  const profileInitials = $derived(
+    initialsOf(status.profile?.name ?? '', initialsOf(status.displayName, 'TV')),
+  );
 
   /**
    * Keep the selection inside the current view, and land on the first row when it falls out.
@@ -272,6 +304,15 @@
     } else if (meta && key === 'l') {
       event.preventDefault();
       void lock();
+    } else if (meta && event.key === ',') {
+      // D-70. Bound because the profile popover prints "⌘," beside its Settings row, and a
+      // shortcut drawn on screen that nothing listens for is the same defect as a disabled
+      // control that promises a feature — it is just cheaper to fix. It is also the platform
+      // convention for preferences on all three targets, which is why the design drew it.
+      // Matched on `event.key` rather than the lowercased copy: `,` has no case, and the
+      // shifted character on this key differs per layout.
+      event.preventDefault();
+      goto({ kind: 'settings' });
     } else if (event.key === 'Escape' && overlay !== 'none') {
       overlay = 'none';
     }
@@ -316,8 +357,13 @@
         {view}
         vaultName={status.displayName}
         {vaultFile}
+        profile={status.profile}
+        menuOpen={overlay === 'profileMenu'}
         onview={goto}
-        onvaults={() => (overlay = 'vaults')}
+        onmenu={(trigger) => {
+          profileAnchor = trigger;
+          overlay = 'profileMenu';
+        }}
       />
     </div>
 
@@ -341,6 +387,7 @@
         onchange={saveSettings}
         ondeletevault={() => (overlay = 'deleteVault')}
         onimport={() => (overlay = 'import')}
+        oneditprofile={() => (overlay = 'editProfile')}
       />
     {:else}
       <div class="pane" style="width: {listWidth}px">
@@ -405,6 +452,32 @@
       {tags}
       onclose={() => closeOverlay('edit')}
       onsaved={itemChanged}
+    />
+  {:else if overlay === 'editProfile'}
+    <!-- The one editor, reached from the sidebar popover and from the Settings card. It closes
+         on success and the router re-reads, which is what repaints the footer, the popover
+         header and the card together. -->
+    <EditProfileDialog
+      name={status.profile?.name ?? ''}
+      email={status.profile?.email ?? ''}
+      onclose={() => closeOverlay('editProfile')}
+      onsaved={() => {
+        closeOverlay('editProfile');
+        onstatuschanged();
+      }}
+    />
+  {:else if overlay === 'profileMenu' && profileAnchor}
+    <ProfileMenu
+      anchor={profileAnchor}
+      name={status.profile?.name ?? ''}
+      email={status.profile?.email ?? ''}
+      initials={profileInitials}
+      vaultName={status.displayName}
+      onclose={() => closeOverlay('profileMenu')}
+      oneditprofile={() => (overlay = 'editProfile')}
+      onvaults={() => (overlay = 'vaults')}
+      onsettings={() => goto({ kind: 'settings' })}
+      onlock={() => void lock()}
     />
   {:else if overlay === 'import'}
     <!-- The dialog stays open after a successful import and shows the commit's report; only

@@ -2,10 +2,14 @@
   /**
    * Settings — the prototype's grouped rows, carrying the four values D-33 actually persists.
    *
-   * The prototype's Profile card is a *vault* card here. There is no account, no email and no
-   * sync (D-03), so a profile would be three invented fields on the one screen where a user
-   * goes to check what is true about their vault. The geometry is unchanged; the content is the
-   * vault's own.
+   * **Two cards at the top, where the prototype has one — D-70.** The design's single Profile
+   * card was a *vault* card here for two phases, because there was no account, no e-mail and no
+   * sync (D-03) and a profile would have been three invented fields on the one screen a user
+   * opens to check what is true. D-70 made the profile real, so the card the design drew comes
+   * back — and the vault card stays, because what it answers (which file, how many items, where
+   * it is) is the thing the prototype had nowhere else to put and this screen still owes. The
+   * stats row belongs to the vault card for the same reason: *Items stored*, *Sync* and *Vault
+   * file* are facts about the file, not about the person.
    *
    * **UI scale** and **Launch at login** were absent rather than disabled until 2026-08-06,
    * because the host had nowhere to keep them and a control that forgets on relaunch is worse
@@ -17,6 +21,7 @@
   import Segmented from '../components/Segmented.svelte';
   import Toggle from '../components/Toggle.svelte';
   import type { Settings, Theme, UiScale, VaultStatus } from '../ipc';
+  import { initialsOf } from './profile';
 
   interface Props {
     settings: Settings;
@@ -27,6 +32,7 @@
     onchange: (next: Settings) => void;
     ondeletevault: () => void;
     onimport: () => void;
+    oneditprofile: () => void;
   }
 
   const {
@@ -37,19 +43,27 @@
     onchange,
     ondeletevault,
     onimport,
+    oneditprofile,
   }: Props = $props();
 
   const fileName = $derived((status.path ?? '').split(/[/\\]/).pop() || 'vault.tvault');
 
-  const initials = $derived(
-    status.displayName
-      .trim()
-      .split(/\s+/)
-      .map((word) => word[0] ?? '')
-      .slice(0, 2)
-      .join('')
-      .toUpperCase() || 'TV',
+  const vaultInitials = $derived(initialsOf(status.displayName, 'TV'));
+
+  /**
+   * The profile card's own two lines, and what they say when nobody has filled one in — D-70.
+   *
+   * The empty state is an invitation rather than a blank card: every vault starts here, because
+   * onboarding's three steps are vault name, master password and recovery kit and none of them
+   * asks. The prototype's second line reads "budi@warungpintar.id · Lifetime license"; the
+   * licence half is gone for the reason `EditProfileDialog` gives — there is no purchase and
+   * nothing to manage.
+   */
+  const profileName = $derived(status.profile?.name || 'No profile set');
+  const profileEmail = $derived(
+    status.profile?.email || 'A name and e-mail for this vault and its recovery kit.',
   );
+  const profileInitials = $derived(initialsOf(status.profile?.name ?? '', '—'));
 
   const facts = $derived([
     { k: 'Items stored', v: `${itemCount} items` },
@@ -90,10 +104,27 @@
   <div class="column">
     <h1>Settings</h1>
 
+    <!-- The design's Profile card, real since D-70. `Edit profile` is the same dialog the
+         sidebar popover opens; there is one editor, reached from the two places the design
+         draws an avatar. -->
+    <p class="group-label">Profile</p>
+    <div class="card">
+      <div class="vault-head">
+        <span class="avatar" class:unset={!status.profile?.name}>{profileInitials}</span>
+        <div class="vault-titles">
+          <p class="vault-name" class:muted={!status.profile?.name}>{profileName}</p>
+          <p class="profile-email">{profileEmail}</p>
+        </div>
+        <Button onclick={oneditprofile}>
+          {status.profile?.name || status.profile?.email ? 'Edit profile' : 'Add profile'}
+        </Button>
+      </div>
+    </div>
+
     <p class="group-label">Vault</p>
     <div class="card vault">
       <div class="vault-head">
-        <span class="avatar">{initials}</span>
+        <span class="avatar">{vaultInitials}</span>
         <div class="vault-titles">
           <p class="vault-name">{status.displayName}</p>
           <p class="vault-path">{status.path ?? ''}</p>
@@ -323,6 +354,21 @@
   .vault-name {
     font-size: var(--text-md);
     font-weight: var(--weight-medium);
+  }
+  /* The empty profile: the placeholder reads as a prompt rather than as a name. */
+  .vault-name.muted {
+    color: var(--fg-muted);
+  }
+  .avatar.unset {
+    background: transparent;
+    border: 1px dashed var(--border-strong);
+    color: var(--fg-subtle);
+  }
+  .profile-email {
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-lh);
+    color: var(--fg-muted);
+    text-wrap: pretty;
   }
   /* Left-to-right with a plain ellipsis. Truncating from the *left* would be more useful for a
      long path, but `direction: rtl` moves the leading slash to the end and prints a path that

@@ -580,6 +580,48 @@ pub struct AuditEntry {
     pub field_id: FieldId,
 }
 
+/// Who the vault belongs to, as a label — `docs/vault-format.md` §6.6, D-70.
+///
+/// **Not an account.** D-03 put sync out of scope and there is no server to authenticate
+/// against, so these two strings are never sent anywhere, never checked, and never used to
+/// unlock: they label the sidebar footer, the Settings card and the printed recovery kit, and
+/// that is their whole job. Storing them was the alternative to inventing them on screen.
+///
+/// It lives **inside the sealed body** rather than beside the settings (D-33), and the
+/// difference is the point: a name and an e-mail address identify a person, and the file whose
+/// whole purpose is that its contents are unreadable without a key is the right place for them.
+/// The cost is that they cannot be read while locked, which is why the lock screen names the
+/// vault and not its owner.
+///
+/// Both strings may be empty, which is the state every vault starts in — onboarding does not
+/// ask (the design's three steps are vault name, master password, recovery kit) and a profile
+/// nobody filled in must serialize to nothing at all. See [`Profile::is_empty`].
+/// `Eq` is absent for the reason it is absent on [`Field`]: [`Unknown`] holds a
+/// `ciborium::Value`, which can contain a float. Preserving a newer version's data (N-09) is
+/// worth more than a total equality relation.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Profile {
+    /// Full name, as the user typed it. The avatar is its initials, computed for display.
+    #[serde(default)]
+    pub name: String,
+    /// E-mail address. **Never used to sign in** — there is nothing to sign in to.
+    #[serde(default)]
+    pub email: String,
+    /// Keys written by a newer version, preserved untouched (N-09).
+    #[serde(flatten)]
+    pub unknown: Unknown,
+}
+
+impl Profile {
+    /// Whether nothing has been filled in, which is what stops the key from being written.
+    ///
+    /// `unknown` counts: a profile that holds only a key this build does not recognize is not
+    /// empty, and skipping it would drop the newer version's data — N-09's whole point.
+    pub fn is_empty(&self) -> bool {
+        self.name.is_empty() && self.email.is_empty() && self.unknown.is_empty()
+    }
+}
+
 /// The decrypted contents of a vault.
 ///
 /// This is the plaintext that the body seal protects. It never leaves the core as a whole:
@@ -597,6 +639,14 @@ pub struct VaultBody {
     pub updated_at: i64,
     /// The items.
     pub items: Vec<Item>,
+    /// Who the vault belongs to, as a label — §6.6, D-70.
+    ///
+    /// `skip_serializing_if` for the reason [`VaultBody::audit`] has one, and it matters more
+    /// here because every existing vault has an empty profile: an untouched one writes **no key
+    /// at all**, so a vault that predates this field encodes to exactly the bytes it did before
+    /// — which is what keeps the known-answer vectors in `tests/vectors/` valid.
+    #[serde(default, skip_serializing_if = "Profile::is_empty")]
+    pub profile: Profile,
     /// Reveals recorded while the audit setting was on, oldest first (R-13, D-31).
     ///
     /// `skip_serializing_if` is not an optimization. An empty log writes **no key at all**,
@@ -627,9 +677,31 @@ impl VaultBody {
             created_at: now,
             updated_at: now,
             items: Vec::new(),
+            profile: Profile::default(),
             audit: Vec::new(),
             unknown: Unknown::new(),
         }
+    }
+
+    /// Sets the profile, reporting whether anything actually changed — §6.6, D-70.
+    ///
+    /// Both strings are trimmed, because the one thing this data is for is being *displayed*
+    /// and a trailing space in a name is invisible in every place it renders. The return value
+    /// is what lets the caller skip a save: this is reached from a dialog whose Save button is
+    /// pressed whether or not the fields were touched, and a write per press would rewrite the
+    /// whole vault file to store the string it already held.
+    ///
+    /// `unknown` is left alone: keys a newer version wrote are not this build's to clear.
+    pub(crate) fn set_profile(&mut self, name: &str, email: &str) -> bool {
+        let name = name.trim();
+        let email = email.trim();
+        if self.profile.name == name && self.profile.email == email {
+            return false;
+        }
+        self.profile.name = name.to_owned();
+        self.profile.email = email.to_owned();
+        self.touch();
+        true
     }
 
     /// Appends a reveal to the audit log and enforces the cap.
@@ -1041,6 +1113,63 @@ mod tests {
         item.set_favourite(true);
         assert_ne!(item.updated_at, 0);
         assert!(item.favourite);
+    }
+
+    #[test]
+    fn an_untouched_profile_writes_no_key_at_all() {
+        // Not cosmetic, and the same argument as `custom` and `audit`: every vault that exists
+        // today has an empty profile, and the known-answer vectors in tests/vectors/ stay valid
+        // only because such a vault encodes to the bytes it did before this field existed.
+        let body = VaultBody::new("Personal Vault");
+        let encoded = serde_json::to_string(&body).unwrap();
+        assert!(
+            !encoded.contains("profile"),
+            "an empty profile must write no `profile` key: {encoded}"
+        );
+    }
+
+    #[test]
+    fn a_body_written_before_profile_existed_reads_as_empty() {
+        let json = format!(
+            r#"{{"vault_id":"{}","name":"Personal Vault","created_at":0,"updated_at":0,"items":[]}}"#,
+            Uuid::new_v4()
+        );
+        let body: VaultBody = serde_json::from_str(&json).unwrap();
+        assert!(body.profile.is_empty());
+        assert!(
+            body.unknown.is_empty(),
+            "`profile` is a known key, not one that falls through to `unknown`"
+        );
+    }
+
+    #[test]
+    fn setting_a_profile_trims_and_reports_whether_it_changed() {
+        let mut body = VaultBody::new("Personal Vault");
+        body.updated_at = 0;
+
+        assert!(body.set_profile("  Budi Santoso  ", " budi@warungpintar.id "));
+        assert_eq!(body.profile.name, "Budi Santoso");
+        assert_eq!(body.profile.email, "budi@warungpintar.id");
+        assert_ne!(body.updated_at, 0, "a real change is a change");
+
+        body.updated_at = 0;
+        assert!(
+            !body.set_profile("Budi Santoso", "budi@warungpintar.id"),
+            "the dialog's Save is pressed whether or not anything was typed"
+        );
+        assert_eq!(body.updated_at, 0, "and that must not rewrite the file");
+    }
+
+    #[test]
+    fn a_profile_holding_only_an_unknown_key_is_not_empty() {
+        // N-09 read the other way round: skipping it on write would drop what a newer version
+        // stored, which is the silent corruption the whole `unknown` mechanism exists to stop.
+        let mut profile = Profile::default();
+        assert!(profile.is_empty());
+        profile
+            .unknown
+            .insert("avatar_colour".to_owned(), Value::Text("brass".to_owned()));
+        assert!(!profile.is_empty());
     }
 
     #[test]

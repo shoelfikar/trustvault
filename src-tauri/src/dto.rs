@@ -230,6 +230,20 @@ pub enum VaultState {
     Unlocked,
 }
 
+/// Who the vault belongs to, as a label — D-70.
+///
+/// **Not an account and not a credential.** Both strings are labels the user typed for their
+/// own benefit; nothing authenticates against them and nothing is sent anywhere (D-03). They
+/// are not `Secret` in R-10's sense for the same reason `display_name` is not — but they do
+/// come out of the sealed body, which is why they are only knowable while unlocked.
+#[derive(Debug, Clone, Serialize)]
+pub struct Profile {
+    /// Full name. Empty until the user fills it in; onboarding does not ask.
+    pub name: String,
+    /// E-mail address. Empty by default, and never used to sign in.
+    pub email: String,
+}
+
 /// The answer to "what is going on", which the whole frontend routes on.
 #[derive(Debug, Clone, Serialize)]
 pub struct VaultStatus {
@@ -245,6 +259,17 @@ pub struct VaultStatus {
     pub display_name: String,
     /// How many items, or `None` while locked, because it cannot be known.
     pub item_count: Option<usize>,
+    /// Who the vault belongs to, or `None` while locked — D-70.
+    ///
+    /// It rides on the status rather than having a `get_profile` of its own, and `item_count`
+    /// one line up is the precedent: both are read out of the sealed body, both are `None`
+    /// exactly when there is no key to read them with, and both are wanted by the first render
+    /// after an unlock. A second command would be a second round trip for the same moment.
+    ///
+    /// `None` is the honest shape rather than an empty `Profile`, because "locked, so unknown"
+    /// and "unlocked, and nobody has filled it in" are different facts and the footer draws
+    /// them differently.
+    pub profile: Option<Profile>,
 }
 
 /// Argon2id parameters, measured on this machine (R-02).

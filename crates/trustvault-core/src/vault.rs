@@ -15,7 +15,7 @@ use crate::aead::{self, NONCE_LEN, WRAP_LEN, random};
 use crate::format::{HEADER_LEN, Header, SALT_LEN, WRAP_AAD_LEN};
 use crate::import::{ImportReport, bitwarden};
 use crate::kdf::{self, KEY_LEN, KdfParams, Key};
-use crate::model::{AuditEntry, FieldId, Item, ItemId, ItemKind, VaultBody};
+use crate::model::{AuditEntry, FieldId, Item, ItemId, ItemKind, Profile, VaultBody};
 use crate::recovery::RecoveryCode;
 use crate::search;
 use crate::secret::{SecretBytes, SecretString};
@@ -243,6 +243,19 @@ impl Vault {
     /// The vault's display name.
     pub fn name(&self) -> &str {
         &self.body.name
+    }
+
+    /// Who the vault belongs to, as a label — D-70. Both strings are empty until one is set.
+    pub fn profile(&self) -> &Profile {
+        &self.body.profile
+    }
+
+    /// Sets the profile, reporting whether anything changed.
+    ///
+    /// `false` means the caller can skip the save — see [`VaultBody::set_profile`], which is
+    /// where the trimming and the comparison live.
+    pub fn set_profile(&mut self, name: &str, email: &str) -> bool {
+        self.body.set_profile(name, email)
     }
 
     /// The Argon2id parameters this vault was created with.

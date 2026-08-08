@@ -27,6 +27,19 @@
   --accent-hover: #d6a044;
   --on-accent: #17150f;
   --accent-wash: rgb(192 138 46 / 0.12);
+  /*
+   * `--accent-wash` already flattened onto `--bg-base` — D-70, and the same kind of token D-63
+   * added for the same reason.
+   *
+   * The wash is translucent, so an avatar drawn on it is read against whatever is *behind* the
+   * avatar, and the sidebar footer is where that moves: the row tints to `--bg-hover` on hover
+   * and while the profile popover is open. Measured 2026-08-08 — brass over the wash over
+   * `--bg-hover` is **4.09:1**, under §9's 4.5, and 5.3:1 here. A chip whose legibility depends
+   * on the state of the row under it is not a chip, so this is the opaque colour it always had
+   * on the untidied row and it stops moving. `color-mix` was the first attempt and is not
+   * usable: it computes to `color(srgb …)`, which `scripts/audits/contrast.js` cannot read.
+   */
+  --accent-chip: #282014;
 
   /* Status. Desaturated so an all-red Watchtower is not a fire alarm.
      Never used alone: every status carries an icon and a text label. */
@@ -135,6 +148,7 @@
   --accent-hover: #6f4a0b;
   --on-accent: #ffffff;
   --accent-wash: rgb(122 82 13 / 0.1);
+  --accent-chip: #e3dccf; /* the wash flattened onto --bg-base — D-70; 6.1:1 */
 
   --ok: #2f6b41;
   --warn: #8f4520;
@@ -166,6 +180,7 @@
     --accent-hover: #6f4a0b;
     --on-accent: #ffffff;
     --accent-wash: rgb(122 82 13 / 0.1);
+    --accent-chip: #e3dccf; /* D-70 */
 
     --ok: #2f6b41;
     --warn: #8f4520;

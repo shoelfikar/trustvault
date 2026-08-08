@@ -65,7 +65,7 @@ pub use import::{Converted, ImportReport, KindCount, Refusal};
 pub use kdf::KdfParams;
 pub use model::{
     AuditEntry, Field, FieldEdit, FieldId, FieldKind, HistoryEntry, Item, ItemId, ItemKind,
-    ItemStatus, VaultBody,
+    ItemStatus, Profile, VaultBody,
 };
 pub use recovery::RecoveryCode;
 pub use secret::{SecretBytes, SecretString};

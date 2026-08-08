@@ -125,6 +125,7 @@ pub fn run() {
             // Vault-class — require an unlocked vault, return no secret.
             commands::vault::unlock,
             commands::vault::lock,
+            commands::vault::set_profile,
             commands::items::list_items,
             commands::items::get_item,
             commands::items::copy_field,

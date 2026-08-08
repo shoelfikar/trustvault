@@ -200,11 +200,37 @@ says something about how it was missed, and the manual pass below has not run ye
 _The per-surface rows have not been run. They need the pointer physically unplugged and the app
 in front of a person, which is what S-08 asks for and what nothing here can stand in for._
 
+## Manual pass — in progress
+
+**Opened 2026-08-08 by the author.** Recorded as it arrives rather than at the end, for the reason
+the preamble gives: an audit written up afterwards records what the implementation turned out to
+do.
+
+- **The four global shortcuts fire and open their surfaces** — ⌘L lock, ⌘K search, ⌘N new item,
+  ⌘G generate. Reported working. **This ticks no row**, and the gap is worth naming rather than
+  rounding up: opening a surface is the first clause of rows 11, 12 and 14 and the whole of none
+  of them, and ⌘L has no row at all — it is global rule 6's example, already ticked by grep. What
+  these four establish is that the shortcut layer works, which is what makes the rest of the pass
+  possible; a surface that cannot be opened cannot be walked.
+
+Still owed on the three rows this touches, taken from their own wording:
+
+| Row | Opened by | Still to check |
+|---|---|---|
+| 11 Command palette | ⌘K ✓ | Esc closes, ↑/↓ navigate, Enter copies the password, ⇧Enter opens the item |
+| 12 New-item dialog | ⌘N ✓ | Type chips on ←/→ and Space; every type's fields Tab-reachable; the generator opens from inside it **and returns focus**; the New tag field takes Enter without submitting; the 2FA switch takes Space and Tab lands in the seed field it just revealed |
+| 14 Generator dialog | ⌘G ✓ | Length slider on ←/→ and Home/End; the four set toggles on Space; Regenerate and Copy reachable |
+
+Row 12's "the generator opens from inside it and returns focus" is the one to watch while both are
+fresh: ⌘G from the shell and the generator opened from **inside** the New-item dialog are two
+different focus stories, and only the second can strand you — it is a dialog over a dialog, and
+`Dialog.svelte`'s restore was written for one opener, then fixed on 2026-08-07 (finding 1 above).
+
 ## Result
 
 | | |
 |---|---|
 | S-08 target | 100 % of surfaces operable with no pointer |
 | Global rules | **7 of 7**, measured 2026-08-07 — `npm run a11y`, 68 surface-audits, no findings |
-| Surfaces | — not yet run, 0 of 19 |
-| Date | 2026-08-07 (global rules only) |
+| Surfaces | **0 of 19** — the manual pass opened 2026-08-08 and is in progress. The four global shortcuts are confirmed working, which opens rows 11, 12 and 14 without ticking any of them |
+| Date | 2026-08-07 (global rules); manual pass opened 2026-08-08, not complete |

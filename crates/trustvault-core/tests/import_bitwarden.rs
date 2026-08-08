@@ -66,13 +66,13 @@ fn refusal_fields(report: &ImportReport) -> Vec<&str> {
 }
 
 #[test]
-fn the_fixture_imports_as_seven_items_of_five_kinds() {
+fn the_fixture_imports_as_nine_items_of_five_kinds() {
     let mut vault = vault();
     let report = vault.import_bitwarden(fixture_path()).unwrap();
 
-    // Eight items in the export, one of them in Bitwarden's trash.
-    assert_eq!(report.total, 7);
-    assert_eq!(vault.items().count(), 7);
+    // Ten items in the export, one of them in Bitwarden's trash.
+    assert_eq!(report.total, 9);
+    assert_eq!(vault.items().count(), 9);
 
     let counts: Vec<(ItemKind, usize)> = report
         .per_kind
@@ -84,8 +84,9 @@ fn the_fixture_imports_as_seven_items_of_five_kinds() {
         vec![
             (ItemKind::Login, 2),
             (ItemKind::Card, 1),
-            // The secure note, and the bank account that has no type of its own.
-            (ItemKind::Note, 2),
+            // The secure note, and the three types that have none of their own here — bank
+            // account, driving licence and passport, all through D-50's one generic path.
+            (ItemKind::Note, 4),
             (ItemKind::SshKey, 1),
             (ItemKind::Identity, 1),
         ],
@@ -105,6 +106,29 @@ fn api_key_and_wifi_are_not_reachable_from_a_bitwarden_export() {
         vault
             .items()
             .all(|item| item.kind != ItemKind::ApiKey && item.kind != ItemKind::WiFi)
+    );
+}
+
+#[test]
+fn the_fixture_covers_every_bitwarden_item_type() {
+    // The other half of the sentence above, and the half the Phase 3 gate line rests on since
+    // D-64 re-worded it: the fixture exercises *all eight* of Bitwarden's types, and the five
+    // of ours they map onto is the most any export can produce. Asserted rather than stated,
+    // because "the fixture covers everything" is exactly the claim that rots when a type is
+    // added upstream — 6, 7 and 8 were newer than the four everyone quotes, and reading the
+    // schema rather than remembering it is what found them.
+    let export = fixture_json();
+    let present: std::collections::BTreeSet<u64> = export["items"]
+        .as_array()
+        .expect("the fixture has an items array")
+        .iter()
+        .filter_map(|item| item["type"].as_u64())
+        .collect();
+
+    assert_eq!(
+        present,
+        (1..=8).collect::<std::collections::BTreeSet<u64>>(),
+        "every CipherType in `bitwarden/clients` must appear in the fixture"
     );
 }
 
@@ -368,8 +392,8 @@ fn folders_become_tags_and_an_existing_tag_is_merged_rather_than_duplicated() {
     let all_tags: Vec<&String> = vault.items().flat_map(|item| item.tags.iter()).collect();
     assert_eq!(
         all_tags.iter().filter(|tag| **tag == "Personal").count(),
-        3,
-        "three items carry the one tag; a merge is not a rename"
+        4,
+        "the seeded item and three imported ones carry the one tag; a merge is not a rename"
     );
 }
 
@@ -381,7 +405,7 @@ fn a_preview_commits_nothing_and_reports_what_the_import_would_do() {
 
     let committed = vault.import_bitwarden(fixture_path()).unwrap();
     assert_eq!(preview, committed);
-    assert_eq!(vault.items().count(), 7);
+    assert_eq!(vault.items().count(), 9);
 }
 
 #[test]
@@ -416,7 +440,7 @@ fn imported_items_survive_a_save_and_reopen() {
     drop(vault);
 
     let reopened = Vault::open(&bytes, PASSWORD).unwrap();
-    assert_eq!(reopened.items().count(), 7);
+    assert_eq!(reopened.items().count(), 9);
     let login = item(&reopened, "Example Login");
     assert_eq!(field(login, "Password").value.expose(), "fixture-password");
     assert_eq!(login.tags, vec!["Work/Clients"]);

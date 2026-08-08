@@ -43,7 +43,10 @@ fn main() -> ExitCode {
 
     let path = PathBuf::from(argument);
     if path.try_exists().unwrap_or(true) {
-        eprintln!("{} already exists — refusing to write over it", path.display());
+        eprintln!(
+            "{} already exists — refusing to write over it",
+            path.display()
+        );
         return ExitCode::FAILURE;
     }
 

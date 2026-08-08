@@ -177,6 +177,51 @@
     },
     {
       "passwordHistory": null,
+      "revisionDate": "2026-06-07T07:07:07.000Z",
+      "creationDate": "2026-06-07T07:07:07.000Z",
+      "deletedDate": null,
+      "id": "a1000000-0000-4000-8000-000000000007",
+      "organizationId": null,
+      "folderId": "f1000000-0000-4000-8000-000000000002",
+      "type": 7,
+      "reprompt": 0,
+      "name": "Example Driving Licence",
+      "notes": null,
+      "favorite": false,
+      "fields": null,
+      "driversLicense": {
+        "licenseNumber": "FIXTURE-0000000",
+        "issuingAuthority": "Fixture Licensing Agency",
+        "expirationDate": "2030-01-01",
+        "restrictions": null,
+        "endorsements": ["none"]
+      },
+      "collectionIds": null
+    },
+    {
+      "passwordHistory": null,
+      "revisionDate": "2026-06-08T08:08:08.000Z",
+      "creationDate": "2026-06-08T08:08:08.000Z",
+      "deletedDate": null,
+      "id": "a1000000-0000-4000-8000-000000000010",
+      "organizationId": null,
+      "folderId": null,
+      "type": 8,
+      "reprompt": 0,
+      "name": "Example Passport",
+      "notes": "Kept in the fixture because 7 and 8 are the two Bitwarden types nothing here maps.",
+      "favorite": true,
+      "fields": null,
+      "passport": {
+        "passportNumber": "FIXTURE000000",
+        "country": "Fixtureland",
+        "expirationDate": "2032-02-02",
+        "issuedDate": "2022-02-02"
+      },
+      "collectionIds": null
+    },
+    {
+      "passwordHistory": null,
       "revisionDate": "not-a-timestamp",
       "creationDate": "2026-07-07T07:07:07.000Z",
       "deletedDate": null,

@@ -61,6 +61,21 @@ pub fn run() {
             // contradict.
             commands::settings::reconcile_autostart(&state);
             restore_geometry(&handle, &state);
+            // S-04's instrument, and the only thing the `measure` feature does. The criterion is
+            // keystroke-to-render in the **shipping** build, `CommandPalette.svelte` records it
+            // with `performance.measure`, and a release build has no console to read it from.
+            //
+            // Opened rather than merely enabled, because "right-click and find Inspect Element"
+            // is a per-platform detail that turns a measurement into a hunt.
+            //
+            // It is also the compile-time proof that the feature still reaches Tauri:
+            // `open_devtools` exists only under `debug_assertions` or `tauri/devtools`, so a
+            // `measure` build that had quietly stopped enabling devtools fails here instead of
+            // launching without a console and wasting the sitting it was built for.
+            #[cfg(feature = "measure")]
+            if let Some(window) = handle.get_webview_window("main") {
+                window.open_devtools();
+            }
             autolock::start(handle);
             Ok(())
         })

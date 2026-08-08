@@ -96,6 +96,12 @@
    * Read them from the devtools console with
    * `performance.getEntriesByName('palette-keystroke-to-render')`. The host half of the same
    * path is measured by `cargo bench --bench search`.
+   *
+   * Take the reading from a **release** build with devtools turned on —
+   * `npm run tauri build -- --no-bundle --features measure`, D-65 — and not from `tauri dev`.
+   * The dev profile leaves our own crates unoptimized, where the same matching costs 6.63 ms p95
+   * instead of 0.85 ms, so a number taken there is 12 % of the budget spent by a build nobody
+   * ships and is indistinguishable from a number that is not.
    */
   $effect(() => {
     const asked = ++issued;

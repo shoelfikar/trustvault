@@ -51,57 +51,145 @@
       .join('')
       .toUpperCase() || 'TV',
   );
+
+  /**
+   * The three groups as data, so every entry has an index across the whole sidebar.
+   *
+   * They are rendered as three lists with a rule between them, which is the design; the roving
+   * tab stop below has to run across all of them, and an index that resets per list cannot do
+   * that. The footer's *Switch vault* is deliberately **not** in here — see `onkeydown`.
+   */
+  const mainEntries = $derived([
+    {
+      key: 'all',
+      label: 'All Items',
+      icon: 'list' as IconName,
+      count: items.length,
+      to: { kind: 'all' } as View,
+    },
+    {
+      key: 'favourites',
+      label: 'Favorites',
+      icon: 'star' as IconName,
+      count: favourites,
+      to: { kind: 'favourites' } as View,
+    },
+    ...types.map((entry) => ({
+      key: `type:${entry.type}`,
+      label: entry.label,
+      icon: entry.icon,
+      count: countOf(entry.type),
+      to: { kind: 'type', type: entry.type } as View,
+    })),
+  ]);
+
+  const tagEntries = $derived(
+    tags.map((tag) => ({
+      key: `tag:${tag}`,
+      label: tag,
+      tag,
+      count: countTag(tag),
+      to: { kind: 'tag', tag } as View,
+    })),
+  );
+
+  const bottomEntries = $derived([
+    {
+      key: 'watchtower',
+      label: 'Watchtower',
+      icon: 'shield' as IconName,
+      badge: flagged,
+      to: { kind: 'watchtower' } as View,
+    },
+    {
+      key: 'trash',
+      label: 'Trash',
+      icon: 'trash' as IconName,
+      badge: 0,
+      to: { kind: 'trash' } as View,
+    },
+  ]);
+
+  const entries = $derived([...mainEntries, ...tagEntries, ...bottomEntries]);
+
+  /**
+   * One tab stop for the whole sidebar — `docs/keyboard-audit.md` row 6, and the implementation
+   * catching up to a line that had described it since the row was written.
+   *
+   * Measured on 2026-08-08 it was **thirteen** consecutive tab stops, which is a legitimate shape
+   * for a nav list and is not what the row asks for: reaching Settings from the titlebar took
+   * fifteen Tab presses, thirteen of them in here, and from a chair that is indistinguishable
+   * from Tab never arriving.
+   *
+   * **Arrows move, Enter selects** — and that is the difference from `Segmented`, which selects
+   * on arrow because a radiogroup's value *is* the focused option. Moving through eleven views
+   * would otherwise re-filter the item list ten times on the way to the eleventh. The buttons
+   * are left as buttons in a `<nav>` rather than given `listbox`/`option` roles: the roles here
+   * were measured under the global rules already, and swapping them is a semantic change no part
+   * of row 6 asks for.
+   */
+  let roving = $state<number | null>(null);
+
+  const selected = $derived(entries.findIndex((entry) => sameView(view, entry.to)));
+  /** Where Tab lands: wherever the arrows left off, else the current view, else the first row. */
+  const tabStop = $derived(roving ?? Math.max(0, selected));
+
+  $effect(() => {
+    // A view chosen anywhere else — the palette, the titlebar — takes the tab stop back to it.
+    void view;
+    roving = null;
+  });
+
+  function onkeydown(event: KeyboardEvent, index: number) {
+    const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
+    if (!step) return;
+    event.preventDefault();
+    const next = (index + step + entries.length) % entries.length;
+    roving = next;
+    const list = (event.currentTarget as HTMLElement).closest('nav');
+    list?.querySelector<HTMLElement>(`[data-nav="${next}"]`)?.focus();
+  }
 </script>
 
 <nav class="sidebar sb" aria-label="Vault">
   <p class="heading">Vault</p>
   <ul>
-    <li>
-      <button class:on={sameView(view, { kind: 'all' })} onclick={() => onview({ kind: 'all' })}>
-        <Icon name="list" size={16} />
-        <span class="text">All Items</span>
-        <span class="count">{items.length}</span>
-      </button>
-    </li>
-    <li>
-      <button
-        class:on={sameView(view, { kind: 'favourites' })}
-        onclick={() => onview({ kind: 'favourites' })}
-      >
-        <Icon name="star" size={16} />
-        <span class="text">Favorites</span>
-        <span class="count">{favourites}</span>
-      </button>
-    </li>
-    {#each types as entry (entry.type)}
+    {#each mainEntries as entry, index (entry.key)}
       <li>
         <button
-          class:on={sameView(view, { kind: 'type', type: entry.type })}
-          onclick={() => onview({ kind: 'type', type: entry.type })}
+          data-nav={index}
+          tabindex={index === tabStop ? 0 : -1}
+          class:on={sameView(view, entry.to)}
+          onclick={() => onview(entry.to)}
+          onkeydown={(event) => onkeydown(event, index)}
         >
           <Icon name={entry.icon} size={16} />
           <span class="text">{entry.label}</span>
-          <span class="count">{countOf(entry.type)}</span>
+          <span class="count">{entry.count}</span>
         </button>
       </li>
     {/each}
   </ul>
 
-  {#if tags.length}
+  {#if tagEntries.length}
     <hr />
     <p class="heading">Tags</p>
     <ul>
-      {#each tags as tag (tag)}
+      {#each tagEntries as entry, offset (entry.key)}
+        {@const index = mainEntries.length + offset}
         <li>
           <button
-            class:on={sameView(view, { kind: 'tag', tag })}
-            onclick={() => onview({ kind: 'tag', tag })}
+            data-nav={index}
+            tabindex={index === tabStop ? 0 : -1}
+            class:on={sameView(view, entry.to)}
+            onclick={() => onview(entry.to)}
+            onkeydown={(event) => onkeydown(event, index)}
           >
             <span class="dot-slot"
-              ><span class="dot" style="background:{tagColour(tag)}"></span></span
+              ><span class="dot" style="background:{tagColour(entry.tag)}"></span></span
             >
-            <span class="text">{tag}</span>
-            <span class="count">{countTag(tag)}</span>
+            <span class="text">{entry.label}</span>
+            <span class="count">{entry.count}</span>
           </button>
         </li>
       {/each}
@@ -111,27 +199,24 @@
   <hr />
 
   <ul>
-    <li>
-      <button
-        class:on={sameView(view, { kind: 'watchtower' })}
-        onclick={() => onview({ kind: 'watchtower' })}
-      >
-        <Icon name="shield" size={16} />
-        <span class="text">Watchtower</span>
-        {#if flagged > 0}
-          <span class="badge">{flagged}</span>
-        {/if}
-      </button>
-    </li>
-    <li>
-      <button
-        class:on={sameView(view, { kind: 'trash' })}
-        onclick={() => onview({ kind: 'trash' })}
-      >
-        <Icon name="trash" size={16} />
-        <span class="text">Trash</span>
-      </button>
-    </li>
+    {#each bottomEntries as entry, offset (entry.key)}
+      {@const index = mainEntries.length + tagEntries.length + offset}
+      <li>
+        <button
+          data-nav={index}
+          tabindex={index === tabStop ? 0 : -1}
+          class:on={sameView(view, entry.to)}
+          onclick={() => onview(entry.to)}
+          onkeydown={(event) => onkeydown(event, index)}
+        >
+          <Icon name={entry.icon} size={16} />
+          <span class="text">{entry.label}</span>
+          {#if entry.badge > 0}
+            <span class="badge">{entry.badge}</span>
+          {/if}
+        </button>
+      </li>
+    {/each}
   </ul>
 
   <div class="spacer"></div>

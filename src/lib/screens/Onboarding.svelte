@@ -206,6 +206,38 @@
 
   /** Six groups of four, which is how R-07 says it is transcribed. */
   const groups = $derived(recoveryCode.split('-'));
+
+  /**
+   * Step 3's two keyboard defects, both found by walking row 3 on 2026-08-08 — finding 4.
+   *
+   * **Focus.** Steps 1 and 2 land focus with `autofocus` on their text field; step 3 has no text
+   * field, so it had nothing, and the password field being removed from the DOM dropped focus to
+   * `document.body` — the first Tab then restarted from the top of the *document* rather than
+   * from the kit on screen. The first control in the step gets focus instead, which is the same
+   * place `autofocus` puts it on the two steps before. Not the acknowledgement checkbox, though
+   * it is the required action: starting there puts Print and Save PDF *behind* the user, and the
+   * kit is the one thing on this screen that cannot be shown again.
+   *
+   * **Enter.** `onenter` lives on the input inside `TextField`, so a step with no text field had
+   * no Enter path at all — the row's "Enter finishes" was never implemented rather than broken.
+   * It is handled here on the step rather than globally, and it **ignores Enter on a button**,
+   * because Enter already activates a focused button: without that guard, Enter on *Print* would
+   * print and finish, and finishing clears the recovery code the print dialog is still holding.
+   */
+  let kitStep = $state<HTMLDivElement | null>(null);
+
+  $effect(() => {
+    if (step !== 3) return;
+    kitStep?.querySelector<HTMLElement>('button, input')?.focus();
+  });
+
+  function onKitKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Enter') return;
+    if ((event.target as HTMLElement | null)?.tagName === 'BUTTON') return;
+    if (!kitAcknowledged) return;
+    event.preventDefault();
+    finish();
+  }
 </script>
 
 <div class="onboarding">
@@ -307,27 +339,30 @@
             </Callout>
           </div>
         {:else}
-          <div class="kit">
-            <p class="kit-label">Recovery key</p>
-            <div class="groups">
-              {#each groups as group, index (index)}
-                <span class="group">{group}</span>
-              {/each}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div bind:this={kitStep} onkeydown={onKitKeydown}>
+            <div class="kit">
+              <p class="kit-label">Recovery key</p>
+              <div class="groups">
+                {#each groups as group, index (index)}
+                  <span class="group">{group}</span>
+                {/each}
+              </div>
+              <div class="kit-actions">
+                <Button icon="copy" onclick={() => window.print()} title="Print or save as PDF">
+                  Print
+                </Button>
+                <Button icon="note" onclick={() => window.print()} title="Print or save as PDF">
+                  Save PDF
+                </Button>
+              </div>
             </div>
-            <div class="kit-actions">
-              <Button icon="copy" onclick={() => window.print()} title="Print or save as PDF">
-                Print
-              </Button>
-              <Button icon="note" onclick={() => window.print()} title="Print or save as PDF">
-                Save PDF
-              </Button>
-            </div>
-          </div>
 
-          <label class="ack">
-            <input type="checkbox" bind:checked={kitAcknowledged} />
-            <span>I have saved this kit somewhere safe</span>
-          </label>
+            <label class="ack">
+              <input type="checkbox" bind:checked={kitAcknowledged} />
+              <span>I have saved this kit somewhere safe</span>
+            </label>
+          </div>
         {/if}
 
         {#if error}
@@ -336,8 +371,15 @@
       </div>
 
       <div class="cta">
+        <!-- `create_vault` derives the key at the settings `calibrateKdf` just measured, so this
+             is the slowest thing the application ever does and it is deliberately slow — R-02.
+             `canCreate` already held the button disabled through it, which on its own is the
+             worst signal available: a dead control is what a frozen window looks like. The label
+             is the same pattern the other five long operations use (`Unlocking…`, `Saving…`,
+             `Importing…`, `Deleting…`) rather than a spinner, because §5 bans the theatre and a
+             present participle says which operation is running where a spinner does not. -->
         <Button variant="primary" tall disabled={!canAdvance} onclick={next}>
-          {copy[step].cta}
+          {busy && step === 2 ? 'Creating vault…' : copy[step].cta}
         </Button>
         {#if step !== 3 && (step !== 1 || oncancel)}
           <Button tall onclick={back}>{copy[step].back}</Button>

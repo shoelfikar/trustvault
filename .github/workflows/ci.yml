@@ -97,6 +97,25 @@ jobs:
             echo "::error::a size is written in rem — every size comes from a token multiplied by --ui-scale (R-21, D-57)"
             exit 1
           fi
+      # D-65. The `measure` feature turns on devtools so S-04's end-to-end number can be read off
+      # the build that ships rather than off a `tauri dev` build whose matching is 7.8x slower.
+      # Devtools is an inspector attached to a process holding decrypted secrets, so the feature
+      # is passed by hand for one measurement and by nothing that produces a binary a user runs.
+      # There are exactly two ways it stops being opt-in: it becomes a default feature, or a
+      # workflow starts passing it.
+      #
+      # The bracket in the second pattern stops the check matching its own source; without it
+      # grep finds this step and fails on it.
+      - name: Assert devtools stay opt-in (D-65)
+        run: |
+          if grep -En '^ *default *=' src-tauri/Cargo.toml; then
+            echo "::error::src-tauri gained default features — devtools must never be among them (D-65)"
+            exit 1
+          fi
+          if grep -rEn '(--features|-F|-f)[^#]*[m]easure' .github/workflows; then
+            echo "::error::a workflow builds with the measure feature, which ships devtools (D-65)"
+            exit 1
+          fi
 
   nonce:
     name: Nonce discipline (R-06)

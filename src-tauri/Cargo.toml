@@ -46,5 +46,27 @@ arboard = "3"
 # (S-01, cold start <= 800 ms) is the thing this app is judged on.
 zxcvbn = { version = "3.1", default-features = false }
 
+[features]
+# S-04 is a number about the application that ships, and the only way to read it is a devtools
+# console -- `CommandPalette.svelte` records the keystroke-to-render path with
+# `performance.measure`, and nothing else in the product can print it.
+#
+# Tauri opens devtools automatically in a debug build, which is the trap this feature exists to
+# avoid rather than the convenience it looks like: `tauri dev` compiles our own crates
+# unoptimized (`[profile.dev.package."*"]` in the workspace manifest optimizes dependencies and
+# deliberately not us), and the matching that costs **0.85 ms p95** in a release build costs
+# **6.63 ms** there -- 13 % of the 50 ms budget instead of 1.7 %, measured with
+# `cargo bench --bench search --profile dev`. A measurement taken that way is a measurement of a
+# build no user will ever run, and it looks exactly like one that is not.
+#
+# So: build the real thing and give it a console.
+#
+#     npm run tauri build -- --no-bundle --features measure
+#
+# Off by default and never passed by CI, because a released password manager with devtools is a
+# process holding plaintext that any local prompt can be attached to. The `devtools` job in
+# `.github/workflows/ci.yml` asserts the default build does not carry it.
+measure = ["tauri/devtools"]
+
 [lints.clippy]
 unwrap_used = "warn"

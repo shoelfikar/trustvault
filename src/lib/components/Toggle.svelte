@@ -37,7 +37,12 @@
     width: 34px;
     height: 20px;
     padding: 2px;
-    border-radius: 10px;
+    /* `--radius-full`, not a hardcoded 10px. The two paint identically at this height, and one
+       of them survives the row getting a pixel taller — found 2026-08-07 while ticking §10's
+       "no radius > 6px outside avatars", which is the line the track was quietly breaking. §4
+       now names the switch track beside the avatar, because the knob below has always used the
+       token and a track that is not a pill is not a switch. */
+    border-radius: var(--radius-full);
     background: var(--border-strong);
     transition:
       background var(--dur-instant) var(--ease-out),

@@ -57,6 +57,24 @@
 
   let card = $state<HTMLElement | null>(null);
 
+  /**
+   * Whatever had focus when this dialog was created — `docs/keyboard-audit.md`, global rule 4.
+   *
+   * Read here in the component body rather than in an effect, and that is the load-bearing part:
+   * the effect below moves focus **into** the dialog, and effects run after mount in creation
+   * order, so an opener captured in one would already be the dialog's own first control. Here it
+   * runs before the element exists.
+   *
+   * Added 2026-08-07 by the keyboard audit's own pass. The trap and Esc have been here since
+   * Phase 2 and the restore had not, which is exactly the combination the rule is written
+   * against: a dialog that traps focus correctly and then drops it on `<body>` passes both of
+   * the checks anyone thinks to make, and strands the user who closed it at the top of the
+   * application with no way back except Tab. It is worst where the dialog is opened *from* a
+   * list — closing the delete confirmation should leave you standing on the row you were
+   * reading, and instead it left you above the sidebar.
+   */
+  const opener = typeof document === 'undefined' ? null : document.activeElement;
+
   const FOCUSABLE =
     'a[href],button:not([disabled]),input:not([disabled]),select,textarea,[tabindex]:not([tabindex="-1"])';
 
@@ -87,6 +105,15 @@
     // Move focus in on open. Without it, Tab from the trigger lands behind the scrim.
     const target = card?.querySelector<HTMLElement>(FOCUSABLE);
     target?.focus();
+  });
+
+  $effect(() => {
+    return () => {
+      // `isConnected` is the guard that matters: a dialog opened from a row that the dialog then
+      // deleted must not focus a detached node, which silently focuses `<body>` — the exact
+      // outcome this is here to prevent, arriving through the fix for it.
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
   });
 </script>
 

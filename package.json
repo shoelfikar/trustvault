@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "shots": "npm run build && node scripts/screenshots.mjs",
+    "a11y": "npm run build && node scripts/a11y.mjs",
     "fmt": "prettier --write .",
     "fmt:check": "prettier --check .",
     "tauri": "tauri"

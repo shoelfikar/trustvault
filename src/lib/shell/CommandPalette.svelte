@@ -297,6 +297,23 @@
     font-family: var(--font-sans);
     font-size: var(--text-md);
   }
+  /* The ring lives on the row, not on the input — `TextField` does the same thing and for the
+     same reason: the input has no border of its own, so a 2px ring around it would float inside
+     a row that already looks like the field. `outline: none` here is only safe because of the
+     rule above it, which is why the two sit together.
+
+     Found 2026-08-07 by `scripts/a11y.mjs`, and it was the finding that made the tool worth
+     writing: the input had cancelled the global ring and replaced it with nothing since Phase 2.
+     Nobody had noticed because the palette opens with this field already focused, so the only
+     way to see the missing ring is to Tab to a result and back — which is what a keyboard user
+     does and what nobody testing by clicking ever does.
+
+     `inset` box-shadow rather than a thicker border: a 2px border would move the results list
+     down by a pixel when focus arrived, and a layout that shifts on focus is §9's own ban. */
+  .search:focus-within {
+    box-shadow: inset 0 -2px 0 0 var(--accent);
+    color: var(--accent);
+  }
   .search input:focus {
     outline: none;
   }

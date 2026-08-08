@@ -416,10 +416,16 @@
     font-weight: var(--weight-semibold);
     color: var(--fg-subtle);
   }
+  /* The numeral is `--fg` and not `--accent`, which is the one place in the app where brass on
+     its own wash was doing the reading: 4.4:1 in both themes, and the last two findings
+     `scripts/a11y.mjs` had left (D-63). Brass still marks the step — it is the border and the
+     wash — and the digit is the part that has to be legible. Filling it like `li.done` would
+     have been the other fix and is wrong: the current step and a finished step would then look
+     the same, which is the whole thing the rail is for. */
   .steps li.on .num {
     border-color: var(--accent);
     background: var(--accent-wash);
-    color: var(--accent);
+    color: var(--fg);
   }
   .steps li.done .num {
     border-color: var(--accent);

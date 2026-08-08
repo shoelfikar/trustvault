@@ -71,8 +71,7 @@
   /** A settings write the host refused. Only `launch_at_login` can produce one. */
   let settingsError = $state('');
 
-  /** Which overlay is up. One at a time — the prototype never stacks two. */
-  let overlay = $state<
+  type Overlay =
     | 'none'
     | 'palette'
     | 'generator'
@@ -81,8 +80,30 @@
     | 'import'
     | 'vaults'
     | 'deleteItem'
-    | 'deleteVault'
-  >('none');
+    | 'deleteVault';
+
+  /** Which overlay is up. One at a time — the prototype never stacks two. */
+  let overlay = $state<Overlay>('none');
+
+  /**
+   * Close an overlay only if it is still the one on screen.
+   *
+   * One state for every overlay means "run the command, then close me" is two synchronous writes
+   * to the same variable, and the close was winning: the palette's *New item* row set
+   * `overlay = 'add'` and had it overwritten by `'none'` in the next statement, so the dialog
+   * never rendered. *Generate password* was broken identically, while *Lock vault*, *Watchtower*
+   * and *Settings* worked because they route through `onlock`/`onview` and never touch `overlay`
+   * — three of five working is why it survived, and why the palette looked alive.
+   *
+   * Reordering the two calls would have fixed the same two rows and left the next one to be
+   * written broken, because it would still be ordering that decided. Guarding on identity makes
+   * the rule structural: a handler that navigated somewhere keeps where it went, and a close that
+   * is only a close still closes. Found on 2026-08-08 in the manual keyboard pass, though the
+   * pointer path was identically broken — `docs/keyboard-audit.md`, finding 5.
+   */
+  function closeOverlay(which: Overlay) {
+    if (overlay === which) overlay = 'none';
+  }
 
   /** Epoch-ms the clipboard is scheduled to clear at. Owned here; see DetailPane's note. */
   let clipboardUntil = $state(0);
@@ -358,7 +379,7 @@
 
   {#if overlay === 'palette'}
     <CommandPalette
-      onclose={() => (overlay = 'none')}
+      onclose={() => closeOverlay('palette')}
       onopen={openItem}
       onview={goto}
       onlock={() => void lock()}
@@ -367,13 +388,13 @@
       oncopied={(clearsAt) => (clipboardUntil = clearsAt)}
     />
   {:else if overlay === 'generator'}
-    <GeneratorDialog onclose={() => (overlay = 'none')} />
+    <GeneratorDialog onclose={() => closeOverlay('generator')} />
   {:else if overlay === 'add'}
     <NewItemDialog
       vaultName={status.displayName}
       {vaultFile}
       {tags}
-      onclose={() => (overlay = 'none')}
+      onclose={() => closeOverlay('add')}
       onsaved={itemSaved}
     />
   {:else if overlay === 'edit' && selectedId}
@@ -382,7 +403,7 @@
       vaultName={status.displayName}
       {vaultFile}
       {tags}
-      onclose={() => (overlay = 'none')}
+      onclose={() => closeOverlay('edit')}
       onsaved={itemChanged}
     />
   {:else if overlay === 'import'}
@@ -390,15 +411,15 @@
          `mutations` moves here, so the list and the tag sidebar re-read behind it. Closing on
          success would take the refusal list off screen at the moment it becomes permanent —
          it is the one record of what did *not* come across. -->
-    <ImportDialog onclose={() => (overlay = 'none')} onimported={() => (mutations += 1)} />
+    <ImportDialog onclose={() => closeOverlay('import')} onimported={() => (mutations += 1)} />
   {:else if overlay === 'vaults'}
     <VaultSwitcher
       openPath={status.path}
       itemCount={items.length}
-      onclose={() => (overlay = 'none')}
+      onclose={() => closeOverlay('vaults')}
       onswitched={onvaultchanged}
       oncreate={() => {
-        overlay = 'none';
+        closeOverlay('vaults');
         oncreatevault();
       }}
     />
@@ -407,7 +428,7 @@
       target="item"
       name={selectedTitle}
       itemId={selectedId}
-      onclose={() => (overlay = 'none')}
+      onclose={() => closeOverlay('deleteItem')}
       ondeleted={itemDeleted}
     />
   {:else if overlay === 'deleteVault'}
@@ -416,7 +437,7 @@
       name={status.displayName}
       vaultPath={status.path}
       itemCount={items.length}
-      onclose={() => (overlay = 'none')}
+      onclose={() => closeOverlay('deleteVault')}
       ondeleted={onvaultchanged}
     />
   {/if}

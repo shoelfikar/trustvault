@@ -3,21 +3,28 @@
  * Walks every surface in both themes and reports what a keyboard and a pair of eyes would hit.
  *
  *   npm run build && node scripts/a11y.mjs [--audit focus] [--scenario shell] [--theme dark]
+ *                                          [--stops]
  *
- * Two audits, both from `MASTER.md` §10's checklist and both previously unmeasurable:
+ * Three audits, all from `MASTER.md` §10's checklist and all previously unmeasurable:
  *
  * * **focus** — every interactive element changes appearance when it takes keyboard focus (§7).
  * * **contrast** — every text node clears 4.5:1 against the background actually behind it (§9).
+ * * **taborder** — every operable control is in the tab order, once (`docs/keyboard-audit.md`).
+ *
+ * `--stops` prints the tab order itself, in document order, for the surfaces selected. It is how
+ * finding 7 was found and it fails nothing: how many stops a surface *should* have is a row in
+ * `docs/keyboard-audit.md`, not a property of the DOM.
  *
  * It runs against `scripts/harness.mjs`, the same fake host and the same fixtures the screenshot
  * tool photographs, so a finding here is about the surface in the shot and not about a second
  * application assembled for testing.
  *
  * **What it cannot see** is worth as much as what it can, and it is the same blind spot the
- * screenshot harness has: it stubs `invoke`, so nothing about the real host is exercised. It
- * also cannot press Tab — `element.focus()` is not the same as tabbing, so *tab order* and
- * *focus traps* are not measured here. Those are rows in `docs/keyboard-audit.md` and they are
- * run by hand with the pointer unplugged, which is what S-08 asks for.
+ * screenshot harness has: it stubs `invoke`, so nothing about the real host is exercised. Nor
+ * can any of the three press Tab — `taborder` reads what the browser *would* treat as a stop,
+ * which answers "is this reachable at all" but not "does Tab escape this dialog". Focus traps
+ * and the order a person was actually reading in stay rows in `docs/keyboard-audit.md`, walked
+ * by hand with the pointer unplugged, which is what S-08 asks for.
  */
 
 import { spawn } from 'node:child_process';
@@ -28,7 +35,7 @@ import { join } from 'node:path';
 import { DIST, ROOT, SCENARIOS, SIZE, serve } from './harness.mjs';
 
 const PROFILE = join(ROOT, 'target/a11y-profile');
-const AUDITS = ['focus', 'contrast'];
+const AUDITS = ['focus', 'contrast', 'taborder'];
 /** Long enough for a cold Firefox plus the longest scenario's own hold, and no longer. */
 const TIMEOUT_MS = 15000;
 
@@ -91,6 +98,7 @@ const flag = (name) => {
   const at = args.indexOf(`--${name}`);
   return at === -1 ? null : args[at + 1];
 };
+const has = (name) => args.includes(`--${name}`);
 
 if (!existsSync(join(DIST, 'index.html'))) {
   console.error('dist/index.html is missing — run `npm run build` first.');
@@ -155,8 +163,9 @@ for (const report of reports) {
   // A surface that reported nothing to look at is not a clean surface: it is a drive that did
   // not reach its screen, and it would otherwise be indistinguishable from a perfect one.
   if (report.total === 0) {
+    const nothing = { focus: 'focusable element', contrast: 'text', taborder: 'tab stop' };
     console.error(
-      `  ${report.audit} ${where}: nothing to measure — the scenario drew no ${report.audit === 'focus' ? 'focusable element' : 'text'}`,
+      `  ${report.audit} ${where}: nothing to measure — the scenario drew no ${nothing[report.audit]}`,
     );
     silent += 1;
     continue;
@@ -171,14 +180,41 @@ for (const report of reports) {
   // because six things were excused is a different fact from one that passes because six things
   // are readable, and the difference has to survive the summary.
   const excused = report.exempt ? `, ${report.exempt} exempt` : '';
+  // The tab-order audit counts stops rather than checks, and the difference matters in the
+  // output: "13 checked" reads as a coverage number, "13 tab stops" is the thing itself — the
+  // number a person compares against the surface in front of them.
+  const counted = report.audit === 'taborder' ? 'tab stops' : 'checked';
+  // A modal narrows what the audit measured, so it is printed on every line rather than left to
+  // be inferred from a count that got smaller.
+  const within = report.modal ? ` within ${report.modal}` : '';
+
+  // Printed on a clean surface as well as a failing one: the sequence is evidence, not a
+  // diagnostic, and the defect it exists to expose (a surface that is thirteen consecutive
+  // stops) fails no rule here.
+  const sequence = () => {
+    if (!has('stops') || !report.stops) return;
+    report.stops.forEach((stop, index) =>
+      console.log(`      ${String(index).padStart(2)}  ${stop}`),
+    );
+  };
 
   if (failures.length === 0 && unfocusable.length === 0) {
-    console.log(`  ${report.audit} ${where}: ${report.total} checked${excused}, clean`);
+    console.log(`  ${report.audit} ${where}: ${report.total} ${counted}${within}${excused}, clean`);
+    sequence();
     continue;
   }
 
   problems += failures.length + unfocusable.length;
-  console.log(`  ${report.audit} ${where}: ${report.total} checked`);
+  console.log(`  ${report.audit} ${where}: ${report.total} ${counted}${within}`);
+
+  if (report.audit === 'taborder') {
+    for (const finding of failures) {
+      console.log(`      ${finding.kind}: ${finding.name} — ${finding.detail}`);
+      for (const member of finding.members ?? []) console.log(`          ${member}`);
+    }
+    sequence();
+    continue;
+  }
 
   if (report.audit === 'focus') {
     for (const finding of [...failures, ...unfocusable]) {

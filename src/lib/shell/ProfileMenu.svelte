@@ -105,6 +105,22 @@
 
   let menu = $state<HTMLElement | null>(null);
 
+  /**
+   * One tab stop for the whole menu — `Sidebar.svelte`'s pattern, and for a stricter reason.
+   *
+   * The sidebar's thirteen consecutive stops were a defect against a row somebody had written
+   * (row 6, D-67); four stops in here are a defect against **`role="menu"` itself**, which ARIA
+   * defines as one tab stop with the arrows inside it. Written with four ordinary buttons, Tab
+   * from *Settings* left the open popover for whatever sits behind it, and the menu neither knew
+   * nor closed. Found 2026-08-14 by the tab-order audit on its first full run, on a surface
+   * built six days earlier and never walked.
+   *
+   * `roving` follows the arrows rather than resetting, so Esc-and-reopen starts at the first row
+   * again — the menu is recreated on every open, which is what makes that the default without a
+   * line to enforce it.
+   */
+  let roving = $state(0);
+
   /** Focus lands on the first row, which is what makes the menu operable without a pointer. */
   $effect(() => {
     menu?.querySelector<HTMLElement>('[data-row]')?.focus();
@@ -135,6 +151,7 @@
     if (!step) return;
     event.preventDefault();
     const next = (index + step + rows.length) % rows.length;
+    roving = next;
     menu?.querySelector<HTMLElement>(`[data-row="${next}"]`)?.focus();
   }
 </script>
@@ -160,6 +177,7 @@
       <button
         data-row={index}
         role="menuitem"
+        tabindex={index === roving ? 0 : -1}
         class:separated={row.separated}
         onclick={() => choose(row)}
         onkeydown={(event) => onkeydown(event, index)}

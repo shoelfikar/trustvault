@@ -42,8 +42,12 @@ read the code. The one that is not ticked is the one only a person can answer, a
       both lists, which is §7's own wording
 - [x] **Tab order follows visual order** on every surface. No positive `tabindex` anywhere in the
       codebase; a positive value reorders the whole document, not the component it appears in.
-      **The `tabindex` half is a grep and it is clean** — the only three in `src/` are `-1` and a
-      roving `0`/`-1` pair in `Segmented`. *Visual order* is the manual pass below, because DOM
+      **Measured on every build since 2026-08-14** by `npm run a11y -- --audit taborder`, which
+      replaced the grep this line used to carry: a grep reads the source and cannot see a control
+      that left the tab order because the *value* it was compared against went missing, which is
+      how finding 6 survived. The audit enumerates what the browser would treat as a tab stop, in
+      document order, and fails three shapes — a roving group with no stop, a roving group with
+      two, and any positive `tabindex`. *Visual order* is still the manual pass below, because DOM
       order and painted order are the same thing only until something is absolutely positioned
 - [x] **No keyboard trap.** From any focused element, Tab and Shift+Tab eventually leave — except
       inside a modal, where the trap is the point and Esc is the exit. Nothing in `src/` calls
@@ -347,15 +351,42 @@ sharing a screen, and the row fails on either one alone.
    because the row was describing a keyboard that works and the implementation was the half that
    did not.
 
+10. **The profile popover is four tab stops, and `role="menu"` promises one.** Found 2026-08-14 by
+    the tab-order audit on its first full sweep, on a surface built six days earlier (D-70) and
+    never walked. Nobody reported it: with a pointer it is perfect, and with a keyboard the four
+    rows work — ↑/↓ move between them, Esc closes, Enter chooses. What is broken is **leaving**.
+    Tab from *Settings* does not close the menu and does not stay in it; it steps to *Lock vault*
+    and then out into whatever sits behind the open popover, which the menu neither controls nor
+    knows about.
+
+    This is the first finding here that is a defect against a **specification rather than against
+    a row**. Rows 6 and 12 needed the author to decide what the surface should do; `role="menu"`
+    already says — ARIA defines a menu as one tab stop with the arrows inside it — so there was
+    nothing to decide and the fix is the implementation catching up to the role it had already
+    claimed. It is also why the audit could find it at all: the sidebar's thirteen stops
+    (finding 7) fail no such contract, and no property of the DOM tells that shape from an
+    ordinary navigation column.
+
+    **Fixed 2026-08-14**, in `Sidebar.svelte`'s pattern: one roving `tabindex`, the arrows moving
+    it, Enter choosing. `docs/keyboard-audit.md` row 20 stays unticked — the fix has not been
+    walked, and the row is what says whether it worked.
+
 _Rows other than 3, 6, 7, 8, 9 and part of 11 have not been run. They need the pointer physically
 unplugged and the app in front of a person, which is what S-08 asks for and what nothing here can
 stand in for._
 
-**On findings 6 and 7 both**: they come from a throwaway script that enumerates what the browser
-would treat as a tab stop, in document order. That is **not** pressing Tab and does not supersede
-this table — it cannot see a focus trap, and it runs against the harness, which stubs `invoke`.
-What it can do is answer "is this control in the tab order at all", which is the one question the
-two audits already here are structurally unable to ask.
+**On findings 6, 7 and 10**: the throwaway script that found the first two is now
+`scripts/audits/taborder.js`, the third audit beside `focus` and `contrast`, and finding 10 is
+what it returned on its first full sweep. It is **not** pressing Tab and does not supersede this
+table — it cannot see a focus trap, and it runs against the harness, which stubs `invoke`. What it
+can do is answer "is this control in the tab order, once", which is the one question the other two
+are structurally unable to ask: `element.focus()` reaches a `tabindex="-1"` control perfectly well.
+
+Two things about it are worth knowing before reading its output. It measures **inside the modal**
+when one is open, because `Dialog.svelte` traps Tab — so *New item* reports 22 stops rather than
+the document's 47, and the narrowing assumes a trap this audit cannot verify. And it deliberately
+does not judge **how many** stops a surface has: that is the row's job, and it is the half of
+finding 7 no script could have decided.
 
 ## Manual pass — in progress
 
@@ -404,9 +435,9 @@ about the moment **between** two renders — the screen is correct in every stat
 | | |
 |---|---|
 | S-08 target | 100 % of surfaces operable with no pointer |
-| Global rules | **7 of 7**, measured 2026-08-07 — `npm run a11y`, 68 surface-audits, no findings |
+| Global rules | **7 of 7**. Six by machine on every build — `npm run a11y`, **120 surface-audits, no findings** on 2026-08-14 — three audits over twenty scenarios in both themes. `taborder` joined `focus` and `contrast` that day and returned finding 10 on its first sweep; the number above is the sweep after it was fixed. The seventh rule is the manual pass below |
 | Surfaces | **3 passed of 22** — rows 7, 8, 9. Row 6 passed and was **re-opened** by D-67, which changed the surface under it. Walked and failed: row 3 (finding 4) and row 11 in part (finding 5, not a keyboard defect). Row 8a is not walked and is easy to miss: it needs an item carrying a one-time code on screen |
-| Date | 2026-08-07 (global rules); manual pass opened 2026-08-08, not complete |
+| Date | 2026-08-07 (global rules), extended 2026-08-14 (tab order, and it is in CI); manual pass opened 2026-08-08, not complete |
 
 **The total is 22 boxes**, and the number above is corrected rather than carried: the rows are
 numbered 1–21, row 8a is a box alongside row 8, so the count is 21 + 1. Every "0 of 19" written

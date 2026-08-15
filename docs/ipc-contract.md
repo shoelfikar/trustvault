@@ -163,6 +163,8 @@ vault_status(): {
   display_name: string;        // see below
   item_count: number | null;   // null unless unlocked
   profile: { name: string; email: string } | null;   // null unless unlocked — D-70
+  last_scan_at: number | null;           // planned — Phase 4, §6.9
+  last_breach_check_at: number | null;   // planned — Phase 4, §6.9
 }
 ```
 
@@ -684,8 +686,16 @@ type Settings = {
   window_width: number;                   // px — R-27
   window_height: number;                  // px — R-27
   window_maximized: boolean;              // R-27
+  breach_check_enabled: boolean;          // planned — Phase 4, R-26, default false
 };
 ```
+
+**`breach_check_enabled` is the switch on the only network call in the product**, and it is off by
+default because R-26 says so and because S-10 is measured on a fresh install. It is not host-owned:
+the user sets it, from a Settings row whose copy has to say plainly what leaves the machine — a
+5-character hash prefix, never a password and never an item — because a toggle labelled "check for
+breaches" invites the reading this product exists to refuse. `watchtower_breach_check` reads it in
+the host rather than taking it as an argument (§6.9).
 
 The five fields below `last_vault_path` are Phase 3's, and all five shipped 2026-08-06. Two of them
 are not merely stored:
@@ -738,6 +748,151 @@ decided: plain JSON in the OS app-config directory, all of it, per **D-33**.
 The rule is enforced in one named function, `merge_incoming`, with a test per field rather than a
 line inside a closure — a host-owned field that is only host-owned by convention is one the next
 field added will quietly break.
+
+### 6.9 Watchtower — R-23…R-26, S-07, S-10
+
+Written 2026-08-15, before any of it exists, which is the habit Phase 3 ended with and the reason
+this section is worth more than the code it describes: every previous section written this way was
+falsified within the hour, and each time that was cheaper than the bug.
+
+```ts
+type Verdict = "weak" | "reused" | "breached" | "expired";
+
+type Finding = {
+  item_id: Uuid;
+  field_id: Uuid;         // which password field the verdict is about
+  verdict: Verdict;
+  score: number;          // zxcvbn 0–4 — R-24
+  crack_time: string;     // zxcvbn's own phrasing, in words — R-24
+  shared_with: Uuid[];    // the other items carrying the same value — R-23
+};
+
+type WatchtowerReport = {
+  scanned_at: Millis;
+  passwords: number;      // password fields examined
+  distinct: number;       // distinct values among them — what a breach check would cost
+  findings: Finding[];
+};
+
+type BreachReport = {
+  checked_at: Millis;
+  requested: number;      // range requests actually made — one per distinct value
+  breached: { item_id: Uuid; field_id: Uuid; count: number }[];
+  unchecked: { item_id: Uuid; field_id: Uuid; reason: "off" | "offline" | "http" }[];
+};
+
+watchtower_scan(): WatchtowerReport            // planned — R-23, R-24
+watchtower_breach_check(): BreachReport        // planned — R-25, R-26
+```
+
+**Both are vault-class. Neither returns a `Secret`, and nothing here needs a fifth sanctioned
+command** — a finding is not a secret, and if a Watchtower command ever appears to want a plaintext
+password in the webview, the design is wrong rather than the budget.
+
+**Two commands rather than one, and the split is the S-10 argument made structural.** The local half
+— zxcvbn scoring and reuse grouping — touches no network and is the whole scan for a user who never
+opts in. The breach half is the only command in the application that opens a socket. With one
+combined command, "zero packets when breach checking is off" is a branch inside a function that
+someone must keep taking; with two, it is a command that is never called, and `tcpdump` on the app's
+PID is measuring a claim the code's shape already makes. It also separates two very different
+costs: the local scan is milliseconds and repeatable, the breach check is minutes and depends on a
+service we do not run (see S-07 below).
+
+**`findings` carries no clean verdicts.** An item that passes is the absence of a row, not a row
+saying `strong`. `ItemStatus::Strong` is still written to the vault's status cache (D-26) because
+the item list draws a pip from it; it is not carried twice.
+
+**Nothing in Phase 4 produces `expired`.** The variant exists in `ItemStatus` and the Watchtower
+view draws a group for it, and no requirement in R-23…R-26 defines a rotation date for an item to
+be past. The group stays empty, and the surface must not imply a check is running that is not —
+the same false-promise class as D-49, D-55 and D-61, one screen further on.
+
+#### What may cross, and what may not
+
+The elision rule reaches this section in a way the roadmap did not say. Reuse detection groups items
+by password; **the grouping key is a hash of a secret, and a hash of a short secret is a secret.**
+
+- The key never leaves `trustvault-core`. It is not in `Finding`, not in an event, not in an error,
+  and not shortened into a "group id" the webview could use to colour rows by group. `shared_with`
+  names the **other members** — ids the item list already carries — which is the same information
+  the user needs and none of the information an offline attacker does.
+- The 5-character SHA-1 prefix and the range response are **host-only**. Neither crosses IPC in any
+  form. `requested` is a count, not a list of prefixes.
+- `count` in `breached` is the number of times the value appears in the breach corpus, which is what
+  the row shows. It is a property of the corpus rather than of the value: narrowing a password from
+  it requires the range response, and that never leaves the host.
+- Every one of these is proven in `tests/ipc_session.rs` when the commands ship, not promised here.
+
+#### The setting owns the egress, not the caller
+
+`watchtower_breach_check` takes **no argument**. Whether the network may be touched is read from
+`Settings.breach_check_enabled` inside the host, because an argument would put the decision to send
+a user's passwords — even as prefixes — in the hands of the layer this whole document exists not to
+trust. Called while the setting is off, it returns a `BreachReport` with `requested: 0` and every
+password in `unchecked` with reason `"off"`. It does not error: refusing is the correct behaviour
+and an error would be read by the UI as a failure to be retried.
+
+**A failed check reports "not checked", never "safe"** — R-25's own wording. An item whose request
+failed appears in `unchecked` with `"offline"` or `"http"` and its stored status is left exactly as
+the local scan wrote it. The screen says when the last breach check ran and how much of it landed;
+it must never present a stale or partial pass as a clean one.
+
+#### When the scan ran, and whether it finished
+
+`vault_status` grows two timestamps rather than either command growing a second read path (D-70's
+precedent: the profile rode on the status call rather than gaining a `get_profile`). Both are `null`
+while locked, for `item_count`'s reason — they live in the sealed body beside `status`, and there is
+no key to read them with. `vault-format.md` §9 permits the new keys without a version bump; they are
+added in the commit that implements the scan.
+
+Two timestamps and not one, because `strong` means "clean at the last scan" and the two passes can
+be days apart. A single "last scanned" would let a local scan from this morning vouch for a breach
+check that has never run.
+
+```ts
+last_scan_at: Millis | null;           // planned — Phase 4
+last_breach_check_at: Millis | null;   // planned — Phase 4
+```
+
+**Results are discarded if the vault locked while the scan was running.** A breach check over a
+thousand passwords outlives an auto-lock timeout by a wide margin, and the key to write the cache
+with is gone by then. The scan does not extend the lock, does not hold the vault open, and does not
+resurrect a key — it finishes, finds the vault closed, and drops what it computed. This is the one
+place where the open question about the auto-lock clock (`trustvault-state.md`) has a **wrong**
+answer available and worth naming: a scan that touches the lock timer would let a background task
+keep a vault unlocked indefinitely.
+
+#### What the network half actually costs — measured 2026-08-15
+
+Numbers, because S-07 is a wall-clock criterion and nothing in the phase document had one. Against
+the live service from this machine, `Add-Padding: true`, prefix `21BD1`:
+
+| | |
+|---|---|
+| Padded response | **80,497 bytes**, 2,049 rows, **125** of them zero-count decoys |
+| Same prefix unpadded | **75,622 bytes**, 1,924 rows — the real suffixes are identical in both |
+| Cost of padding | **+6.4 % of bytes.** R-25 is free: there is no size trade to argue about |
+| Decoy count | **not fixed** — 110 on 2026-08-15 at the entry check, 125 hours later, same prefix |
+| 48 cold prefixes, one connection reused | 25.6 s — **1.87 req/s** |
+| 48 cold prefixes, 8 concurrent | 19.0 s — **2.5 req/s** |
+
+The reference vault holds **1,000 items with 1,000 distinct passwords** (`benchfixture.rs`), so a
+full breach check is 1,000 range requests and roughly **80 MB**. At the rate measured here that is
+**≈ 400 seconds**, against S-07's ten. The gap is 40×, and it is not an implementation quality
+problem: ten seconds needs 100 requests per second sustained, which is neither achievable from here
+nor a polite thing to aim at.
+
+Two consequences the code must carry regardless of how the criterion is re-worded:
+
+- **One request per distinct value, never per item.** A vault where twelve items share a password
+  costs one request. The reference vault is the worst case by construction, not the typical one.
+- **The scan is long enough to need progress and interruption.** `watchtower-progress` (§8) exists
+  for the first. The second has no command yet, deliberately: a cancel is a decision about what a
+  half-finished check leaves behind, and it follows the S-07 answer rather than preceding it.
+
+**S-07 is not measurable as written**, and that is raised in `trustvault-state.md`'s open questions
+with a proposal, not edited here. A criterion re-worded by the author of the code it measures is not
+a criterion — the same reason D-64, D-67 and D-73 were the author's calls.
 
 ## 7. Sanctioned commands
 
@@ -901,10 +1056,18 @@ an event, so rule 2 of §2 could not be satisfied by one.
 "vault-locked":    { reason: "manual" | "timeout" | "os_sleep" }   // R-09
 "field-remasked":  { item_id: Uuid; field_id: Uuid }               // R-12
 "clipboard-cleared": { item_id: Uuid; field_id: Uuid }             // R-14
+"watchtower-progress": { done: number; total: number }             // planned — Phase 4, §6.9
 ```
 
 `vault-locked` carries its reason so the lock screen can say why, which is the difference between a
 user thinking the app crashed and a user knowing the timeout fired.
+
+`watchtower-progress` carries two integers and nothing else — no item id, no title, no prefix. A
+progress event naming the item currently being checked would be a running commentary on the vault,
+emitted on a timer, which rule 2 of §2 forbids for a `Secret` and which is a bad idea here for the
+same reason one step down. It exists because §6.9's measurement says a full breach check of the
+reference vault is minutes rather than seconds, and a minutes-long command with no feedback is a
+frozen window.
 
 ## 9. What the audit harness checks
 
@@ -977,9 +1140,14 @@ Recorded now so the extension points are honest about what they can absorb.
   they belong: `generate_password` is the fourth sanctioned command (**D-44**, §7), a TOTP code is
   not a `Secret` (**D-45**, §7.1), and palette search matches in Rust (**D-46**, §6.5). The import
   path is §6.8.
-- **Phase 4** adds Watchtower. Nothing it returns is a secret: a breach check sends a 5-character
-  SHA-1 prefix and receives a list, and the scoring happens in Rust. If any Watchtower command ends
-  up wanting a plaintext password in the webview, the design is wrong.
+- ~~**Phase 4** adds Watchtower.~~ **Written into §6.9 on 2026-08-15, before the code**, which is
+  what the entry check asked for. The sentence this bullet carried is unchanged and is now the
+  section's opening claim: nothing Watchtower returns is a secret, and a command that wants a
+  plaintext password in the webview is the design being wrong rather than the budget being tight.
+  Two things the bullet did not anticipate and the section had to settle: the scan is **two**
+  commands rather than one, so "zero egress when opted out" is a command nobody calls instead of a
+  branch somebody must keep taking; and the reuse **grouping key never crosses IPC in any form**,
+  because a hash of a short secret is a secret.
 - **Item history** still has no command, and §6.1 still says what it would take: one entry at a
   time through a sanctioned command, or it does not arrive. Phase 3's `update_item` writes to
   `history` (a changed value pushes the old one) without any way to read it back, which is the

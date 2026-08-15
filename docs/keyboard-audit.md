@@ -89,20 +89,20 @@ design predates the importer). None of them is a surface the design drew and we 
 four exist because a requirement needed one, which is the direction the disagreement was always
 going to point.
 
-**Nineteen of the twenty-two boxes are ticked, on the author's walk of 2026-08-14.** These rows are
+**All twenty-two boxes are ticked. S-08 is met.** These rows are
 what a person finds with the pointer unplugged: whether Tab lands where the eye is, whether a
 dialog gives focus back to the row it was opened from, whether swallowing Enter in the tag field
 reads as broken to somebody who does not know why it happens. `scripts/a11y.mjs` answers the
 global rules above on every build and it cannot answer one of these — `element.focus()` is not
 Tab, and no script can tell you that the order it produced is the order you were reading in.
 
-**Three are held, and each is held for a reason that is not the author's word being doubted.**
-Row 12 cannot be ticked as written, because one of its clauses describes a dialog that does not
-exist. Rows 20 and 21 describe a surface that is **not in the binary this walk could have used**:
-`target/release/trustvault` on this machine was built 2026-08-08 at 12:11 and D-70's profile
-landed at 18:13 the same day, so on that build there is no popover to open and no Edit-profile
-dialog to focus. If the walk ran against a build made elsewhere, say so and they tick with the
-rest; otherwise they are a five-minute re-walk on a fresh binary, not a repeat of the sitting.
+**The last three closed on 2026-08-15**, and how each one closed is the record worth keeping.
+Row 12 was **re-worded** to the behaviour that exists rather than ticked against a clause about a
+dialog nobody built — D-73, the author's call, the same shape as D-64 and D-67. Rows 20 and 21
+were **re-walked on a rebuilt binary**: they had been held because `target/release/trustvault` was
+built 2026-08-08 at 12:11 and D-70's profile landed at 18:13 the same day, so no binary on this
+machine had ever carried the surface those two rows describe. The rebuild is what made them
+walkable, and it took five minutes rather than a second sitting.
 Details are in the walk record below.
 
 ### Before unlock
@@ -137,7 +137,7 @@ same keystrokes and would swallow the first letter of every shortcut a later pha
 | # | Surface | Must be operable by | Done |
 |---|---------|--------------------|------|
 | 11 | Command palette | ⌘K/Ctrl+K opens from anywhere, Esc closes, ↑/↓ navigate, Enter copies the password, ⇧Enter opens the item — R-16 | [x] |
-| 12 | New-item dialog | Type chips selectable with ←/→ and Space; every type's fields Tab-reachable; the generator opens from inside it and returns focus; the **New tag** field takes Enter to add a tag and does **not** submit the item; the **2FA switch** takes Space and Tab from it lands in the seed field it just revealed | [ ] |
+| 12 | New-item dialog | Type chips selectable with ←/→ and Space; every type's fields Tab-reachable; **Generate** fills the password field in place, reveals it, and leaves focus on it — re-worded 2026-08-15, **D-73**; the **New tag** field takes Enter to add a tag and does **not** submit the item; the **2FA switch** takes Space and Tab from it lands in the seed field it just revealed | [x] |
 | 13 | Delete confirmation | Focus lands on **Cancel**, not Delete; Esc cancels; Enter activates whatever is focused and nothing else; for a **vault**, the confirm field is reachable and the Delete button stays disabled until the typed name matches — R-18 | [x] |
 | 14 | Generator dialog | Length slider on ←/→ (and Home/End), the four set toggles on Space, Regenerate and Copy reachable — R-15 | [x] |
 | 15 | Vault switcher | ↑/↓ between vaults **including the open one**, Enter switches, Tab within a row reaches **Leave**, Esc closes — R-22 | [x] |
@@ -145,8 +145,8 @@ same keystrokes and would swallow the first letter of every shortcut a later pha
 | 17 | Watchtower | The findings list is a list: ↑/↓ and Enter to the offending item | [x] |
 | 18 | Edit-item dialog | Every field row Tab-reachable in display order; **Replace** on a secret row reachable without hover, and Tab from it lands in the input it just opened; Remove and Add field reachable; the **New tag** field takes Enter as "add this tag" — R-17 | [x] |
 | 19 | Import dialog | Esc closes from the intro **and** from the report; Choose file… reachable and the **native picker takes over from there**, so the keyboard path leaves the app and must come back to a focused dialog; Import stays disabled until a preview is on screen; the report's refusal list scrolls with the keyboard alone, not only with a wheel — R-29 | [x] |
-| 20 | Profile popover | Enter or Space on the footer row opens it and focus lands on the **first row, not the header**; ↑/↓ wrap between the four rows; Esc closes and focus returns to the footer row that opened it; the ⌘, printed beside *Settings* actually reaches Settings — D-70 | [ ] |
-| 21 | Edit-profile dialog | Focus lands in **Full name**; Tab reaches Email, Cancel and Save in that order; Enter in either field saves rather than doing nothing; Esc cancels and focus returns to whatever opened it — the popover row **or** the Settings card's button, which are two different return paths — D-70 | [ ] |
+| 20 | Profile popover | Enter or Space on the footer row opens it and focus lands on the **first row, not the header**; ↑/↓ wrap between the four rows; Esc closes and focus returns to the footer row that opened it; the ⌘, printed beside *Settings* actually reaches Settings — D-70 | [x] |
+| 21 | Edit-profile dialog | Focus lands in **Full name**; Tab reaches Email, Cancel and Save in that order; Enter in either field saves rather than doing nothing; Esc cancels and focus returns to whatever opened it — the popover row **or** the Settings card's button, which are two different return paths — D-70 | [x] |
 
 Rows 18 and 19 were added 2026-08-06 with the surfaces themselves, and rows 20 and 21 on
 2026-08-08 with D-70's, which is why this table's count is now **21 against the gate's 15**. None
@@ -377,12 +377,15 @@ sharing a screen, and the row fails on either one alone.
     ordinary navigation column.
 
     **Fixed 2026-08-14**, in `Sidebar.svelte`'s pattern: one roving `tabindex`, the arrows moving
-    it, Enter choosing. `docs/keyboard-audit.md` row 20 stays unticked — the fix has not been
-    walked, and the row is what says whether it worked.
+    it, Enter choosing. **Confirmed in the app on 2026-08-15**: row 20 was walked on a rebuilt
+    binary with the pointer unplugged, and one Tab leaves the menu rather than stepping through
+    *Lock vault* into what sits behind the popover. The audit found it; the walk is what says it
+    is fixed, and those are deliberately two different events.
 
-_Findings 4, 5, 8 and 9 are all confirmed fixed by the re-walks of 2026-08-14: rows 3, 6 and 11
-were walked again after the surfaces under them changed, and passed. Finding 10's fix is **not**
-confirmed — row 20 is the row that would confirm it, and it is one of the three still held._
+_Every finding in this list is now confirmed fixed by a walk rather than by a commit. Findings 4,
+5, 8 and 9 by the re-walks of 2026-08-14 (rows 3, 6, 11), and finding 10 by row 20 on 2026-08-15.
+Ten findings, all closed, and **the walk found four of them** — which is the argument for having
+run it at all rather than trusting three passing audits._
 
 **On findings 6, 7 and 10**: the throwaway script that found the first two is now
 `scripts/audits/taborder.js`, the third audit beside `focus` and `contrast`, and finding 10 is
@@ -397,7 +400,7 @@ the document's 47, and the narrowing assumes a trap this audit cannot verify. An
 does not judge **how many** stops a surface has: that is the row's job, and it is the half of
 finding 7 no script could have decided.
 
-## Manual pass — in progress
+## Manual pass — complete
 
 **Opened 2026-08-08 by the author.** Recorded as it arrives rather than at the end, for the reason
 the preamble gives: an audit written up afterwards records what the implementation turned out to
@@ -410,9 +413,10 @@ do.
   these four establish is that the shortcut layer works, which is what makes the rest of the pass
   possible; a surface that cannot be opened cannot be walked.
 
-Still owed on the three rows this touches, taken from their own wording. **Rows 11 and 14 were
-walked in full on 2026-08-14 and are ticked; row 12 is the one that is still owed**, and its first
-listed clause is why:
+Still owed on the three rows this touches, taken from their own wording — **all three are closed
+now**: rows 11 and 14 were walked in full on 2026-08-14, and row 12 on 2026-08-15 once its first
+listed clause had been re-worded to the surface that exists (D-73). Kept as written, because it is
+the list that turned "the shortcut works" into three rows nobody could yet tick:
 
 | Row | Opened by | Still to check |
 |---|---|---|
@@ -454,7 +458,19 @@ observations nobody wrote down would make this document worth less than the memo
 So the "what was observed" column is not back-filled for the sixteen new rows. The report is the
 evidence and it is dated.
 
-**Three rows are not ticked, and none of the three is a doubt about the walk.**
+**The three rows that could not be ticked on the 14th closed on the 15th**, each in its own way,
+and the way matters more than the tick:
+
+| Row | How it closed |
+|---|---|
+| 12 New-item dialog | **Re-worded, not conceded.** The clause "the generator opens from inside it and returns focus" described a dialog nobody built; the row now says what exists — *Generate* fills the password field in place, reveals it, and leaves focus on it. **D-73**, the author's call, taken in the open rather than by quietly deleting a clause that could not pass |
+| 20 Profile popover | **Walked on the rebuilt binary and passed**, including the clause today's fix created: one Tab leaves the menu instead of stepping through *Lock vault* into what sits behind it. This is finding 10 confirmed by a person rather than by a commit |
+| 21 Edit-profile dialog | **Walked and passed on both open paths** — from the popover row, which is gone by the time the dialog closes, and from the Settings card's button, which is not. That is `Dialog.svelte`'s `isConnected` guard exercised on the path it was written for, which no other row reaches |
+
+The record below is what was written when they were still open, kept because the reason a row was
+held is worth more later than the tick that replaced it.
+
+**Three rows were not ticked, and none of the three was a doubt about the walk.**
 
 | Row | Why it is held | What closes it |
 |---|---|---|
@@ -471,8 +487,8 @@ with a note saying where — the check is that the build carried the surface, no
 |---|---|
 | S-08 target | 100 % of surfaces operable with no pointer |
 | Global rules | **7 of 7**. Six by machine on every build — `npm run a11y`, **120 surface-audits, no findings** on 2026-08-14 — three audits over twenty scenarios in both themes. `taborder` joined `focus` and `contrast` that day and returned finding 10 on its first sweep; the number above is the sweep after it was fixed. The seventh rule is the manual pass below |
-| Surfaces | **19 passed of 22**, on the author's walk of 2026-08-14 — including the three re-walks D-66, D-67 and D-68/D-69 had re-opened, and no finding returned. **Three held**: row 12 (a clause describing a dialog that does not exist — the author's wording call), rows 20 and 21 (the surface postdates every binary on this machine). S-08 is **not met** until those three are closed; the target is 100 % and there is no partial credit in it |
-| Date | 2026-08-07 (global rules), extended 2026-08-14 (tab order, and it is in CI); manual pass opened 2026-08-08, walked 2026-08-14, **three rows outstanding** |
+| Surfaces | **22 of 22 — S-08 is met.** Nineteen on the author's walk of 2026-08-14, including the three re-walks D-66, D-67 and D-68/D-69 had re-opened; the last three on 2026-08-15 — row 12 re-worded (**D-73**), rows 20 and 21 walked on a rebuilt binary carrying D-70's profile. No finding came out of either sitting |
+| Date | 2026-08-07 (global rules), extended 2026-08-14 (tab order, and it is in CI); manual pass opened 2026-08-08, walked 2026-08-14, **completed 2026-08-15** |
 
 **The total is 22 boxes**, and the number above is corrected rather than carried: the rows are
 numbered 1–21, row 8a is a box alongside row 8, so the count is 21 + 1. Every "0 of 19" written

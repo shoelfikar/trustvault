@@ -30,9 +30,14 @@ zeroize.workspace = true
 zxcvbn.workspace = true
 
 [features]
-# The reference vault of trustvault-requirements.md — 1 000 items, 4 fields each. Off in the
-# shipped library on purpose: a fixture generator compiled into the application is a way to
-# create a thousand fake items in somebody's real vault.
+# The fixture vaults. Off in the shipped library on purpose: a fixture generator compiled into
+# the application is a way to create a thousand fake items in somebody's real vault.
+#
+# Two vaults behind one flag, because they are one risk and opposite trades — `benchfixture`
+# is the reference vault of trustvault-requirements.md (1 000 items, 4 fields each, no reuse
+# and one repeated score: a timing floor), and `auditfixture` is twenty-one items built to have
+# reuse groups of known size and a password at every zxcvbn score (D-77). The name is the first
+# fixture that needed the flag, not the only one that lives behind it.
 benchfixture = []
 
 [dev-dependencies]
@@ -56,6 +61,13 @@ harness = false
 # thousand samples is three lines of `sort`.
 [[bench]]
 name = "search"
+harness = false
+
+# S-07a, whose target number this benchmark is what *sets* — the criterion was written blank on
+# purpose (D-77) the way S-03's 511 ms was, and the rule is that the first reading goes into
+# trustvault-requirements.md the same day it is taken: `cargo bench --bench watchtower`.
+[[bench]]
+name = "watchtower"
 harness = false
 
 [lints.rust]

@@ -47,6 +47,8 @@
 
 mod aead;
 #[cfg(feature = "benchfixture")]
+pub mod auditfixture;
+#[cfg(feature = "benchfixture")]
 pub mod benchfixture;
 mod format;
 mod generate;

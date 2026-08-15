@@ -51,6 +51,17 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      # S-07a is the one measured criterion in this project that a runner can re-take, so it is
+      # the one that gets to be a build failure rather than a number in a document. The others
+      # need this desktop (S-03's Argon2id calibration), a display (the clipboard pair), or the
+      # running app (S-04's end-to-end half) — see trustvault-requirements.md.
+      #
+      # The budget lives in the benchmark, not here: `BUDGET_MS` in benches/watchtower.rs, set
+      # to 8x the first reading with the multiplier for a slower machine written into it (D-80).
+      # If this step starts failing on the runner rather than on a change, that is evidence
+      # about the runner and belongs in trustvault-state.md — not a bigger number.
+      - name: Watchtower local scan within budget (S-07a)
+        run: cargo bench --bench watchtower -p trustvault-core
 
   boundary:
     name: Vault core isolation (N-02)

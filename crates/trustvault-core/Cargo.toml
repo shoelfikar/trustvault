@@ -24,6 +24,10 @@ subtle.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
+# D-78. Brings `fancy-regex`, `regex`, `itertools` and `time` into a Tier-1 crate, which is the
+# cost of the move and is written here rather than discovered in a tree: none of them is on
+# N-02's list, and `time` is already in the lockfile at the version D-18 raised the MSRV for.
+zxcvbn.workspace = true
 
 [features]
 # The reference vault of trustvault-requirements.md — 1 000 items, 4 fields each. Off in the

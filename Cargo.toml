@@ -49,6 +49,16 @@ sha1 = { version = "0.11", default-features = false, features = ["zeroize"] }
 sha2 = { version = "0.11", default-features = false, features = ["zeroize"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
+# D-12, decided at kickoff: the design's crack-time strings ("takes ~8 centuries to crack") are
+# zxcvbn's own output format, so anything else means reimplementing its phrasing.
+#
+# **In the core since D-78**, not in `src-tauri`. The original reason it was in the host — the
+# ~400 kB of dictionaries against S-01's 800 ms cold start — was an argument against the
+# *webview* and is untouched by the move. What decides between host and core is that scoring
+# every password means reading every password, and the core is where they already are. N-02 is
+# unaffected: nothing in this tree is Tauri, a webview, or a socket.
+zxcvbn = { version = "3.1", default-features = false }
+
 # Release profile. A password manager spends its life idle in the dock, so size and
 # startup (S-01, S-06) matter more than throughput.
 [profile.release]

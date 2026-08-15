@@ -39,7 +39,7 @@ pub type Unknown = BTreeMap<String, Value>;
 ///
 /// A plain integer rather than a date type: the vault format should not depend on a calendar
 /// library's serialization, and formatting for display is the UI's problem.
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))

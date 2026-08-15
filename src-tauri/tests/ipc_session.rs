@@ -177,7 +177,7 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
     // ---- Onboarding: the password is scored, then the vault is created -------------------
     // TESTING parameters, not calibrated ones: this test is about what crosses the boundary,
     // and a 511 ms KDF per unlock would make it the slowest test in the workspace.
-    let strength = trustvault_lib::commands::strength::score(MASTER, &["Session Vault".into()]);
+    let strength = trustvault_core::score(MASTER, &["Session Vault"]);
     log.record_infallible("score_password", &strength);
 
     let created = vault_cmd::create_vault_inner(

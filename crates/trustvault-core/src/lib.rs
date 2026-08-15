@@ -58,6 +58,7 @@ mod search;
 mod secret;
 mod totp;
 mod vault;
+mod watchtower;
 
 pub use format::{HEADER_LEN, Header, WRAP_AAD_LEN};
 pub use generate::{CharSets, MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, PasswordRecipe};
@@ -71,6 +72,7 @@ pub use recovery::RecoveryCode;
 pub use secret::{SecretBytes, SecretString};
 pub use totp::{TotpAlgorithm, TotpSpec};
 pub use vault::Vault;
+pub use watchtower::{Finding, Report, Strength, Verdict, WEAK_MAX_SCORE, scan, score};
 
 use thiserror::Error;
 

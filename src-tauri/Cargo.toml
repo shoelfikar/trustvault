@@ -40,11 +40,10 @@ serde_json = "1"
 # not to record the entry -- and because it documents the Wayland ownership caveat rather than
 # hiding it. The hint is advisory on every platform; see docs/ipc-contract.md §6.3.
 arboard = "3"
-# D-12, decided at kickoff: the design's crack-time strings ("takes ~8 centuries to crack") are
-# zxcvbn's own output format, so anything else means reimplementing its phrasing. Lives in the
-# host rather than the webview because the dictionaries are ~400 kB and the frontend budget
-# (S-01, cold start <= 800 ms) is the thing this app is judged on.
-zxcvbn = { version = "3.1", default-features = false }
+# zxcvbn was here until 2026-08-15. It is a `trustvault-core` dependency now (D-78) and reaches
+# this crate through it: `score_password` is a pass-through, and Watchtower needs the scoring
+# where the passwords already are. Nothing about the webview changed -- the dictionaries were
+# never shipped to it and still are not.
 
 [features]
 # S-04 is a number about the application that ships, and the only way to read it is a devtools

@@ -21,10 +21,11 @@ use trustvault_core::{CharSets, PasswordRecipe, SecretString};
 
 use crate::clipboard;
 use crate::commands::items::clear_after;
-use crate::commands::strength::{Strength, score};
+// The generator scores what it mints, through the one definition of a score there is (D-78).
 use crate::dto::Copied;
 use crate::error::{ErrorKind, IpcError, IpcResult};
 use crate::state::{AppState, now_ms};
+use trustvault_core::{Strength, score};
 
 /// What `generate_password` returns: one password and the meter that goes with it.
 ///

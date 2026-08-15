@@ -4110,7 +4110,6 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "trustvault-core",
- "zxcvbn",
 ]
 
 [[package]]
@@ -4134,6 +4133,7 @@ dependencies = [
  "trustvault-core",
  "uuid",
  "zeroize",
+ "zxcvbn",
 ]
 
 [[package]]

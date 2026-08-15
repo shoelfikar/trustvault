@@ -89,22 +89,31 @@ design predates the importer). None of them is a surface the design drew and we 
 four exist because a requirement needed one, which is the direction the disagreement was always
 going to point.
 
-**Every box below is unticked, and that is the state rather than an omission.** These rows are
+**Nineteen of the twenty-two boxes are ticked, on the author's walk of 2026-08-14.** These rows are
 what a person finds with the pointer unplugged: whether Tab lands where the eye is, whether a
 dialog gives focus back to the row it was opened from, whether swallowing Enter in the tag field
 reads as broken to somebody who does not know why it happens. `scripts/a11y.mjs` answers the
 global rules above on every build and it cannot answer one of these — `element.focus()` is not
 Tab, and no script can tell you that the order it produced is the order you were reading in.
 
+**Three are held, and each is held for a reason that is not the author's word being doubted.**
+Row 12 cannot be ticked as written, because one of its clauses describes a dialog that does not
+exist. Rows 20 and 21 describe a surface that is **not in the binary this walk could have used**:
+`target/release/trustvault` on this machine was built 2026-08-08 at 12:11 and D-70's profile
+landed at 18:13 the same day, so on that build there is no popover to open and no Edit-profile
+dialog to focus. If the walk ran against a build made elsewhere, say so and they tick with the
+rest; otherwise they are a five-minute re-walk on a fresh binary, not a repeat of the sitting.
+Details are in the walk record below.
+
 ### Before unlock
 
 | # | Surface | Must be operable by | Done |
 |---|---------|--------------------|------|
-| 1 | Onboarding step 1 — name & location | Tab through name and path, Enter advances | [ ] |
-| 2 | Onboarding step 2 — master password | Type, Tab to confirm, strength meter reachable but not focus-stealing, Enter advances only when valid | [ ] |
-| 3 | Onboarding step 3 — recovery kit | Copy and Save buttons focusable; the acknowledgement checkbox toggles with Space; Enter finishes | [ ] |
-| 4 | Lock screen | Password field focused **on mount**, Enter unlocks, the recovery link is Tab-reachable | [ ] |
-| 5 | Recovery dialog, both steps | Esc closes from either step; Enter advances; the reissued kit's copy button is reachable | [ ] |
+| 1 | Onboarding step 1 — name & location | Tab through name and path, Enter advances | [x] |
+| 2 | Onboarding step 2 — master password | Type, Tab to confirm, strength meter reachable but not focus-stealing, Enter advances only when valid | [x] |
+| 3 | Onboarding step 3 — recovery kit | Copy and Save buttons focusable; the acknowledgement checkbox toggles with Space; Enter finishes | [x] |
+| 4 | Lock screen | Password field focused **on mount**, Enter unlocks, the recovery link is Tab-reachable | [x] |
+| 5 | Recovery dialog, both steps | Esc closes from either step; Enter advances; the reissued kit's copy button is reachable | [x] |
 
 Row 4's "focused on mount" is the one autofocus in the application that is unambiguously right: the
 lock screen exists to receive a password and has one field. Everywhere else, autofocus is a finding.
@@ -113,12 +122,12 @@ lock screen exists to receive a password and has one field. Everywhere else, aut
 
 | # | Surface | Must be operable by | Done |
 |---|---------|--------------------|------|
-| 6 | Sidebar — views, tags, vault switcher trigger | Tab in, ↑/↓ between entries, Enter selects | [ ] |
+| 6 | Sidebar — views, tags, vault switcher trigger | Tab in, ↑/↓ between entries, Enter selects | [x] |
 | 7 | Item list | ↑/↓ move selection, Home/End jump, Enter opens in the detail pane, type-ahead is **not** implemented (⌘K is the search) | [x] |
 | 8 | Detail pane — fields and toolbar | Tab through fields; per-field Reveal and Copy reachable **without hover**; Edit and Delete in the toolbar | [x] |
-| 8a | Detail pane — one-time code row | The **Copy code** button is a Tab stop like every other copy in the box, and the remaining seconds are readable as text rather than only as the arc — a countdown drawn in colour and geometry alone is unreadable to the people this audit is for | [ ] |
+| 8a | Detail pane — one-time code row | The **Copy code** button is a Tab stop like every other copy in the box, and the remaining seconds are readable as text rather than only as the arc — a countdown drawn in colour and geometry alone is unreadable to the people this audit is for | [x] |
 | 9 | Empty states — every list | The primary action is focusable and is the first stop after the list itself | [x] |
-| 10 | Titlebar / toolbar chrome | Search trigger, New item, and the lock button all Tab-reachable | [ ] |
+| 10 | Titlebar / toolbar chrome | Search trigger, New item, and the lock button all Tab-reachable | [x] |
 
 Row 7 says what is **not** built as well as what is: type-ahead in a list competes with ⌘K for the
 same keystrokes and would swallow the first letter of every shortcut a later phase adds.
@@ -127,15 +136,15 @@ same keystrokes and would swallow the first letter of every shortcut a later pha
 
 | # | Surface | Must be operable by | Done |
 |---|---------|--------------------|------|
-| 11 | Command palette | ⌘K/Ctrl+K opens from anywhere, Esc closes, ↑/↓ navigate, Enter copies the password, ⇧Enter opens the item — R-16 | [ ] |
+| 11 | Command palette | ⌘K/Ctrl+K opens from anywhere, Esc closes, ↑/↓ navigate, Enter copies the password, ⇧Enter opens the item — R-16 | [x] |
 | 12 | New-item dialog | Type chips selectable with ←/→ and Space; every type's fields Tab-reachable; the generator opens from inside it and returns focus; the **New tag** field takes Enter to add a tag and does **not** submit the item; the **2FA switch** takes Space and Tab from it lands in the seed field it just revealed | [ ] |
-| 13 | Delete confirmation | Focus lands on **Cancel**, not Delete; Esc cancels; Enter activates whatever is focused and nothing else; for a **vault**, the confirm field is reachable and the Delete button stays disabled until the typed name matches — R-18 | [ ] |
-| 14 | Generator dialog | Length slider on ←/→ (and Home/End), the four set toggles on Space, Regenerate and Copy reachable — R-15 | [ ] |
-| 15 | Vault switcher | ↑/↓ between vaults **including the open one**, Enter switches, Tab within a row reaches **Leave**, Esc closes — R-22 | [ ] |
-| 16 | Settings | Every control reachable in visual order; the segmented controls on ←/→; **UI scale changes do not move focus**; the **Start at login** toggle takes Space, and when the platform refuses the write the toggle returns to its old position with the reason announced — R-21 | [ ] |
-| 17 | Watchtower | The findings list is a list: ↑/↓ and Enter to the offending item | [ ] |
-| 18 | Edit-item dialog | Every field row Tab-reachable in display order; **Replace** on a secret row reachable without hover, and Tab from it lands in the input it just opened; Remove and Add field reachable; the **New tag** field takes Enter as "add this tag" — R-17 | [ ] |
-| 19 | Import dialog | Esc closes from the intro **and** from the report; Choose file… reachable and the **native picker takes over from there**, so the keyboard path leaves the app and must come back to a focused dialog; Import stays disabled until a preview is on screen; the report's refusal list scrolls with the keyboard alone, not only with a wheel — R-29 | [ ] |
+| 13 | Delete confirmation | Focus lands on **Cancel**, not Delete; Esc cancels; Enter activates whatever is focused and nothing else; for a **vault**, the confirm field is reachable and the Delete button stays disabled until the typed name matches — R-18 | [x] |
+| 14 | Generator dialog | Length slider on ←/→ (and Home/End), the four set toggles on Space, Regenerate and Copy reachable — R-15 | [x] |
+| 15 | Vault switcher | ↑/↓ between vaults **including the open one**, Enter switches, Tab within a row reaches **Leave**, Esc closes — R-22 | [x] |
+| 16 | Settings | Every control reachable in visual order; the segmented controls on ←/→; **UI scale changes do not move focus**; the **Start at login** toggle takes Space, and when the platform refuses the write the toggle returns to its old position with the reason announced — R-21 | [x] |
+| 17 | Watchtower | The findings list is a list: ↑/↓ and Enter to the offending item | [x] |
+| 18 | Edit-item dialog | Every field row Tab-reachable in display order; **Replace** on a secret row reachable without hover, and Tab from it lands in the input it just opened; Remove and Add field reachable; the **New tag** field takes Enter as "add this tag" — R-17 | [x] |
+| 19 | Import dialog | Esc closes from the intro **and** from the report; Choose file… reachable and the **native picker takes over from there**, so the keyboard path leaves the app and must come back to a focused dialog; Import stays disabled until a preview is on screen; the report's refusal list scrolls with the keyboard alone, not only with a wheel — R-29 | [x] |
 | 20 | Profile popover | Enter or Space on the footer row opens it and focus lands on the **first row, not the header**; ↑/↓ wrap between the four rows; Esc closes and focus returns to the footer row that opened it; the ⌘, printed beside *Settings* actually reaches Settings — D-70 | [ ] |
 | 21 | Edit-profile dialog | Focus lands in **Full name**; Tab reaches Email, Cancel and Save in that order; Enter in either field saves rather than doing nothing; Esc cancels and focus returns to whatever opened it — the popover row **or** the Settings card's button, which are two different return paths — D-70 | [ ] |
 
@@ -371,9 +380,9 @@ sharing a screen, and the row fails on either one alone.
     it, Enter choosing. `docs/keyboard-audit.md` row 20 stays unticked — the fix has not been
     walked, and the row is what says whether it worked.
 
-_Rows other than 3, 6, 7, 8, 9 and part of 11 have not been run. They need the pointer physically
-unplugged and the app in front of a person, which is what S-08 asks for and what nothing here can
-stand in for._
+_Findings 4, 5, 8 and 9 are all confirmed fixed by the re-walks of 2026-08-14: rows 3, 6 and 11
+were walked again after the surfaces under them changed, and passed. Finding 10's fix is **not**
+confirmed — row 20 is the row that would confirm it, and it is one of the three still held._
 
 **On findings 6, 7 and 10**: the throwaway script that found the first two is now
 `scripts/audits/taborder.js`, the third audit beside `focus` and `contrast`, and finding 10 is
@@ -401,7 +410,9 @@ do.
   these four establish is that the shortcut layer works, which is what makes the rest of the pass
   possible; a surface that cannot be opened cannot be walked.
 
-Still owed on the three rows this touches, taken from their own wording:
+Still owed on the three rows this touches, taken from their own wording. **Rows 11 and 14 were
+walked in full on 2026-08-14 and are ticked; row 12 is the one that is still owed**, and its first
+listed clause is why:
 
 | Row | Opened by | Still to check |
 |---|---|---|
@@ -430,14 +441,38 @@ Row 3 failing on the first surface walked is the argument for the whole manual p
 are plain in the source and neither was found by reading it in three phases, because both are
 about the moment **between** two renders — the screen is correct in every static reading of it.
 
+### The sitting — 2026-08-14
+
+**Reported by the author: the walk was run and every row it reached passed**, including the three
+re-walks the fixes of 2026-08-08 had re-opened (row 3 after D-68/D-69, row 6 after D-67, row 11
+after D-66). Nineteen boxes are ticked above on that report. No finding came out of it, which
+makes it the first pass here that returned none.
+
+**What this record is.** The rows above are ticked from the author's report, in the same way rows
+7, 8 and 9 were on 2026-08-08 — a manual walk has no other evidence, and inventing per-row
+observations nobody wrote down would make this document worth less than the memory it came from.
+So the "what was observed" column is not back-filled for the sixteen new rows. The report is the
+evidence and it is dated.
+
+**Three rows are not ticked, and none of the three is a doubt about the walk.**
+
+| Row | Why it is held | What closes it |
+|---|---|---|
+| 12 New-item dialog | Its clause *"the generator opens from inside it and returns focus"* describes a dialog that does not exist — `NewItemDialog.svelte:124` calls `generatePassword()` and fills the field in place. A row cannot pass a clause about a surface nobody built, and it cannot be re-worded here: that is the author's call, the same shape as D-64 and D-67 | Decide: build the nested dialog, or re-word the clause to the fill-in-place behaviour. Then walk it |
+| 20 Profile popover | The surface is **not in any binary this machine has**. `target/release/trustvault` was built 2026-08-08 12:11; D-70's profile landed 18:13 the same day, and the roving-tab-stop fix (finding 10) on 2026-08-14 | Rebuild, then walk both rows. Five minutes, not a sitting |
+| 21 Edit-profile dialog | Same build gap, plus it is the row that exercises `Dialog.svelte`'s `isConnected` guard on the path where the opener is **gone** by the time the dialog closes — the one thing here no other row covers | As above |
+
+If the walk ran against a binary built somewhere other than `target/release/`, rows 20 and 21 tick
+with a note saying where — the check is that the build carried the surface, not where it sat.
+
 ## Result
 
 | | |
 |---|---|
 | S-08 target | 100 % of surfaces operable with no pointer |
 | Global rules | **7 of 7**. Six by machine on every build — `npm run a11y`, **120 surface-audits, no findings** on 2026-08-14 — three audits over twenty scenarios in both themes. `taborder` joined `focus` and `contrast` that day and returned finding 10 on its first sweep; the number above is the sweep after it was fixed. The seventh rule is the manual pass below |
-| Surfaces | **3 passed of 22** — rows 7, 8, 9. Row 6 passed and was **re-opened** by D-67, which changed the surface under it. Walked and failed: row 3 (finding 4) and row 11 in part (finding 5, not a keyboard defect). Row 8a is not walked and is easy to miss: it needs an item carrying a one-time code on screen |
-| Date | 2026-08-07 (global rules), extended 2026-08-14 (tab order, and it is in CI); manual pass opened 2026-08-08, not complete |
+| Surfaces | **19 passed of 22**, on the author's walk of 2026-08-14 — including the three re-walks D-66, D-67 and D-68/D-69 had re-opened, and no finding returned. **Three held**: row 12 (a clause describing a dialog that does not exist — the author's wording call), rows 20 and 21 (the surface postdates every binary on this machine). S-08 is **not met** until those three are closed; the target is 100 % and there is no partial credit in it |
+| Date | 2026-08-07 (global rules), extended 2026-08-14 (tab order, and it is in CI); manual pass opened 2026-08-08, walked 2026-08-14, **three rows outstanding** |
 
 **The total is 22 boxes**, and the number above is corrected rather than carried: the rows are
 numbered 1–21, row 8a is a box alongside row 8, so the count is 21 + 1. Every "0 of 19" written

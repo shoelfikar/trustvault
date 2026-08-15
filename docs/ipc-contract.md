@@ -872,7 +872,7 @@ the live service from this machine, `Add-Padding: true`, prefix `21BD1`:
 | Padded response | **80,497 bytes**, 2,049 rows, **125** of them zero-count decoys |
 | Same prefix unpadded | **75,622 bytes**, 1,924 rows — the real suffixes are identical in both |
 | Cost of padding | **+6.4 % of bytes.** R-25 is free: there is no size trade to argue about |
-| Decoy count | **not fixed** — 110 on 2026-08-15 at the entry check, 125 hours later, same prefix |
+| Decoy count | **not fixed** — **110, then 125, then 156** for the same prefix inside 2026-08-15, the third taken while re-measuring for D-77. The 1,924 real suffixes are byte-identical in all three |
 | 48 cold prefixes, one connection reused | 25.6 s — **1.87 req/s** |
 | 48 cold prefixes, 8 concurrent | 19.0 s — **2.5 req/s** |
 
@@ -890,9 +890,23 @@ Two consequences the code must carry regardless of how the criterion is re-worde
   for the first. The second has no command yet, deliberately: a cancel is a decision about what a
   half-finished check leaves behind, and it follows the S-07 answer rather than preceding it.
 
-**S-07 is not measurable as written**, and that is raised in `trustvault-state.md`'s open questions
-with a proposal, not edited here. A criterion re-worded by the author of the code it measures is not
-a criterion — the same reason D-64, D-67 and D-73 were the author's calls.
+**S-07 was not measurable as written**, and it was raised in `trustvault-state.md`'s open questions
+with a proposal rather than edited here — a criterion re-worded by the author of the code it measures
+is not a criterion, the same reason D-64, D-67 and D-73 were the author's calls. **Answered the same
+day as D-77**: the local half is **S-07a**, a wall-clock budget with the network untouched whose
+number is blank until the first `cargo bench` sets it, and the network half is **S-07b**, stated as
+the two consequences above rather than as a clock. Both consequences stand exactly as written; what
+changed is that they are now the criterion instead of a note beneath one.
+
+#### One parsing detail, because it is cheap here and expensive in `hibp.rs`
+
+The range response is **CRLF-terminated, and its final line carries no terminator**. Splitting on
+`\n` leaves a trailing `\r` on every row: the suffix compare still succeeds — it is the part before
+the colon — and the **count parse is what fails**, on all 2 000 rows, which reads as "no breach
+found" rather than as an error. A padded response is `SUFFIX:COUNT` per row with the decoys carrying
+`:0`, and the decoys are indistinguishable from real rows except by that count, so a zero-count row
+is dropped rather than reported as a breach with zero occurrences. Found 2026-08-15 while
+re-measuring the service for D-77, before `hibp.rs` existed.
 
 ## 7. Sanctioned commands
 

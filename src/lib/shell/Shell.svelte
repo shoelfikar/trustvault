@@ -34,9 +34,11 @@
     listItems,
     lock,
     setSettings,
+    watchtowerScan,
     type ItemSummary,
     type Settings,
     type VaultStatus,
+    type WatchtowerReport,
   } from '../ipc';
   import { initialsOf } from './profile';
   import { isFullWidth, matches, viewTitle, type View } from './views';
@@ -161,6 +163,69 @@
       .then((loaded) => (items = loaded))
       .catch((thrown) => (error = asIpcError(thrown).message));
   });
+
+  /* ---- Watchtower — §6.9, R-23, R-24 --------------------------------------- */
+
+  /** The last scan's report. `null` until one has run in this session. */
+  let report = $state<WatchtowerReport | null>(null);
+  let scanning = $state(false);
+  let scanError = $state('');
+  /**
+   * The `mutations` generation `report` was taken at, or `-1` for "no scan yet".
+   *
+   * This is what makes the scan run **once** rather than on every visit to the screen. The scan
+   * is not free — it re-scores every password (S-07a) and **saves the vault**, because the
+   * statuses it writes are a cache the item list draws from — so navigating away and back must
+   * not re-encrypt the file. Bumping `mutations` is what invalidates it, which means an added,
+   * edited or deleted item makes the next visit re-scan: exactly the cases where a finding could
+   * have appeared or been fixed.
+   */
+  let scannedAt = $state(-1);
+
+  /**
+   * Scan when the screen is opened and the held report is older than the last mutation.
+   *
+   * **The generation is marked as attempted before the call, not after it**, and that ordering is
+   * the whole of this effect's correctness. Marking it on success only would leave a *failed*
+   * scan eligible to run again the instant `scanning` flips back — a retry loop against the host
+   * at whatever rate the failure returns at, on a screen the user is only reading. Attempted-once
+   * is the rule; the way back from an error is the button in the error state, which is a person
+   * asking rather than a loop.
+   *
+   * The same assignment is the termination proof: the effect reads `scannedAt`, so the write
+   * re-triggers it, and the re-run returns on the first line.
+   */
+  $effect(() => {
+    const generation = mutations;
+    if (view.kind !== 'watchtower' || scannedAt === generation) return;
+    scannedAt = generation;
+    scanning = true;
+    scanError = '';
+    void watchtowerScan()
+      .then((scanned) => {
+        report = scanned;
+        // The scan wrote a status per item and stamped `last_scan_at`. Neither is in the
+        // response, so both are re-read rather than patched in here — the host is the source,
+        // and the pips in the item list are the visible half of the same write.
+        return listItems().then((loaded) => (items = loaded));
+      })
+      .then(() => onstatuschanged())
+      .catch((thrown) => (scanError = asIpcError(thrown).message))
+      .finally(() => (scanning = false));
+  });
+
+  /**
+   * Scan again because the user asked — the error state's only action.
+   *
+   * There is no *Re-check* control on the screen itself, and that is the prototype's design
+   * rather than an omission: the scan runs on opening the screen and after any change to an item,
+   * which covers every case where a finding could appear or be fixed. This exists for the case
+   * the prototype does not draw at all — a scan the host refused — where the alternative is a
+   * dead end until the vault is locked and reopened.
+   */
+  function rescanWatchtower() {
+    scannedAt = -1;
+  }
 
   const visible = $derived(items.filter((item) => matches(view, item)));
 
@@ -377,7 +442,15 @@
     ></div>
 
     {#if view.kind === 'watchtower'}
-      <Watchtower {items} onopen={openItem} />
+      <Watchtower
+        {items}
+        {report}
+        {scanning}
+        error={scanError}
+        lastScanAt={status.lastScanAt}
+        onopen={openItem}
+        onretry={rescanWatchtower}
+      />
     {:else if view.kind === 'settings'}
       <SettingsPane
         {settings}

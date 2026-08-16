@@ -48,6 +48,9 @@ export const SIZE = { width: 1280, height: 860 };
  * no tags, and every status the list can render.
  */
 
+/** The id an item fixture gets, so a report can name one without repeating the shape. */
+const ID = (key) => `00000000-0000-4000-8000-${key.padEnd(12, '0').slice(0, 12)}`;
+
 const ITEMS = [
   item('github', 'login', 'GitHub', ['work', 'dev'], 'strong', true),
   item('aws', 'api_key', 'AWS Production Access Key', ['work', 'infra'], 'weak', false),
@@ -60,7 +63,7 @@ const ITEMS = [
 
 function item(id, kind, title, tags, status, favourite) {
   return {
-    id: `00000000-0000-4000-8000-${id.padEnd(12, '0').slice(0, 12)}`,
+    id: ID(id),
     kind,
     title,
     tags,
@@ -70,6 +73,68 @@ function item(id, kind, title, tags, status, favourite) {
     updated_at: 1785600000000,
   };
 }
+
+/**
+ * What `watchtower_scan` answers with — §6.9, and it must agree with `ITEMS` above.
+ *
+ * The two halves of the Watchtower screen read from different places (the groups from this report,
+ * *Safe* from each item's cached `status`), so a report that disagreed with the statuses would
+ * photograph a screen the product cannot produce. Every finding here names an item whose status is
+ * the verdict `worst()` would have cached for it.
+ *
+ * Three things it is built to exercise, none of which happen by accident:
+ *
+ * * **`bca` is in two groups.** It carries a `breached` finding *and* a `reused` one, which is the
+ *   design's central asymmetry (§6.9): the report keeps both, and the item's single status pip is
+ *   the louder of the two. A fixture with one verdict per item would have hidden that.
+ * * **The reuse group has two members.** It has to: `shared_with` is rendered as *"Same as …"*, so
+ *   a group of one would draw a sentence with nothing after it.
+ * * **A `breached` finding, which nothing in the product produces yet.** Carried deliberately.
+ *   `watchtower_breach_check` lands later this phase and the group's copy is otherwise on a screen
+ *   no shot can reach — which is precisely how a false sentence sat undisturbed in Trash for a day.
+ */
+const WATCHTOWER_REPORT = {
+  scanned_at: 1785600000000,
+  passwords: 6,
+  distinct: 5,
+  findings: [
+    {
+      item_id: ID('aws'),
+      field_id: 'f2',
+      verdict: 'weak',
+      score: 2,
+      crack_time: '31 minutes',
+      shared_with: [],
+    },
+    {
+      item_id: ID('bca'),
+      field_id: 'f2',
+      verdict: 'breached',
+      score: 3,
+      crack_time: '3 hours',
+      shared_with: [],
+    },
+    {
+      item_id: ID('bca'),
+      field_id: 'f2',
+      verdict: 'reused',
+      score: 3,
+      crack_time: '3 hours',
+      shared_with: [ID('ssh')],
+    },
+    {
+      item_id: ID('ssh'),
+      field_id: 'f2',
+      verdict: 'reused',
+      score: 3,
+      crack_time: '3 hours',
+      shared_with: [ID('bca')],
+    },
+  ],
+};
+
+/** A scanned vault with nothing wrong in it — the reassurance state, R-19. */
+const CLEAN_REPORT = { scanned_at: 1785600000000, passwords: 2, distinct: 2, findings: [] };
 
 const FIELDS = [
   { id: 'f1', label: 'Username', kind: 'username', secret: false, value: 'octocat', mask: null },
@@ -187,6 +252,28 @@ export const SCENARIOS = {
   shell: { status: UNLOCKED },
   settings: { status: UNLOCKED, drive: `click('[title="Settings"]')` },
   watchtower: { status: UNLOCKED, drive: `clickText('button', 'Watchtower')` },
+  // The third state of the same screen, and the only one the prototype does not draw at all: a
+  // scan the host refused. It matters more than it looks — empty groups and a refused scan are
+  // indistinguishable to a reader unless the screen says which it is, which is R-25's "not
+  // checked, never safe" applied to the local half. `fail` makes the stub reject that one command.
+  watchtowerError: {
+    status: { ...UNLOCKED, last_scan_at: null },
+    fail: 'watchtower_scan',
+    drive: `clickText('button', 'Watchtower')`,
+  },
+  // The other half of the same screen, and the one nobody would otherwise look at again: a vault
+  // that was scanned and came back clean. Its copy is reassurance rather than a blank pane (R-19),
+  // and it is a separate scenario because "no findings" is a different fixture — a clean report and
+  // items whose status is `strong` — rather than a different rendering of the same one.
+  watchtowerClean: {
+    status: UNLOCKED,
+    items: [
+      item('github', 'login', 'GitHub', ['work', 'dev'], 'strong', true),
+      item('stripe', 'login', 'Stripe', ['work'], 'strong', false),
+    ],
+    report: CLEAN_REPORT,
+    drive: `clickText('button', 'Watchtower')`,
+  },
   palette: { status: UNLOCKED, drive: `key('k', { ctrlKey: true })` },
   // The palette with a query that matches nothing. Its own empty state (R-19) is otherwise
   // unreachable in a shot, and it is the one place in the app where "no results" and "the
@@ -316,7 +403,13 @@ function harness(scenario, theme, audit) {
   // A scenario may replace the item fixture wholesale — that is how an empty vault is shot,
   // and it is a substitution rather than a flag because "the list is empty" is a different
   // fixture, not a different rendering of the same one.
-  const { status, drive, items = ITEMS } = SCENARIOS[scenario];
+  const {
+    status,
+    drive,
+    items = ITEMS,
+    report = WATCHTOWER_REPORT,
+    fail = '',
+  } = SCENARIOS[scenario];
   return `
 <script>
 window.__SHOT__ = ${JSON.stringify({ scenario, theme })};
@@ -325,9 +418,14 @@ const ITEMS = ${JSON.stringify(items)};
 const FIELDS = ${JSON.stringify(FIELDS)};
 const SETTINGS = ${JSON.stringify(SETTINGS)};
 const IMPORT_REPORT = ${JSON.stringify(IMPORT_REPORT)};
+const WATCHTOWER_REPORT = ${JSON.stringify(report)};
+const FAIL = ${JSON.stringify(fail)};
 
 let listener = 0;
 function respond(cmd, args) {
+  // One command made to fail, as an IpcError -- the shape asIpcError() reads. Thrown rather than
+  // returned, because a refusal that came back as a value would exercise the success path.
+  if (cmd === FAIL) throw { kind: 'io', message: 'The vault file could not be written.' };
   switch (cmd) {
     case 'vault_status': return STATUS;
     case 'build_info': return { version: '0.0.0', format_version: 1, extension: 'tvault' };
@@ -390,6 +488,10 @@ function respond(cmd, args) {
     // nobody edited in between -- and the difference between them (commit re-reads, so it can
     // differ) is a race no screenshot can hold still anyway.
     case 'import_preview': case 'import_commit': return IMPORT_REPORT;
+    // §6.9. The real one re-scores every password and saves the vault; this one is a fixture that
+    // agrees with ITEMS, because the screen reads its groups from here and its Safe count from the
+    // statuses over there.
+    case 'watchtower_scan': return WATCHTOWER_REPORT;
     default:
       // Tauri's event plugin rides the same channel. Anything else is a command the harness
       // has not been taught, and it is loud rather than silently undefined.

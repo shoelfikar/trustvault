@@ -142,7 +142,7 @@ same keystrokes and would swallow the first letter of every shortcut a later pha
 | 14 | Generator dialog | Length slider on ←/→ (and Home/End), the four set toggles on Space, Regenerate and Copy reachable — R-15 | [x] |
 | 15 | Vault switcher | ↑/↓ between vaults **including the open one**, Enter switches, Tab within a row reaches **Leave**, Esc closes — R-22 | [x] |
 | 16 | Settings | Every control reachable in visual order; the segmented controls on ←/→; **UI scale changes do not move focus**; the **Start at login** toggle takes Space, and when the platform refuses the write the toggle returns to its old position with the reason announced — R-21 | [x] |
-| 17 | Watchtower | The findings list is a list: ↑/↓ and Enter to the offending item | [x] |
+| 17 | Watchtower | The findings list is a list: ↑/↓ and Enter to the offending item | [ ] |
 | 18 | Edit-item dialog | Every field row Tab-reachable in display order; **Replace** on a secret row reachable without hover, and Tab from it lands in the input it just opened; Remove and Add field reachable; the **New tag** field takes Enter as "add this tag" — R-17 | [x] |
 | 19 | Import dialog | Esc closes from the intro **and** from the report; Choose file… reachable and the **native picker takes over from there**, so the keyboard path leaves the app and must come back to a focused dialog; Import stays disabled until a preview is on screen; the report's refusal list scrolls with the keyboard alone, not only with a wheel — R-29 | [x] |
 | 20 | Profile popover | Enter or Space on the footer row opens it and focus lands on the **first row, not the header**; ↑/↓ wrap between the four rows; Esc closes and focus returns to the footer row that opened it; the ⌘, printed beside *Settings* actually reaches Settings — D-70 | [x] |
@@ -172,6 +172,14 @@ according to the platform, and what has to be checked here is the return — a d
 with focus on `body` leaves the user who just chose a file with nothing selected and no visible
 reason. It is also the first row that cannot be checked in the screenshot harness at all, because
 the harness has no file chooser to open.
+
+**Row 17 is un-ticked as of 2026-08-16, and it is not a regression.** It passed on 2026-08-14
+against a screen drawn from item statuses, and the screen underneath it now reads a real
+`watchtower_scan` report: the rows are `<ul>/<li>` instead of bare buttons, they carry different
+text, and their ↑/↓ handler **did not exist before today** — nothing on that surface answered an
+arrow key, so what the tick recorded was Tab and Enter working. Same precedent as D-67: a tick
+against markup that no longer exists is worse than an empty box. The clause is unchanged, the
+implementation is now the one `ItemList.svelte` uses, and the walk needs a person and a build.
 
 Row 18's "Tab from Replace lands in the input it just opened" is the finding waiting to happen:
 pressing Replace swaps a disabled input for an editable one in the same position, and the browser
@@ -486,8 +494,8 @@ with a note saying where — the check is that the build carried the surface, no
 | | |
 |---|---|
 | S-08 target | 100 % of surfaces operable with no pointer |
-| Global rules | **7 of 7**. Six by machine on every build — `npm run a11y`, **120 surface-audits, no findings** on 2026-08-14 — three audits over twenty scenarios in both themes. `taborder` joined `focus` and `contrast` that day and returned finding 10 on its first sweep; the number above is the sweep after it was fixed. The seventh rule is the manual pass below |
-| Surfaces | **22 of 22 — S-08 is met.** Nineteen on the author's walk of 2026-08-14, including the three re-walks D-66, D-67 and D-68/D-69 had re-opened; the last three on 2026-08-15 — row 12 re-worded (**D-73**), rows 20 and 21 walked on a rebuilt binary carrying D-70's profile. No finding came out of either sitting |
+| Global rules | **7 of 7**. Six by machine on every build — `npm run a11y`, **132 surface-audits, no findings** on 2026-08-16 (120 on 2026-08-14, and the twelve new ones are the two Watchtower scenarios below) — three audits over twenty scenarios in both themes — **twenty-two since 2026-08-16**: `watchtowerClean` is the scanned-and-clean vault whose reassurance copy no other scenario reaches, and `watchtowerError` is a scan the host refused, whose *Try again* is an empty state's action and therefore row 9's rule again. `taborder` joined `focus` and `contrast` that day and returned finding 10 on its first sweep; the number above is the sweep after it was fixed. The seventh rule is the manual pass below |
+| Surfaces | **21 of 22 — S-08 was met on 2026-08-15 and row 17 re-opened on 2026-08-16**, when the Watchtower screen started drawing real findings. Nineteen on the author's walk of 2026-08-14, including the three re-walks D-66, D-67 and D-68/D-69 had re-opened; the last three on 2026-08-15 — row 12 re-worded (**D-73**), rows 20 and 21 walked on a rebuilt binary carrying D-70's profile. No finding came out of either sitting. The re-open was **predicted at Phase 4's entry check** rather than discovered here, which is the only reason it costs a walk instead of an argument |
 | Date | 2026-08-07 (global rules), extended 2026-08-14 (tab order, and it is in CI); manual pass opened 2026-08-08, walked 2026-08-14, **completed 2026-08-15** |
 
 **The total is 22 boxes**, and the number above is corrected rather than carried: the rows are

@@ -141,6 +141,115 @@ probe() {
   say "Wrote $directory/report.md"
 }
 
+# ── the sampler ────────────────────────────────────────────────────────────────────────────────
+#
+# Every 200 ms, write one heartbeat and one line per socket held by any process in the tree
+# rooted at `$1`. Re-deriving the tree each pass rather than once is the point: WebKitGTK spawns
+# its network process after the window opens, and a tree computed at launch would not contain the
+# process most likely to make a request (D-88).
+#
+# A function rather than an inline subshell so that `selftest` can run it against a process it
+# controls. That is not tidiness — the first real use of this harness died here, in a line no
+# test covered, and the report script's own self-test could not have seen it by construction.
+sample_tree() {
+  local root="$1" out="$2" tree pattern
+  # `set -euo pipefail` is inherited, and `ss | grep` exits 1 when the tree holds no matching
+  # socket — which is the **expected** state of an `off` run. Left inherited, the sampler died on
+  # its first pass of every run and attribution was empty every time. The vacuity guard is the
+  # only reason that was read as a failure rather than as a clean result.
+  set +e +o pipefail
+  while kill -0 "$root" 2>/dev/null; do
+    tree=$(
+      ps -eo pid=,ppid= | awk -v root="$root" '
+        { parent[$1] = $2 }
+        END {
+          for (pid in parent) {
+            p = pid
+            for (hops = 0; hops < 64 && p != "" && p != "1"; hops++) {
+              if (p == root) { print pid; break }
+              p = parent[p]
+            }
+          }
+          print root
+        }'
+    )
+    tree=$(echo "$tree" | sort -u)
+    pattern=$(echo "$tree" | sed 's/^/pid=/' | paste -sd'|')
+    # A heartbeat every pass, whether or not the tree holds a socket. Without it an app that
+    # never opened one is indistinguishable from an app that never launched, and the `off` run —
+    # whose whole claim is that no socket was opened — would pass vacuously on a crash.
+    printf '%s\t# tree %s\n' "$(date +%s.%N)" "$(echo "$tree" | wc -l)" >> "$out"
+    if [[ -n "$pattern" ]]; then
+      ss -tunapH 2>/dev/null | grep -E "$pattern" | while IFS= read -r line; do
+        printf '%s\t%s\n' "$(date +%s.%N)" "$line"
+      done >> "$out"
+    fi
+    sleep "$sample_interval"
+  done
+}
+
+# ── the sampler's own test ─────────────────────────────────────────────────────────────────────
+#
+# Two directions, both against a process this function starts and owns. Needs no root, no build
+# and no network, so it runs wherever the report's self-test runs.
+#
+# It exists because of what happened on the first real run: the sampler stopped after one pass in
+# all three captures, attribution was empty in all three, and the piece that caught it was the
+# vacuity guard rather than anything testing the sampler. The first case below is the exact
+# failure — a live process holding **no** socket, which is what an `off` run is.
+selftest_sampler() {
+  local workspace out failures=0
+  workspace=$(mktemp -d)
+  trap 'rm -rf "$workspace"' RETURN
+
+  check() {
+    if [[ "$1" == pass ]]; then printf 'PASS  %s\n' "$2"; else printf 'FAIL  %s\n' "$2"; failures=$((failures + 1)); fi
+  }
+
+  # A process with no sockets at all — the `off` run's expected state, and the case that killed
+  # the sampler on every real run so far.
+  out="$workspace/quiet.txt"
+  sleep 3 &
+  local quiet=$!
+  sample_tree "$quiet" "$out" &
+  local sampler=$!
+  sleep 1.2
+  kill "$sampler" "$quiet" 2>/dev/null || true
+  wait "$sampler" 2>/dev/null || true
+  local beats
+  beats=$(grep -c '# tree' "$out" 2>/dev/null || echo 0)
+  [[ "$beats" -ge 3 ]] && check pass "the sampler survives a process holding no socket ($beats heartbeats)" \
+    || check fail "the sampler stopped early on a process holding no socket ($beats heartbeats, expected >= 3)"
+
+  # And a process that does hold one: the row has to appear, or attribution would be silently
+  # empty in the `on` run for the opposite reason.
+  out="$workspace/listening.txt"
+  python3 -c "
+import socket, time
+s = socket.socket(); s.bind(('127.0.0.1', 0)); s.listen()
+time.sleep(3)
+" &
+  local listener=$!
+  sleep 0.4
+  sample_tree "$listener" "$out" &
+  sampler=$!
+  sleep 1.0
+  kill "$sampler" "$listener" 2>/dev/null || true
+  wait "$sampler" 2>/dev/null || true
+  if grep -q '127.0.0.1:' "$out" 2>/dev/null; then
+    check pass "the sampler records a socket the tree actually holds"
+  else
+    check fail "the sampler missed a listening socket in its own tree"
+  fi
+
+  printf '\n'
+  if [[ $failures -gt 0 ]]; then
+    echo "$failures sampler self-test(s) failed"
+    return 1
+  fi
+  echo "capture.sh's sampler survives both the quiet case and the busy one"
+}
+
 # ── the fixture vault ──────────────────────────────────────────────────────────────────────────
 build_fixture() {
   if [[ -f "$vault" && -f "$manifest" ]]; then
@@ -233,39 +342,7 @@ capture() {
   local app=$!
   note "pid $app — quit the app from its own window when you are done"
 
-  # Sample the sockets of the whole process tree. Re-derived every pass rather than once: the
-  # network process is spawned after the window opens, and a tree computed at launch would not
-  # contain the process most likely to make a request.
-  (
-    while kill -0 "$app" 2>/dev/null; do
-      tree=$(
-        ps -eo pid=,ppid= | awk -v root="$app" '
-          { parent[$1] = $2 }
-          END {
-            for (pid in parent) {
-              p = pid
-              for (hops = 0; hops < 64 && p != "" && p != "1"; hops++) {
-                if (p == root) { print pid; break }
-                p = parent[p]
-              }
-            }
-            print root
-          }'
-      )
-      pattern=$(echo "$tree" | sort -u | sed 's/^/pid=/' | paste -sd'|')
-      # A heartbeat every pass, whether or not the tree holds a socket. Without it an app that
-      # never opened one is indistinguishable from an app that never launched, and the `off` run
-      # — whose whole claim is that no socket was opened — would pass vacuously on a crash. The
-      # report counts these and refuses a run with too few.
-      printf '%s\t# tree %s\n' "$(date +%s.%N)" "$(echo "$tree" | sort -u | wc -l)" >> "$directory/sockets.txt"
-      if [[ -n "$pattern" ]]; then
-        ss -tunapH 2>/dev/null | grep -E "$pattern" | while IFS= read -r line; do
-          printf '%s\t%s\n' "$(date +%s.%N)" "$line"
-        done >> "$directory/sockets.txt"
-      fi
-      sleep "$sample_interval"
-    done
-  ) &
+  sample_tree "$app" "$directory/sockets.txt" &
   local sampler=$!
 
   if [[ "$setting" == off ]]; then
@@ -324,7 +401,12 @@ case "$mode" in
   # a capture by hand, analyses it, and then breaks it on purpose: a planted password, a full
   # SHA-1 in hex and in raw binary, a ClientHello naming somewhere else. Needs no root, no build
   # and no network, which is what makes it runnable on every machine rather than on this one.
-  selftest) need python3 "the report"; python3 scripts/capture-report.py --self-test ;;
+  selftest)
+    need python3 "the report"
+    need ss "socket attribution"
+    python3 scripts/capture-report.py --self-test
+    selftest_sampler
+    ;;
   probe) probe ;;
   off) capture off ;;
   on) capture on ;;

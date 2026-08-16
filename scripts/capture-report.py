@@ -542,13 +542,22 @@ def analyse(
                 asked[name] = asked.get(name, 0) + 1
             hibp_addresses |= dns_addresses(packet.payload, HIBP_HOST)
 
+    # Every ClientHello in the capture, not only the attributed ones. Attribution is sampled and
+    # can fail outright — it did, on this harness's first real run, and the destination check then
+    # reported "0 ClientHello(s) observed" on a capture holding fifty DNS messages for R-25's own
+    # host. A check that goes quiet when its input is missing is worse than one that fails.
     sni: dict[tuple[str, int], str] = {}
-    for packet in egress:
+    all_sni: dict[tuple[str, int], str] = {}
+    for packet in packets:
         if packet.proto != "tcp" or not packet.payload:
             continue
         name = client_hello_sni(packet.payload)
-        if name:
-            sni[(packet.dst, packet.dport)] = name
+        if not name:
+            continue
+        peer = (packet.dst, packet.dport)
+        all_sni[peer] = name
+        if (packet.src, packet.sport) in sockets.endpoints:
+            sni[peer] = name
 
     # ---- conversations -----------------------------------------------------------------
     @dataclass
@@ -584,9 +593,27 @@ def analyse(
         haystack += packet.raw
     lookup = needles(manifest)
     hits: list[tuple[str, int, str]] = []
+    # Spans where R-25's own hostname sits, so a needle found *inside* it is not a leak. The
+    # fixture's loudest password is `password`, and `pwnedpasswords` contains it — so the first
+    # real run reported twenty hits, all of them the domain name the request is permitted to
+    # send. Masking rather than dropping the needle: `password` is exactly the value most worth
+    # searching for everywhere else in the capture. `pwnedpasswords` alone is the mask, because
+    # DNS puts it on the wire as a length-prefixed label with no dots around it.
+    masked = [
+        (match.start(), match.end())
+        for match in re.finditer(re.escape(b"pwnedpasswords"), bytes(haystack))
+    ]
+
+    def inside_hostname(start: int, end: int) -> bool:
+        return any(low <= start and end <= high for low, high in masked)
+
+    explained = 0
     if lookup:
         pattern = re.compile(b"|".join(sorted((re.escape(n) for n in lookup), key=len, reverse=True)))
         for match in pattern.finditer(bytes(haystack)):
+            if inside_hostname(match.start(), match.end()):
+                explained += 1
+                continue
             description = lookup.get(match.group(0), "unknown needle")
             index = 0
             for offset, packet_index in boundaries:
@@ -606,7 +633,13 @@ def analyse(
             "No password, full hash, item title or identifier anywhere in the capture — gate line 2",
             not hits,
             f"{len(lookup)} byte strings searched across {len(packets)} packets ({len(haystack)} bytes); "
-            + ("no match" if not hits else f"**{len(hits)} match(es)** — listed below"),
+            + ("no match" if not hits else f"**{len(hits)} match(es)** — listed below")
+            + (
+                f"; {explained} occurrence(s) inside `{HIBP_HOST}` itself, which is the one string "
+                "the request is permitted to carry"
+                if explained
+                else ""
+            ),
         )
     )
     unexpected = {peer: name for peer, name in sni.items() if name != HIBP_HOST}
@@ -616,10 +649,17 @@ def analyse(
             Check(
                 f"Every TLS connection the app opened named {HIBP_HOST} — gate line 2",
                 not unexpected and bool(sni),
-                f"{len(sni)} ClientHello(s) observed"
+                f"{len(sni)} ClientHello(s) attributed to the app"
                 + (f", all to {HIBP_HOST}" if sni and not unexpected else "")
                 + (f"; **other names: {sorted(set(unexpected.values()))}**" if unexpected else "")
-                + (f"; {len(unnamed)} connection(s) on 443 with no ClientHello captured" if unnamed else ""),
+                + (f"; {len(unnamed)} connection(s) on 443 with no ClientHello captured" if unnamed else "")
+                + (
+                    f". **Attribution produced nothing**, so this fails on missing evidence rather "
+                    f"than on the app's behaviour — the capture itself holds {len(all_sni)} "
+                    f"ClientHello(s), listed below"
+                    if not sni
+                    else ""
+                ),
             )
         )
         checks.append(
@@ -718,6 +758,23 @@ def analyse(
             )
     else:
         report.append("Nothing. No packet outside loopback was attributed to the app's process tree.")
+    report.append("")
+
+    report.append("## Every ClientHello in the capture, attributed or not\n")
+    if all_sni:
+        report.append("| Peer | Server name | The app's? |")
+        report.append("|---|---|---|")
+        for peer, name in sorted(all_sni.items(), key=lambda item: item[1]):
+            report.append(f"| `{peer[0]}:{peer[1]}` | {name} | {'yes' if peer in sni else 'no'} |")
+        report.append("")
+        report.append(
+            "Listed whole because attribution can fail while the capture is fine. A row naming "
+            f"`{HIBP_HOST}` with **no** in the last column means somebody on this machine reached "
+            "R-25's host and the sampler did not see whose socket it was — read it before "
+            "concluding anything about the app."
+        )
+    else:
+        report.append("No TLS ClientHello anywhere in the capture.")
     report.append("")
 
     report.append("## Names asked for, by every process on this machine\n")

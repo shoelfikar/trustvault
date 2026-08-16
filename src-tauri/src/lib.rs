@@ -14,6 +14,10 @@ pub mod clipboard;
 pub mod commands;
 pub mod dto;
 pub mod error;
+// The only socket in the application — R-25, D-83. Registered as a module before any command
+// calls it, which is where the N-02 boundary is visible: `trustvault-core` is a dependency of
+// this crate and cannot see this file, and this file cannot see a vault.
+pub mod hibp;
 pub mod state;
 
 use tauri::Manager as _;

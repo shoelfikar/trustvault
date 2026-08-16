@@ -75,7 +75,8 @@ pub use secret::{SecretBytes, SecretString};
 pub use totp::{TotpAlgorithm, TotpSpec};
 pub use vault::Vault;
 pub use watchtower::{
-    Finding, Report, Strength, Verdict, WEAK_MAX_SCORE, scan, scan_and_record, score,
+    BreachQuery, Finding, Report, Strength, Verdict, WEAK_MAX_SCORE, breach_queries, scan,
+    scan_and_record, score,
 };
 
 use thiserror::Error;

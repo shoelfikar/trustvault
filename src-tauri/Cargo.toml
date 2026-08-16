@@ -44,6 +44,30 @@ arboard = "3"
 # this crate through it: `score_password` is a pass-through, and Watchtower needs the scoring
 # where the passwords already are. Nothing about the webview changed -- the dictionaries were
 # never shipped to it and still are not.
+#
+# The only HTTP client in the application, and the only thing in it that opens a socket -- D-83,
+# after a survey rather than a `cargo add`. It is confined to `src-tauri/src/hibp.rs`; the N-02
+# job in ci.yml already names `ureq` among the crates `trustvault-core` may not reach.
+#
+# `default-features = false` drops nothing we want and one thing we do not: ureq's default set
+# is `["rustls", "gzip"]`, so this line is the default written out, and writing it out is what
+# makes a later feature arrive as an edit rather than as an upgrade.
+#
+# What the survey measured, because "reqwest is already in the lockfile" is true and irrelevant:
+# `tauri` declares reqwest only under `cfg(any(target_os = "android", all(target_vendor =
+# "apple", not(target_os = "macos"))))`, so on the three desktop triples the baseline has no
+# HTTP client at all and `cargo tree --target all` says otherwise. Crates added to the real
+# per-target trees: ureq +12/+12/+12 (linux/windows/macos, an identical set on all three),
+# reqwest+rustls +30/+31/+35. `gzip` costs **zero** additional crates -- flate2 is already
+# under tauri -- and halves the transfer (80 MB -> ~45 MB for the reference vault) without
+# measurably narrowing what `Add-Padding` masks: across five prefixes the padded size spread is
+# 1.30x uncompressed and 1.31x gzipped.
+#
+# The configuration is where the risk actually sits, not the choice. ureq's `Config::default`
+# calls `Proxy::try_from_env()`, defaults `https_only` to false, and follows up to 10 redirects.
+# All three are overridden in `hibp.rs` and each override is a test there: a redirect followed
+# off api.pwnedpasswords.com sends the prefix somewhere R-25's packet capture would not look.
+ureq = { version = "3.4", default-features = false, features = ["rustls", "gzip"] }
 
 [features]
 # S-04 is a number about the application that ships, and the only way to read it is a devtools

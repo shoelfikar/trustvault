@@ -26,9 +26,11 @@
 
 use std::collections::HashMap;
 
+use data_encoding::HEXUPPER;
 use serde::{Deserialize, Serialize};
+use sha1::Sha1;
 use sha2::{Digest, Sha256};
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::model::{FieldId, FieldKind, Item, ItemId, ItemStatus, now_ms};
 use crate::vault::Vault;
@@ -415,6 +417,143 @@ pub fn scan_and_record(vault: &mut Vault) -> Report {
     report
 }
 
+/// The breach check's grouping key: SHA-1 of a password, and **it never leaves this module**.
+///
+/// [`GroupKey`]'s twin, and a separate type rather than a parameter because the two hashes are
+/// chosen by different people for different reasons. SHA-256 groups for reuse because this
+/// project picked it; SHA-1 groups for the breach check because HIBP's range API is indexed by
+/// it. Collapsing them into one would mean the day HIBP changes its index is the day reuse
+/// detection changes its hash.
+#[derive(PartialEq, Eq, Hash, Zeroize, ZeroizeOnDrop)]
+struct Sha1Key([u8; 20]);
+
+impl Sha1Key {
+    fn of(password: &str) -> Self {
+        let mut hasher = Sha1::new();
+        hasher.update(password.as_bytes());
+        Self(hasher.finalize().into())
+    }
+}
+
+/// One range request's worth of work: one **distinct** password value, hashed — R-25, S-07b.
+///
+/// # Why this is built here and not in the host
+///
+/// D-78's argument, one command further on. The breach check needs a SHA-1 of every password,
+/// and computing it in `src-tauri` would mean lifting a thousand plaintext values across a crate
+/// boundary to hash them and dropping them again. The core already holds them, and `sha1` is
+/// already in its tree for TOTP. What crosses the boundary instead is this: a prefix, a hidden
+/// suffix, and the ids that share the value.
+///
+/// # The suffix cannot be read
+///
+/// [`BreachQuery::prefix`] is public because it is the one thing R-25 permits to leave the
+/// machine. The other 35 characters have no accessor at all — the only thing a caller can do
+/// with them is ask [`BreachQuery::matches`] whether a suffix from the response is this one. A
+/// SHA-1 of a short password is a secret by this project's own rule, and `hibp.rs` cannot log,
+/// serialize, or accidentally return a value it has no way to obtain. The same shape as
+/// [`GroupKey`], one crate out.
+pub struct BreachQuery {
+    /// The 5 uppercase hex characters that leave the machine — R-25.
+    prefix: String,
+    /// The remaining 35, uppercase. Never readable; see the type's documentation.
+    suffix: Zeroizing<String>,
+    /// Every password field carrying this value — one request answers for all of them.
+    members: Vec<(ItemId, FieldId)>,
+}
+
+impl BreachQuery {
+    /// The 5-character prefix, and **the only part of the hash R-25 lets off the machine**.
+    #[must_use]
+    pub fn prefix(&self) -> &str {
+        &self.prefix
+    }
+
+    /// The password fields this one request answers for — never fewer than one.
+    ///
+    /// A vault where twelve items share a password costs one request and reports twelve fields,
+    /// which is S-07b's "one range request per distinct value, never per item" as a return type
+    /// rather than as a promise.
+    #[must_use]
+    pub fn members(&self) -> &[(ItemId, FieldId)] {
+        &self.members
+    }
+
+    /// Whether a suffix from a range response is this query's.
+    ///
+    /// Case-insensitive because the comparison is against somebody else's output: HIBP returns
+    /// uppercase today and a client that breaks when that changes fails in the direction of
+    /// reporting every password unbreached, which is R-25's forbidden answer.
+    ///
+    /// Not constant-time, deliberately. The right-hand side is a public range response and the
+    /// left is in this process's memory already; a constant-time compare here would imply a
+    /// timing attacker who, standing where they would have to stand, has the whole vault.
+    #[must_use]
+    pub fn matches(&self, suffix: &str) -> bool {
+        self.suffix.eq_ignore_ascii_case(suffix)
+    }
+}
+
+/// Every distinct password in the vault, hashed and grouped for the breach check — R-25, S-07b.
+///
+/// The hash is **SHA-1**, which is HIBP's choice rather than this project's: the range API is
+/// indexed by it. Nothing in the vault format uses SHA-1 for anything (N-01's key material is
+/// Argon2id and XChaCha20-Poly1305), and its collision weakness is irrelevant to a lookup where
+/// a collision would mean a false *positive* on a password the user is being told to change.
+///
+/// **An empty password field produces no query.** SHA-1 of the empty string is a fixed,
+/// well-known value, so sending its prefix would be sending "somebody here has a blank password
+/// field" — a fact about the vault, on a request that is supposed to carry none. An empty field
+/// has nothing to breach, and it is already reported weak by [`scan`].
+///
+/// The order is deterministic for [`scan`]'s reason: the request log is R-25's evidence, and
+/// evidence that reorders itself between two runs of an unchanged vault cannot be diffed.
+#[must_use]
+pub fn breach_queries(vault: &Vault) -> Vec<BreachQuery> {
+    let mut by_value: HashMap<Sha1Key, Vec<(ItemId, FieldId)>> = HashMap::new();
+
+    for item in vault.items() {
+        for field in &item.fields {
+            if field.kind != FieldKind::Password {
+                continue;
+            }
+            let password = field.value.expose();
+            if password.is_empty() {
+                continue;
+            }
+            // The digest is the key rather than the password, which is `GroupKey`'s reasoning
+            // and the same trade: a map keyed on `String` copies every plaintext into an
+            // allocation nothing wipes, and a fixed-size digest copies nothing.
+            by_value
+                .entry(Sha1Key::of(password))
+                .or_default()
+                .push((item.id, field.id));
+        }
+    }
+
+    let mut queries: Vec<BreachQuery> = by_value
+        .iter()
+        .filter_map(|(digest, members)| {
+            // The hex is produced once per **distinct** value rather than once per field, which
+            // is the same saving as scoring once per group and for the same reason.
+            let hex = Zeroizing::new(HEXUPPER.encode(&digest.0));
+            // A SHA-1 is 40 hex characters and this one was just encoded from 20 bytes, so the
+            // split cannot fail. It is written as a refusal rather than an index anyway: the
+            // core denies `unwrap` and `expect` by lint, and a query built from a truncated
+            // digest would send four characters and match nothing.
+            let (prefix, suffix) = hex.split_at_checked(5)?;
+            Some(BreachQuery {
+                prefix: prefix.to_owned(),
+                suffix: Zeroizing::new(suffix.to_owned()),
+                members: members.clone(),
+            })
+        })
+        .collect();
+
+    queries.sort_by(|a, b| a.members.cmp(&b.members));
+    queries
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -782,5 +921,144 @@ mod tests {
         let one = scan(&vault);
         let two = scan(&vault);
         assert_eq!(one.findings, two.findings, "HashMap order must not show");
+    }
+
+    /// The published SHA-1 of `password`, uppercase, split the way R-25 splits it.
+    ///
+    /// Not computed here on purpose: a test that hashes with the same code it is testing agrees
+    /// with itself. This is the value HIBP's own documentation uses as its worked example, so
+    /// the assertion is against the service's arithmetic rather than against ours.
+    const PASSWORD_SHA1: (&str, &str) = ("5BAA6", "1E4C9B93F3F0682250B6CF8331B7EE68FD8");
+
+    #[test]
+    fn the_prefix_is_five_characters_of_the_sha1_and_the_rest_is_not_readable() {
+        let mut vault = vault();
+        with_password(&mut vault, "Forum", "password");
+
+        let queries = breach_queries(&vault);
+        let query = queries.first().expect("one password, one query");
+        assert_eq!(query.prefix(), PASSWORD_SHA1.0);
+        // The suffix has no accessor, so the only way to assert it is the only way `hibp.rs`
+        // has to use it. That is the point of the type rather than an awkwardness of the test.
+        assert!(query.matches(PASSWORD_SHA1.1));
+        assert!(!query.matches("0000000000000000000000000000000000"));
+    }
+
+    /// R-25's own worked example, and the case where a wire format changes under us.
+    #[test]
+    fn a_suffix_matches_whatever_case_the_service_sends_it_in() {
+        let mut vault = vault();
+        with_password(&mut vault, "Forum", "password");
+
+        let queries = breach_queries(&vault);
+        let query = queries.first().expect("one password, one query");
+        assert!(
+            query.matches(&PASSWORD_SHA1.1.to_lowercase()),
+            "a case change must not read as unbreached"
+        );
+    }
+
+    /// S-07b, as a return type: twelve items sharing a password cost one request.
+    #[test]
+    fn one_query_per_distinct_value_and_never_one_per_item() {
+        let mut vault = vault();
+        for index in 0..12 {
+            with_password(&mut vault, &format!("Item {index}"), "password");
+        }
+        with_password(&mut vault, "Stripe", "qX7#vn2Lp!4dRt");
+
+        let queries = breach_queries(&vault);
+        assert_eq!(queries.len(), 2, "thirteen items, two distinct values");
+        let shared = queries
+            .iter()
+            .find(|query| query.prefix() == PASSWORD_SHA1.0)
+            .expect("the reused value");
+        assert_eq!(shared.members().len(), 12, "one request answers for twelve");
+    }
+
+    /// An item storing one value in two of its own fields is one request, not two.
+    ///
+    /// The counterpart to `scan`'s rule that this is untidy rather than reuse: the *finding* is
+    /// suppressed, and the *request* still must not be made twice.
+    #[test]
+    fn two_fields_of_one_item_holding_the_same_value_cost_one_request() {
+        let mut vault = vault();
+        let id = with_password(&mut vault, "Router", "password");
+        let item = vault.item_mut(id).expect("just added");
+        item.push_field(Field::new("Wi-Fi key", "password", true).with_kind(FieldKind::Password));
+
+        let queries = breach_queries(&vault);
+        assert_eq!(queries.len(), 1);
+        assert_eq!(
+            queries.first().map(|query| query.members().len()),
+            Some(2),
+            "both fields are reported from the one answer"
+        );
+    }
+
+    /// A blank field is a fact about the vault, and R-25 lets no fact about the vault leave.
+    #[test]
+    fn an_empty_password_field_sends_no_prefix() {
+        let mut vault = vault();
+        with_password(&mut vault, "Note", "");
+
+        assert!(
+            breach_queries(&vault).is_empty(),
+            "the SHA-1 of the empty string is a fixed value and sending it says who we are"
+        );
+    }
+
+    /// Every prefix is five hex characters and nothing longer ever reaches the caller.
+    ///
+    /// The blunt reading of R-25: whatever the vault holds, what a caller can obtain from a
+    /// query is five characters of hex and a list of ids. There is no assertion about the
+    /// suffix here because there is no way to write one — see `BreachQuery`.
+    #[test]
+    fn no_query_offers_more_than_five_characters_to_send() {
+        let mut vault = vault();
+        for (title, password) in [
+            ("Forum", "password"),
+            ("Wiki", "Tr0ub4dour&3"),
+            ("Bank", "correct horse battery staple"),
+            ("Router", "\u{1F511} kunci wifi rumah"),
+        ] {
+            with_password(&mut vault, title, password);
+        }
+
+        for query in breach_queries(&vault) {
+            assert_eq!(query.prefix().len(), 5);
+            assert!(
+                query
+                    .prefix()
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'A'..=b'F').contains(&byte)),
+                "uppercase hex, which is what the range endpoint is indexed by"
+            );
+        }
+    }
+
+    /// Two calls over an unchanged vault produce the same request order — R-25's evidence.
+    #[test]
+    fn the_queries_are_ordered_the_same_way_twice() {
+        let mut vault = vault();
+        for index in 0..12 {
+            with_password(
+                &mut vault,
+                &format!("Item {index}"),
+                &format!("pw-{index}-xK9"),
+            );
+        }
+
+        let prefixes = |vault: &Vault| -> Vec<String> {
+            breach_queries(vault)
+                .iter()
+                .map(|query| query.prefix().to_owned())
+                .collect()
+        };
+        assert_eq!(
+            prefixes(&vault),
+            prefixes(&vault),
+            "HashMap order must not reach the request log"
+        );
     }
 }

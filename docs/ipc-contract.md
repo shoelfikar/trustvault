@@ -799,6 +799,19 @@ that write is a decision rather than an oversight — **D-81**: an item with no 
 at the status it had, because Watchtower examined nothing on it and `strong` would be a verdict
 nothing earned.
 
+**The client shipped before the command it serves — 2026-08-16, D-83.** `src-tauri/src/hibp.rs`
+exists, is tested offline against a trimmed real range response, and is called by nothing;
+`watchtower_breach_check` keeps its `// planned` marker until the commit that registers it, which is
+the habit this section was written to hold. What the client deliberately does **not** own is in its
+module docs and repeated here because it is this section's rule rather than that file's: it does not
+read the setting. A client that refuses politely is a client somebody can call anyway.
+
+**What crosses from the core to the host is a `BreachQuery`, and it is one-way.** It carries the
+5-character prefix, the ids the value belongs to, and the other 35 characters **with no accessor** —
+the host can ask whether a suffix from the response matches, and cannot read the suffix to log it,
+serialize it, or return it. The rule two paragraphs down is enforced by the type rather than by
+this document.
+
 **Both are vault-class. Neither returns a `Secret`, and nothing here needs a fifth sanctioned
 command** — a finding is not a secret, and if a Watchtower command ever appears to want a plaintext
 password in the webview, the design is wrong rather than the budget.

@@ -189,6 +189,15 @@ export interface Settings {
   readonly windowWidth: number;
   readonly windowHeight: number;
   readonly windowMaximized: boolean;
+  /**
+   * Whether Watchtower may ask Have I Been Pwned about a password — R-26. **Off by default.**
+   *
+   * The switch on the only network call in the product. It is read in the **host**, inside
+   * `watchtower_breach_check`, never here: a caller that passed the flag as an argument would put
+   * the decision to send anything at all in the layer this whole boundary exists not to trust.
+   * Turning it off here turns the egress off there.
+   */
+  breachCheckEnabled: boolean;
 }
 
 export interface KdfSummary {
@@ -275,6 +284,46 @@ export interface WatchtowerReport {
   passwords: number;
   distinct: number;
   findings: Finding[];
+}
+
+/** One password field found in a breach corpus — §6.9, R-25. */
+export interface BreachHit {
+  itemId: string;
+  fieldId: string;
+  /**
+   * How many times the value appears in the corpus.
+   *
+   * A property of the **corpus**, not of the password: narrowing a password from it would need
+   * the range response, and that never leaves the host.
+   */
+  count: number;
+}
+
+/**
+ * One password field the check could not answer for — §6.9, R-25.
+ *
+ * **This is "not checked", and it must never render as "safe".** A field here kept whatever
+ * status the local scan gave it; nothing about it was proven in either direction.
+ */
+export interface UncheckedField {
+  itemId: string;
+  fieldId: string;
+  /** `off` — the setting; `offline` — it never reached the service; `http` — a refusal. */
+  reason: 'off' | 'offline' | 'http';
+}
+
+/**
+ * What a breach check concluded — §6.9, R-25, R-26.
+ *
+ * Carries no prefix, no suffix and no hash. `requested` is a **count** of range requests and
+ * deliberately not a list of prefixes: a list would be a description of this vault's passwords,
+ * in the one heap that cannot be wiped. It is `0` exactly when the setting is off.
+ */
+export interface BreachReport {
+  checkedAt: number;
+  requested: number;
+  breached: BreachHit[];
+  unchecked: UncheckedField[];
 }
 
 export type ErrorKind =
@@ -645,10 +694,10 @@ export const totpCode = (itemId: string) => call<TotpCode>('totp_code', { itemId
 /**
  * Scores every password in the vault and groups the reused ones — §6.9, R-23, R-24.
  *
- * **The local half, and it touches no network.** The breach check is a separate command that
- * does not exist yet, which is the shape of the S-10 promise rather than a note about it: with
- * one combined command, "zero packets when breach checking is off" would be a branch inside the
- * host; with two, it is a command nobody calls.
+ * **The local half, and it touches no network.** The breach check is the separate command
+ * below, which is the shape of the S-10 promise rather than a note about it: with one combined
+ * command, "zero packets when breach checking is off" would be a branch inside the host; with
+ * two, it is a command nobody calls.
  *
  * It is not free — S-07a budgets 500 ms and it measures 61 ms for a thousand items — and it
  * **writes to the vault**, caching a status per item so the list can draw its pips without
@@ -656,6 +705,20 @@ export const totpCode = (itemId: string) => call<TotpCode>('totp_code', { itemId
  * render.
  */
 export const watchtowerScan = () => call<WatchtowerReport>('watchtower_scan');
+
+/**
+ * Asks Have I Been Pwned about every distinct password — §6.9, R-25, R-26.
+ *
+ * **The only call in this file that reaches the network, and it takes no argument.** Whether
+ * anything leaves the machine is read from `breachCheckEnabled` in the host; with the setting
+ * off this resolves to a report with `requested: 0` and every password in `unchecked` — a
+ * refusal, not a rejection, so it must not be rendered as a failure to retry.
+ *
+ * Minutes rather than milliseconds on a large vault (S-07b: one request per distinct value, and
+ * roughly two per second), so it is called when a person asks for it and never on opening a
+ * screen. `onWatchtowerProgress` is how the wait is made legible.
+ */
+export const watchtowerBreachCheck = () => call<BreachReport>('watchtower_breach_check');
 
 /* ---- Sanctioned — §7 ----------------------------------------------------- */
 /* Exactly four. A fifth entry in this group is a decision, not a patch.       */
@@ -719,6 +782,20 @@ export const onClipboardCleared = (
 ): Promise<UnlistenFn> =>
   listen<{ item_id: string; field_id: string }>('clipboard-cleared', (event) =>
     handler(event.payload.item_id, event.payload.field_id),
+  );
+
+/**
+ * How far a breach check has got — §8.
+ *
+ * Two integers and nothing else. The event names no item and carries no prefix: a progress
+ * event saying which entry is being checked would be a running commentary on the vault, emitted
+ * on a timer with no user action behind any of it.
+ */
+export const onWatchtowerProgress = (
+  handler: (done: number, total: number) => void,
+): Promise<UnlistenFn> =>
+  listen<{ done: number; total: number }>('watchtower-progress', (event) =>
+    handler(event.payload.done, event.payload.total),
   );
 
 export const defaultVaultPath = (name: string) => call<string>('default_vault_path', { name });

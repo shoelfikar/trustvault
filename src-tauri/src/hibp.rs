@@ -310,34 +310,17 @@ impl RangeClient {
     }
 }
 
+/// A range service that never was, for tests that must watch where bytes would have gone.
+///
+/// `pub(crate)` and `#[cfg(test)]`: `commands/watchtower.rs` needs exactly this to prove that a
+/// breach check with the setting off contacts nothing, and a second copy of a listener would be a
+/// second definition of what "was never contacted" means.
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
+pub(crate) mod testing {
+    use std::io::{Read as _, Write as _};
     use std::net::TcpListener;
     use std::sync::mpsc;
     use std::thread;
-    use trustvault_core::{Field, FieldKind, ItemKind, KdfParams, Vault, breach_queries};
-
-    /// A real padded response for `5BAA6`, trimmed — `tests/fixtures/hibp-range-5BAA6.txt`.
-    ///
-    /// Trimmed rather than synthesized: the rows, the counts, the CRLF line endings and the
-    /// zero-count padding all came off the live service on 2026-08-16, so a parser that only
-    /// works against something this project invented cannot pass here. It is the mocked half of
-    /// the gate's first line, and the offline half of the whole suite.
-    const FIXTURE: &str = include_str!("../tests/fixtures/hibp-range-5BAA6.txt");
-
-    /// A vault holding exactly one password, so `breach_queries` yields exactly one query.
-    fn query_for(password: &str) -> BreachQuery {
-        let (mut vault, _) =
-            Vault::create("Test", "master pw", KdfParams::TESTING).expect("valid params");
-        let id = vault.add_item(ItemKind::Login, "Forum");
-        let item = vault.item_mut(id).expect("just added");
-        item.push_field(Field::new("Password", password, true).with_kind(FieldKind::Password));
-        breach_queries(&vault)
-            .pop()
-            .expect("one password, one query")
-    }
 
     /// An HTTP server that answers the same thing to every connection, and reports what it was
     /// asked.
@@ -349,7 +332,7 @@ mod tests {
     /// **It serves in a loop rather than once**, because the client retries: a one-shot server
     /// makes every retry a connection failure, which turns a 429 into `Offline` and would have
     /// let the backoff test pass for the wrong reason.
-    fn serving(response: &str) -> (String, mpsc::Receiver<String>) {
+    pub(crate) fn serving(response: &str) -> (String, mpsc::Receiver<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a free port");
         let addr = listener.local_addr().expect("bound");
         let (tx, rx) = mpsc::channel();
@@ -374,11 +357,39 @@ mod tests {
         (format!("http://127.0.0.1:{}", addr.port()), rx)
     }
 
-    fn ok_response(body: &str) -> String {
+    /// A 200 carrying `body`.
+    pub(crate) fn ok_response(body: &str) -> String {
         format!(
             "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain\r\n\r\n{body}",
             body.len()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::testing::{ok_response, serving};
+    use super::*;
+    use trustvault_core::{Field, FieldKind, ItemKind, KdfParams, Vault, breach_queries};
+
+    /// A real padded response for `5BAA6`, trimmed — `tests/fixtures/hibp-range-5BAA6.txt`.
+    ///
+    /// Trimmed rather than synthesized: the rows, the counts, the CRLF line endings and the
+    /// zero-count padding all came off the live service on 2026-08-16, so a parser that only
+    /// works against something this project invented cannot pass here. It is the mocked half of
+    /// the gate's first line, and the offline half of the whole suite.
+    const FIXTURE: &str = include_str!("../tests/fixtures/hibp-range-5BAA6.txt");
+
+    /// A vault holding exactly one password, so `breach_queries` yields exactly one query.
+    fn query_for(password: &str) -> BreachQuery {
+        let (mut vault, _) =
+            Vault::create("Test", "master pw", KdfParams::TESTING).expect("valid params");
+        let id = vault.add_item(ItemKind::Login, "Forum");
+        let item = vault.item_mut(id).expect("just added");
+        item.push_field(Field::new("Password", password, true).with_kind(FieldKind::Password));
+        breach_queries(&vault)
+            .pop()
+            .expect("one password, one query")
     }
 
     /// R-25's own worked example, offline: a known-pwned password is reported as pwned.

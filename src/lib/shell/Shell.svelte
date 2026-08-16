@@ -33,8 +33,11 @@
     asIpcError,
     listItems,
     lock,
+    onWatchtowerProgress,
     setSettings,
+    watchtowerBreachCheck,
     watchtowerScan,
+    type BreachReport,
     type ItemSummary,
     type Settings,
     type VaultStatus,
@@ -212,6 +215,58 @@
       .then(() => onstatuschanged())
       .catch((thrown) => (scanError = asIpcError(thrown).message))
       .finally(() => (scanning = false));
+  });
+
+  /* ---- The breach half — §6.9, R-25, R-26 ---------------------------------- */
+
+  /** The last breach check's report. `null` until one has run **in this session**. */
+  let breach = $state<BreachReport | null>(null);
+  let checking = $state(false);
+  let breachProgress = $state<{ done: number; total: number } | null>(null);
+  let breachError = $state('');
+
+  /**
+   * Run the breach check, because a person pressed the button.
+   *
+   * **There is no effect that starts this**, and that is the difference between this command and
+   * the scan above. The scan is local, 61 ms, and re-runs itself whenever an item changes; this
+   * one is minutes long and is the only thing in the product that opens a socket, so it happens
+   * when it is asked for and never as a side effect of opening a screen. With the setting off it
+   * still runs — and returns `requested: 0` without contacting anything, which is the host
+   * refusing rather than this side deciding it may not ask.
+   */
+  function runBreachCheck() {
+    if (checking) return;
+    checking = true;
+    breachError = '';
+    breachProgress = null;
+    void watchtowerBreachCheck()
+      .then((report) => {
+        breach = report;
+        // A hit is written into the status cache, so the pips and the sidebar badge change with
+        // it. Re-read rather than patch, for the scan's reason: the host is the source.
+        return listItems().then((loaded) => (items = loaded));
+      })
+      .then(() => onstatuschanged())
+      .catch((thrown) => (breachError = asIpcError(thrown).message))
+      .finally(() => {
+        checking = false;
+        breachProgress = null;
+      });
+  }
+
+  /**
+   * `watchtower-progress` — §8, two integers and nothing else.
+   *
+   * Subscribed for the life of the shell rather than for the life of a check: an event that
+   * arrives after the promise resolves is then ignored by the `checking` guard in the view,
+   * instead of racing an unsubscribe.
+   */
+  $effect(() => {
+    const unlisten = onWatchtowerProgress((done, total) => {
+      if (checking) breachProgress = { done, total };
+    });
+    return () => void unlisten.then((stop) => stop());
   });
 
   /**
@@ -448,8 +503,16 @@
         {scanning}
         error={scanError}
         lastScanAt={status.lastScanAt}
+        breachEnabled={settings.breachCheckEnabled}
+        {breach}
+        {checking}
+        progress={breachProgress}
+        {breachError}
+        lastBreachCheckAt={status.lastBreachCheckAt}
         onopen={openItem}
         onretry={rescanWatchtower}
+        oncheck={runBreachCheck}
+        onsettings={() => goto({ kind: 'settings' })}
       />
     {:else if view.kind === 'settings'}
       <SettingsPane

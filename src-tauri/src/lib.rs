@@ -140,9 +140,12 @@ pub fn run() {
             commands::totp::totp_code,
             commands::import::import_preview,
             commands::import::import_commit,
-            // Watchtower — the local half only (D-76). `watchtower_breach_check` is the one
-            // command in this application that opens a socket, and it is not here yet.
+            // Watchtower — both halves (D-76). The second is the one command in this
+            // application that opens a socket, and it opens none until `breach_check_enabled`
+            // says so: with the setting off it returns before a client is constructed, which is
+            // what makes S-10 a command nobody called rather than a branch nobody took.
             commands::watchtower::watchtower_scan,
+            commands::watchtower::watchtower_breach_check,
             // Sanctioned — exactly four, each returning exactly one secret.
             // The fourth arrived with D-44; a fifth is a decision log entry, not a patch.
             commands::vault::create_vault,

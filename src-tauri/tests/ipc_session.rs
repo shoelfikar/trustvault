@@ -445,6 +445,58 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
         "a local scan must never be read as evidence that a breach check ran"
     );
 
+    // ---- Watchtower: the breach half, against a range service this test runs ---------------
+    // §6.9's elision bullets are about a check that **made requests**: "the prefix and the range
+    // response are host-only" cannot be proven by a command that never sent one. So the setting
+    // is turned on and a listener answers with the committed fixture — a real range exchange,
+    // offline, with the transcript searched afterwards for anything derived from a password.
+    state.with(|inner| inner.settings.breach_check_enabled = true);
+    let (endpoint, asked) = serving(&fs::read_to_string(fixture_path()).expect("the fixture"));
+    let checked = watchtower::breach_check_inner(
+        &state,
+        &trustvault_lib::hibp::RangeClient::new(&endpoint),
+        &|_, _| {},
+    );
+    log.record("watchtower_breach_check", &checked);
+    let breach_report = checked.expect("a vault is open and the range is served");
+    assert_eq!(
+        breach_report.requested, 1,
+        "one request per distinct value — both items share one password (S-07b)"
+    );
+    assert!(
+        breach_report.breached.is_empty() && breach_report.unchecked.is_empty(),
+        "this vault's password is not in the fixture, and the check reached the service"
+    );
+
+    // What the service was actually sent: five hex characters and a padding header. The packet
+    // capture the gate asks for is this claim on the wire; this is the same claim at the socket's
+    // own doorstep, and it runs on every push.
+    let request = asked.recv().expect("the range service saw a request");
+    assert!(
+        request.starts_with("GET /range/") && request.contains(" HTTP/1.1"),
+        "the request line carried more than a range: {request}"
+    );
+    let prefix: String = request
+        .chars()
+        .skip("GET /range/".len())
+        .take_while(|c| !c.is_whitespace())
+        .collect();
+    assert_eq!(prefix.len(), 5, "R-25: five characters, and no more");
+    for forbidden in [SECRET, EDITED_SECRET, USERNAME, MASTER, "GitHub"] {
+        assert!(
+            !request.contains(forbidden),
+            "the request carried something out of the vault: {request}"
+        );
+    }
+
+    let checked_status = state.status();
+    log.record_infallible("vault_status", &checked_status);
+    assert!(
+        checked_status.last_breach_check_at.is_some(),
+        "a complete pass says when it ran — D-86"
+    );
+    state.with(|inner| inner.settings.breach_check_enabled = false);
+
     log.record("delete_item", &items::delete_item_inner(&state, twin_id));
 
     // ---- Delete: the item goes, and so does every way of reading it ------------------------
@@ -595,6 +647,30 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
         );
     }
 
+    // The breach check's own crossing, and the shorter hash. A SHA-1 in hex is **40**
+    // characters, so the run length that catches a leaked grouping key catches nothing here:
+    // a prefix, a suffix, or a whole digest reaching the webview would all be shorter than 64.
+    // §6.9's rule is that none of the three crosses in any form, and `requested` is a count
+    // precisely so that a list of prefixes has nowhere to ride along.
+    for crossing in log
+        .crossings
+        .iter()
+        .filter(|c| c.command == "watchtower_breach_check")
+    {
+        let runs = crossing
+            .payload
+            .split(|c: char| !c.is_ascii_hexdigit())
+            // Item ids are hyphenated UUIDs, so their longest hex run is twelve characters.
+            // Twenty is comfortably above that and comfortably below a SHA-1's forty.
+            .filter(|run| run.len() >= 20)
+            .count();
+        assert_eq!(
+            runs, 0,
+            "watchtower_breach_check crossed a long hex run — the 5-character prefix, the \
+             35-character suffix and the whole SHA-1 are all host-only (§6.9)"
+        );
+    }
+
     // Both recovery codes are secrets and both are accounted for: each appears in exactly the
     // one response that minted it.
     assert_eq!(
@@ -675,6 +751,48 @@ fn a_profile_persists_across_a_relaunch_and_an_unchanged_one_writes_nothing() {
     assert_eq!(reopened.email, "budi@warungpintar.id");
 
     let _ = fs::remove_file(&path);
+}
+
+/// Where the committed range fixture lives, from this test's own file.
+fn fixture_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/hibp-range-5BAA6.txt")
+}
+
+/// A range service that answers one canned response and reports what it was asked.
+///
+/// A near-copy of `hibp::testing::serving`, and the duplication is a language boundary rather
+/// than an oversight: that module is `#[cfg(test)]` inside the library crate, and an integration
+/// test links the library **without** its test configuration, so nothing in it is reachable from
+/// here. The alternative is a public test helper compiled into the shipping binary, which is a
+/// worse trade in a process that holds decrypted secrets.
+fn serving(response: &str) -> (String, std::sync::mpsc::Receiver<String>) {
+    use std::io::{Read as _, Write as _};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port");
+    let addr = listener.local_addr().expect("bound");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let body = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain\r\n\r\n{response}",
+        response.len()
+    );
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else {
+                return;
+            };
+            let mut buffer = [0_u8; 2048];
+            let read = stream.read(&mut buffer).unwrap_or(0);
+            if tx
+                .send(String::from_utf8_lossy(&buffer[..read]).into_owned())
+                .is_err()
+            {
+                return;
+            }
+            let _ = stream.write_all(body.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+    (format!("http://127.0.0.1:{}", addr.port()), rx)
 }
 
 /// The transcript is written, and it is written where the gate can find it.

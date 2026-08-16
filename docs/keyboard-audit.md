@@ -142,7 +142,7 @@ same keystrokes and would swallow the first letter of every shortcut a later pha
 | 14 | Generator dialog | Length slider on ←/→ (and Home/End), the four set toggles on Space, Regenerate and Copy reachable — R-15 | [x] |
 | 15 | Vault switcher | ↑/↓ between vaults **including the open one**, Enter switches, Tab within a row reaches **Leave**, Esc closes — R-22 | [x] |
 | 16 | Settings | Every control reachable in visual order; the segmented controls on ←/→; **UI scale changes do not move focus**; the **Start at login** toggle takes Space, and when the platform refuses the write the toggle returns to its old position with the reason announced — R-21 | [x] |
-| 17 | Watchtower | The findings list is a list: ↑/↓ and Enter to the offending item | [ ] |
+| 17 | Watchtower | The findings list is a list: ↑/↓ and Enter to the offending item; the **Breach check** row's button is Tab-reachable and its label says which action it is (*Check now* / *Check again* / *Settings…*) | [ ] |
 | 18 | Edit-item dialog | Every field row Tab-reachable in display order; **Replace** on a secret row reachable without hover, and Tab from it lands in the input it just opened; Remove and Add field reachable; the **New tag** field takes Enter as "add this tag" — R-17 | [x] |
 | 19 | Import dialog | Esc closes from the intro **and** from the report; Choose file… reachable and the **native picker takes over from there**, so the keyboard path leaves the app and must come back to a focused dialog; Import stays disabled until a preview is on screen; the report's refusal list scrolls with the keyboard alone, not only with a wheel — R-29 | [x] |
 | 20 | Profile popover | Enter or Space on the footer row opens it and focus lands on the **first row, not the header**; ↑/↓ wrap between the four rows; Esc closes and focus returns to the footer row that opened it; the ⌘, printed beside *Settings* actually reaches Settings — D-70 | [x] |
@@ -178,8 +178,14 @@ against a screen drawn from item statuses, and the screen underneath it now read
 `watchtower_scan` report: the rows are `<ul>/<li>` instead of bare buttons, they carry different
 text, and their ↑/↓ handler **did not exist before today** — nothing on that surface answered an
 arrow key, so what the tick recorded was Tab and Enter working. Same precedent as D-67: a tick
-against markup that no longer exists is worse than an empty box. The clause is unchanged, the
-implementation is now the one `ItemList.svelte` uses, and the walk needs a person and a build.
+against markup that no longer exists is worse than an empty box. The implementation is now the one
+`ItemList.svelte` uses, and the walk needs a person and a build.
+
+**The clause grew the same day**, later on 2026-08-16, when the breach check landed: the screen now
+carries a control above the findings — one button whose label is the state it is in — and a row that
+was un-ticked before that control existed would otherwise be re-ticked without anyone having pressed
+it. It is one tab stop, and the thing to watch on the walk is whether it lands **before** the
+findings list rather than after it, since it is above it on screen.
 
 Row 18's "Tab from Replace lands in the input it just opened" is the finding waiting to happen:
 pressing Replace swaps a disabled input for an editable one in the same position, and the browser

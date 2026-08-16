@@ -164,7 +164,7 @@ vault_status(): {
   item_count: number | null;   // null unless unlocked
   profile: { name: string; email: string } | null;   // null unless unlocked — D-70
   last_scan_at: number | null;           // null unless unlocked and scanned — §6.9
-  last_breach_check_at: number | null;   // always null until the breach check ships — §6.9
+  last_breach_check_at: number | null;   // null until a COMPLETE breach check has run — §6.9
 }
 ```
 
@@ -692,7 +692,7 @@ type Settings = {
   window_width: number;                   // px — R-27
   window_height: number;                  // px — R-27
   window_maximized: boolean;              // R-27
-  breach_check_enabled: boolean;          // planned — Phase 4, R-26, default false
+  breach_check_enabled: boolean;          // R-26, default false
 };
 ```
 
@@ -788,7 +788,7 @@ type BreachReport = {
 };
 
 watchtower_scan(): WatchtowerReport            // R-23, R-24
-watchtower_breach_check(): BreachReport        // planned — R-25, R-26
+watchtower_breach_check(): BreachReport        // R-25, R-26
 ```
 
 **`watchtower_scan` shipped 2026-08-16**, marker deleted in the commit that registered it, which is
@@ -799,12 +799,19 @@ that write is a decision rather than an oversight — **D-81**: an item with no 
 at the status it had, because Watchtower examined nothing on it and `strong` would be a verdict
 nothing earned.
 
-**The client shipped before the command it serves — 2026-08-16, D-83.** `src-tauri/src/hibp.rs`
-exists, is tested offline against a trimmed real range response, and is called by nothing;
-`watchtower_breach_check` keeps its `// planned` marker until the commit that registers it, which is
-the habit this section was written to hold. What the client deliberately does **not** own is in its
+**The client shipped before the command it serves — 2026-08-16, D-83**, and the command followed it
+the same day: `watchtower_breach_check` is registered, and its marker was deleted in that commit,
+the eleventh time that habit has held. What the client deliberately does **not** own is in its
 module docs and repeated here because it is this section's rule rather than that file's: it does not
 read the setting. A client that refuses politely is a client somebody can call anyway.
+
+**Four bounds the command owns and the client does not.** The setting, read before a client is
+constructed. The concurrency — a worker pool of **four**, D-85, which is a bound rather than a
+target: §6.9's own numbers below are eight concurrent for 1.34× the serial throughput, so the rate
+belongs to the service and the bound exists to keep the burst polite. The vault, held to read the
+queries and again to write the hits and never across the network. And the **idle clock**, which the
+second acquisition deliberately does not touch — a background task that resets the auto-lock timer
+keeps a vault unlocked for as long as it runs.
 
 **What crosses from the core to the host is a `BreachQuery`, and it is one-way.** It carries the
 5-character prefix, the ids the value belongs to, and the other 35 characters **with no accessor** —
@@ -878,13 +885,21 @@ check that has never run.
 
 ```ts
 last_scan_at: Millis | null;           // written by watchtower_scan
-last_breach_check_at: Millis | null;   // nothing writes it yet
+last_breach_check_at: Millis | null;   // written by a COMPLETE watchtower_breach_check — D-86
 ```
 
-Both landed 2026-08-16 in the commit that implemented the scan, as this section said they would.
-`last_breach_check_at` is carried while still being written by nothing, deliberately: adding it now
-costs one key that is absent from every file (`vault-format.md` §6.7) and adding it later would be a
-second format change for the same feature.
+Both landed 2026-08-16 in the commit that implemented the scan, as this section said they would, and
+the second gained its writer later the same day.
+
+**Only a complete pass stamps `last_breach_check_at` — D-86.** `unchecked` lives in the response and
+is gone when the window closes; the timestamp is the only part of a breach check that survives a
+relaunch. A pass that reached three values out of a thousand and stamped *today* would have
+tomorrow's reader told this vault was checked, which is the stale-partial-pass-as-clean state the
+paragraph above forbids. An incomplete pass still records the breaches it **did** find — a breach
+found is a breach found — and leaves the timestamp where it was. The alternatives, and why not: a
+timestamp on every run says "checked" for a run that checked nothing, and a timestamp with a
+coverage fraction beside it is a second field to keep honest, on a screen whose whole job is not
+overstating what happened.
 
 **Results are discarded if the vault locked while the scan was running.** This is a rule for the
 **breach check**, and `watchtower_scan` is exempt by construction rather than by care: it is
@@ -1104,7 +1119,7 @@ an event, so rule 2 of §2 could not be satisfied by one.
 "vault-locked":    { reason: "manual" | "timeout" | "os_sleep" }   // R-09
 "field-remasked":  { item_id: Uuid; field_id: Uuid }               // R-12
 "clipboard-cleared": { item_id: Uuid; field_id: Uuid }             // R-14
-"watchtower-progress": { done: number; total: number }             // planned — Phase 4, §6.9
+"watchtower-progress": { done: number; total: number }             // §6.9
 ```
 
 `vault-locked` carries its reason so the lock screen can say why, which is the difference between a

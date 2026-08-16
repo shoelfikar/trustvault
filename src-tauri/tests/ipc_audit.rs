@@ -494,6 +494,20 @@ fn every_vault_command_refuses_while_locked() {
         watchtower::watchtower_scan_inner(&state).unwrap_err().kind,
         ErrorKind::Locked
     );
+    // The breach half refuses **before** it builds a query, which is stronger than refusing
+    // before it sends one: a locked vault that still hashed every password would have decrypted
+    // the vault to do it. The endpoint is a port nothing listens on, so a version of this command
+    // that reached the network would make this test slow rather than merely red.
+    assert_eq!(
+        watchtower::breach_check_inner(
+            &state,
+            &trustvault_lib::hibp::RangeClient::new("http://127.0.0.1:1"),
+            &|_, _| {},
+        )
+        .unwrap_err()
+        .kind,
+        ErrorKind::Locked
+    );
 }
 
 /// A Watchtower report carries findings and **no password, and no hash of one** — §6.9, R-10.

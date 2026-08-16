@@ -670,8 +670,10 @@ pub struct VaultBody {
     /// scan and the breach check can be days apart; a single "last scanned" would let this
     /// morning's local scan vouch for a breach check that has never run.
     ///
-    /// Nothing writes it yet — `watchtower_breach_check` is unimplemented — and it is here
-    /// rather than added later so the two are one format change rather than two.
+    /// Written by [`crate::record_breaches`], and **only when the pass finished** — D-86. A
+    /// check that could not reach the service for half its values leaves this alone, because it
+    /// is the only part of a breach check a later launch can still see: `unchecked` is in the IPC
+    /// response and dies with the window. `None` means never, never "clean".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_breach_check_at: Option<i64>,
     /// Keys written by a newer version, preserved untouched (N-09).

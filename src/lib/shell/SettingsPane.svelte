@@ -226,6 +226,28 @@
           onchange={(next) => patch({ auditLogEnabled: next })}
         />
       </div>
+      <div class="row">
+        <div class="row-text">
+          <p class="row-label">Check for breached passwords</p>
+          <!-- R-26, and the copy is the requirement rather than a description of it. The row
+               says what leaves, what does not, and where it goes — in that order, because a
+               toggle labelled "check for breaches" invites exactly the reading this product
+               exists to refuse. No password, no item, no vault: five characters of a hash, and
+               the answer is matched here. The prototype draws no such row (it has no settings
+               for Watchtower at all), so the wording is this project's, like D-48's dialog. -->
+          <p class="row-desc">
+            Sends the <strong>first five characters</strong> of each password's SHA-1 hash to Have I Been
+            Pwned — never a password, never an item name, never anything identifying this vault or you.
+            The answer is matched on this device. Off by default; with it off, TrustVault makes no network
+            connection at all.
+          </p>
+        </div>
+        <Toggle
+          label="Check for breached passwords"
+          checked={settings.breachCheckEnabled}
+          onchange={(next) => patch({ breachCheckEnabled: next })}
+        />
+      </div>
     </div>
 
     <p class="group-label">System</p>

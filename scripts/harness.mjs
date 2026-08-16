@@ -136,6 +136,39 @@ const WATCHTOWER_REPORT = {
 /** A scanned vault with nothing wrong in it — the reassurance state, R-19. */
 const CLEAN_REPORT = { scanned_at: 1785600000000, passwords: 2, distinct: 2, findings: [] };
 
+/**
+ * What `watchtower_breach_check` answers with — §6.9, R-25.
+ *
+ * It agrees with `ITEMS` in the same way `WATCHTOWER_REPORT` does, and for a sharper reason: the
+ * Breached group draws its rows from each item's cached **status**, because the local scan never
+ * produces that verdict and a report from this session is the only place a count exists. So a
+ * fixture naming an item the statuses do not call breached would photograph a count with no row
+ * to sit in.
+ */
+const BREACH_REPORT = {
+  checked_at: 1785600000000,
+  requested: 5,
+  breached: [{ item_id: ID('bca'), field_id: 'f2', count: 1246 }],
+  unchecked: [],
+};
+
+/**
+ * The half-finished check — R-25's "not checked, never safe" in the state that produces it.
+ *
+ * The one state that cannot be reached by waiting: a network that fails for some values and not
+ * others. Its own sentence is the point of the fixture, because "3 could not be checked" beside a
+ * result is the difference between a report and a clean bill of health for everything silent.
+ */
+const PARTIAL_BREACH_REPORT = {
+  checked_at: 1785600000000,
+  requested: 3,
+  breached: [{ item_id: ID('bca'), field_id: 'f2', count: 1246 }],
+  unchecked: [
+    { item_id: ID('github'), field_id: 'f2', reason: 'offline' },
+    { item_id: ID('ssh'), field_id: 'f2', reason: 'offline' },
+  ],
+};
+
 const FIELDS = [
   { id: 'f1', label: 'Username', kind: 'username', secret: false, value: 'octocat', mask: null },
   {
@@ -192,7 +225,13 @@ const SETTINGS = {
   last_vault_path: '/home/shoel/Documents/personal.tvault',
   ui_scale: 'default',
   launch_at_login: false,
+  // R-26, at its default. The two scenarios that turn it on do so by replacing this object,
+  // which is how the Watchtower screen's "off" row and its "checked" row are both photographable.
+  breach_check_enabled: false,
 };
+
+/** The same settings with the user opted in — R-26, and the only scenarios that send anything. */
+const BREACH_ON = { ...SETTINGS, breach_check_enabled: true };
 
 /* ---- Scenarios ------------------------------------------------------------ */
 
@@ -273,6 +312,27 @@ export const SCENARIOS = {
     ],
     report: CLEAN_REPORT,
     drive: `clickText('button', 'Watchtower')`,
+  },
+  // The breach check, run. Driven through its own button rather than fed in as state, because
+  // the button is the only thing in the product that starts it — R-26 makes the check something
+  // a person asks for, and a scenario that set the report directly would photograph a screen no
+  // sequence of clicks can produce. The drive matches the **verb** rather than the whole label:
+  // this scenario carries a stamp from an earlier session so its button reads *Check again*,
+  // and matching "Check now" here clicked nothing and photographed the state before the run.
+  watchtowerChecked: {
+    status: { ...UNLOCKED, last_breach_check_at: 1785600000000 },
+    settings: BREACH_ON,
+    drive: `clickText('button', 'Watchtower'); await sleep(200);
+            clickText('button', 'Check'); await sleep(400)`,
+  },
+  // The same screen after a check that only partly landed. R-25's whole sentence lives here:
+  // what was found, and how much was not checked, in one line that cannot be read as a pass.
+  watchtowerPartial: {
+    status: { ...UNLOCKED, last_breach_check_at: null },
+    settings: BREACH_ON,
+    breach: PARTIAL_BREACH_REPORT,
+    drive: `clickText('button', 'Watchtower'); await sleep(200);
+            clickText('button', 'Check'); await sleep(400)`,
   },
   palette: { status: UNLOCKED, drive: `key('k', { ctrlKey: true })` },
   // The palette with a query that matches nothing. Its own empty state (R-19) is otherwise
@@ -408,6 +468,8 @@ function harness(scenario, theme, audit) {
     drive,
     items = ITEMS,
     report = WATCHTOWER_REPORT,
+    settings = SETTINGS,
+    breach = BREACH_REPORT,
     fail = '',
   } = SCENARIOS[scenario];
   return `
@@ -416,9 +478,10 @@ window.__SHOT__ = ${JSON.stringify({ scenario, theme })};
 const STATUS = ${JSON.stringify(status)};
 const ITEMS = ${JSON.stringify(items)};
 const FIELDS = ${JSON.stringify(FIELDS)};
-const SETTINGS = ${JSON.stringify(SETTINGS)};
+const SETTINGS = ${JSON.stringify(settings)};
 const IMPORT_REPORT = ${JSON.stringify(IMPORT_REPORT)};
 const WATCHTOWER_REPORT = ${JSON.stringify(report)};
+const BREACH_REPORT = ${JSON.stringify(breach)};
 const FAIL = ${JSON.stringify(fail)};
 
 let listener = 0;
@@ -492,6 +555,10 @@ function respond(cmd, args) {
     // agrees with ITEMS, because the screen reads its groups from here and its Safe count from the
     // statuses over there.
     case 'watchtower_scan': return WATCHTOWER_REPORT;
+    // The one command in the product that would open a socket. Here it opens nothing and answers
+    // a fixture -- which is also why the scenarios drive it through its button: the shot is of
+    // the screen a user reaches by asking, not of a state assembled behind the surface.
+    case 'watchtower_breach_check': return BREACH_REPORT;
     default:
       // Tauri's event plugin rides the same channel. Anything else is a command the harness
       // has not been taught, and it is loud rather than silently undefined.

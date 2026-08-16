@@ -85,6 +85,16 @@ pub struct Settings {
     /// Kept beside the size rather than replacing it, because restoring a maximized window
     /// still needs somewhere to put it when the user un-maximizes.
     pub window_maximized: bool,
+    /// Whether Watchtower may ask Have I Been Pwned about a password — R-26. **Off by default.**
+    ///
+    /// The switch on the only network call in the product, and the reason S-10 is measurable on a
+    /// fresh install: with it off, `watchtower_breach_check` returns before a client is built, so
+    /// "zero packets" is a request nobody made rather than a branch nobody took.
+    ///
+    /// **Read in the command, never in `hibp.rs`** (§6.9). A client that refuses politely is a
+    /// client somebody can call anyway, so the refusal lives one layer above the socket. It is
+    /// also not host-owned: the user sets it, and `merge_incoming` leaves it alone.
+    pub breach_check_enabled: bool,
 }
 
 impl Default for Settings {
@@ -106,6 +116,9 @@ impl Default for Settings {
             window_width: 1360,
             window_height: 864,
             window_maximized: false,
+            // R-26, and S-10 is measured on exactly this line. Nothing in TrustVault opens a
+            // socket until somebody turns this on.
+            breach_check_enabled: false,
         }
     }
 }
@@ -414,5 +427,13 @@ mod tests {
         // D-31. Written as a test because a default is exactly the kind of thing that gets
         // flipped by someone making the feature easier to demonstrate.
         assert!(!Settings::default().audit_log_enabled);
+    }
+
+    #[test]
+    fn breach_checking_is_off_by_default() {
+        // R-26, and the line S-10 is measured on: a fresh install sends nothing anywhere. Same
+        // reason as the audit default above — the way this flips is somebody making a demo
+        // easier, and nothing else in the product would notice.
+        assert!(!Settings::default().breach_check_enabled);
     }
 }

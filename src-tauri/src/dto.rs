@@ -319,6 +319,64 @@ pub struct Copied {
     pub clears_at: i64,
 }
 
+/// One password field found in a breach corpus — `docs/ipc-contract.md` §6.9, R-25.
+///
+/// `count` is a property of the **corpus**, not of the password: it is how many times the value
+/// appears in the records HIBP holds, which is what the row on screen shows. Narrowing a password
+/// from it would need the range response, and that never leaves the host.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct BreachHit {
+    /// The item the field belongs to.
+    pub item_id: ItemId,
+    /// Which password field — an item may carry more than one.
+    pub field_id: FieldId,
+    /// Occurrences in the breach corpus.
+    pub count: u64,
+}
+
+/// One password field the check could not answer for — §6.9, R-25.
+///
+/// **This is the type that carries "not checked, never safe".** A field here has a status left
+/// exactly as the local scan wrote it; nothing about it was proven either way, and no surface may
+/// render its absence from [`BreachReport::breached`] as a pass.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct UncheckedField {
+    /// The item the field belongs to.
+    pub item_id: ItemId,
+    /// Which password field.
+    pub field_id: FieldId,
+    /// `"off"`, `"offline"` or `"http"` — §6.9's vocabulary, and it has exactly two producers.
+    ///
+    /// A `&'static str` rather than an enum because the words are already defined once, in
+    /// [`crate::hibp::RangeError::reason`], and the client cannot produce `"off"`: that one comes
+    /// from the command that declined to call it at all. An enum here would be a second
+    /// definition of the same three words, in the crate that has the first.
+    pub reason: &'static str,
+}
+
+/// What `watchtower_breach_check` returns — §6.9, R-25, R-26.
+///
+/// Carries no prefix, no suffix, no hash and no password. `requested` is a **count** of range
+/// requests, deliberately not a list of prefixes: a list would be a description of the vault's
+/// password distribution in the one heap this whole architecture exists not to trust.
+#[derive(Debug, Clone, Serialize)]
+pub struct BreachReport {
+    /// When the check finished, Unix milliseconds UTC.
+    ///
+    /// Not the same thing as the vault's `last_breach_check_at`, which only a **complete** pass
+    /// writes (D-86). This field says when this call ran; that one says when the vault last had a
+    /// check it can still stand behind after a relaunch.
+    pub checked_at: i64,
+    /// Range requests actually made — one per distinct value, never one per item (S-07b).
+    ///
+    /// Zero when the setting is off, and zero is the number S-10's packet capture predicts.
+    pub requested: usize,
+    /// Every password field whose value was found in the corpus.
+    pub breached: Vec<BreachHit>,
+    /// Every password field that was not checked, and why.
+    pub unchecked: Vec<UncheckedField>,
+}
+
 /// Build and format information, for the About surface and bug reports.
 #[derive(Debug, Clone, Serialize)]
 pub struct BuildInfo {

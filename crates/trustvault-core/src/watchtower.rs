@@ -554,6 +554,48 @@ pub fn breach_queries(vault: &Vault) -> Vec<BreachQuery> {
     queries
 }
 
+/// Writes what a breach check concluded into the status cache — R-25, §6.9.
+///
+/// [`scan_and_record`]'s counterpart for the network half, and the two are deliberately not
+/// symmetric. The scan owns every status it can decide and writes all of them; this one writes
+/// **one verdict in one direction** and leaves everything else exactly as the scan left it.
+///
+/// # Why nothing is cleared here
+///
+/// A value that came back absent from the corpus does **not** become [`ItemStatus::Strong`], and
+/// a previously breached item does not stop being breached because this pass could not reach the
+/// service. "Absent from the range HIBP served us today" is not "clean", and R-25's rule is that
+/// a failed check reports *not checked*, never *safe*. What does clear a stale `breached` is the
+/// **local scan**, which re-derives every status from the values in front of it — so the pip
+/// disappears when the password is changed, on the scan that follows the change, rather than on
+/// a network round trip that says nothing about the new value.
+///
+/// # `complete` is the whole of the timestamp rule — D-86
+///
+/// `last_breach_check_at` is the only part of this that survives a relaunch: `unchecked` lives in
+/// the response and is gone the moment the window closes. So a partial pass must not stamp it. A
+/// check that reached three values out of a thousand and stamped *today* would have the screen
+/// telling tomorrow's reader that this vault was checked, which is precisely the stale-partial-pass
+/// -as-clean state §6.9 forbids. Incomplete passes still write their hits — a breach found is a
+/// breach found — and leave the timestamp where it was.
+///
+/// `item.updated_at` does not move, for [`scan_and_record`]'s reason: a check reads the vault.
+pub fn record_breaches(vault: &mut Vault, breached: &[ItemId], complete: bool) -> i64 {
+    let checked_at = now_ms();
+    let hits: std::collections::HashSet<ItemId> = breached.iter().copied().collect();
+
+    let body = vault.body_mut();
+    for item in &mut body.items {
+        if hits.contains(&item.id) {
+            item.status = ItemStatus::Breached;
+        }
+    }
+    if complete {
+        body.last_breach_check_at = Some(checked_at);
+    }
+    checked_at
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1059,6 +1101,78 @@ mod tests {
             prefixes(&vault),
             prefixes(&vault),
             "HashMap order must not reach the request log"
+        );
+    }
+
+    /// A hit is cached as `breached`, and a complete pass is the only thing that stamps the date.
+    #[test]
+    fn a_complete_check_records_its_hits_and_says_when_it_ran() {
+        let mut vault = vault();
+        let breached = with_password(&mut vault, "Forum", "password");
+        let fine = with_password(&mut vault, "Bank", "correct horse battery staple");
+        scan_and_record(&mut vault);
+
+        let checked_at = record_breaches(&mut vault, &[breached], true);
+
+        assert_eq!(
+            vault.item(breached).map(|item| item.status),
+            Some(ItemStatus::Breached)
+        );
+        assert_eq!(
+            vault.item(fine).map(|item| item.status),
+            Some(ItemStatus::Strong),
+            "an item the check cleared keeps what the scan concluded about it"
+        );
+        assert_eq!(vault.body().last_breach_check_at, Some(checked_at));
+    }
+
+    /// D-86: a pass that did not finish writes its hits and **does not** stamp the date.
+    ///
+    /// The timestamp is the only part of a breach check that survives a relaunch — `unchecked`
+    /// lives in the response — so stamping it after three values out of a thousand landed would
+    /// have tomorrow's reader told this vault was checked.
+    #[test]
+    fn an_incomplete_check_records_its_hits_but_leaves_the_date_alone() {
+        let mut vault = vault();
+        let breached = with_password(&mut vault, "Forum", "password");
+        scan_and_record(&mut vault);
+
+        record_breaches(&mut vault, &[breached], false);
+
+        assert_eq!(
+            vault.item(breached).map(|item| item.status),
+            Some(ItemStatus::Breached),
+            "a breach found is a breach found, whatever else failed"
+        );
+        assert_eq!(
+            vault.body().last_breach_check_at,
+            None,
+            "a partial pass must not read afterwards as a check that ran"
+        );
+    }
+
+    /// Nothing is cleared here: R-25's "not checked, never safe", as the absence of a write.
+    ///
+    /// A check that reaches the service and finds nothing must not promote anything to
+    /// `strong` — the value could be weak, reused, or simply absent from the corpus HIBP holds
+    /// today. Clearing a stale `breached` is the **local scan**'s job, on the scan that follows
+    /// the changed password.
+    #[test]
+    fn a_check_that_finds_nothing_promotes_nothing() {
+        let mut vault = vault();
+        let weak = with_password(&mut vault, "Forum", "hunter2");
+        scan_and_record(&mut vault);
+        assert_eq!(
+            vault.item(weak).map(|item| item.status),
+            Some(ItemStatus::Weak)
+        );
+
+        record_breaches(&mut vault, &[], true);
+
+        assert_eq!(
+            vault.item(weak).map(|item| item.status),
+            Some(ItemStatus::Weak),
+            "absent from a breach corpus is not a verdict about the password"
         );
     }
 }

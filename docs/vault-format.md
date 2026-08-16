@@ -390,9 +390,11 @@ Four properties, and the first two are the reason there are two keys rather than
    scan and the breach check can be days apart. A single "last scanned" would let this morning's
    local scan vouch for a breach check that has never run, which is the one direction this cache
    must never fail in.
-2. **`last_breach_check_at` is written by nothing in this version.** It is specified and reserved
-   because adding it now costs an absent key and adding it with the breach check would be a second
-   format change for the same feature. A reader MUST treat it as "never".
+2. **`last_breach_check_at` is written only by a check that finished** — D-86, and it is the one
+   key in the body whose absence is load-bearing rather than incidental. A breach check that
+   reached three values out of a thousand writes the breaches it found and leaves this key alone,
+   because it is the only part of a check that survives a relaunch: `unchecked` lives in the IPC
+   response and is gone with the window. A reader MUST treat absence as "never", never as "clean".
 3. **Absent when never.** A vault that has not been scanned writes no key at all, the rule `audit`
    (§6.4) and `profile` (§6.6) already follow, and the reason the vectors in §10 stay valid.
 4. **They are the only thing that makes `status: "unknown"` legible.** Without a scan timestamp,

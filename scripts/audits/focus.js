@@ -88,6 +88,66 @@ function isVisible(element) {
   return style.visibility !== 'hidden' && style.display !== 'none' && style.opacity !== '0';
 }
 
+/**
+ * The audit's own instrument, measured on this browser before the application is.
+ *
+ * Every check below rests on one assumption: that focusing an element makes the browser repaint
+ * it, so `getComputedStyle` before and after says whether a ring exists. On 2026-08-16 that
+ * assumption failed on a GitHub runner and the audit reported **1 556 findings, every one of them
+ * `no-indicator`** — 100 % of the focusable elements on every surface in both themes, while
+ * `contrast` and `taborder` were clean on the same pages in the same run. A result that uniform
+ * is a statement about the browser, and an audit that cannot tell that apart from an application
+ * with no focus rings anywhere is an audit whose output has to be interpreted by whoever
+ * remembers this story.
+ *
+ * So the mechanism is measured rather than assumed, on a control this file creates, styles and
+ * throws away — nothing in `dist/` can make it pass or fail. Two probes, because the two ways it
+ * can break need different fixes and look identical from the findings list:
+ *
+ * * **`:focus`** — does the browser paint the focused element at all? Gecko drops the focus state
+ *   when it does not consider the window active, which a headless browser on a machine with no
+ *   display server may never be. `document.activeElement` still answers correctly, so the
+ *   elements report as focusable and every one of them reports as ringless.
+ * * **`:focus-visible`** — does `focus({ focusVisible: true })` produce a keyboard-focus paint?
+ *   This is the narrower assumption, and the app's ring is written against `:focus-visible`
+ *   alone, with `:focus:not(:focus-visible)` explicitly cancelling the outline in `global.css`.
+ *
+ * A failing probe is reported as the audit's own failure and the run still exits non-zero. The
+ * ring is an S-09 requirement and this is not a way to go green on a runner: it is the
+ * difference between "this app has no focus rings" and "this browser drew none of them".
+ */
+function mechanism() {
+  const style = document.createElement('style');
+  // Id specificity, deliberately: `global.css` cancels the outline on `:focus:not(:focus-visible)`
+  // and a probe styled by class would be measuring that rule rather than the browser.
+  style.textContent = [
+    '#tv-probe-focus,#tv-probe-focus-visible{position:fixed;top:0;left:-9999px;',
+    'width:16px;height:16px;outline:0 solid transparent}',
+    '#tv-probe-focus:focus{outline:3px solid rgb(255,0,0)}',
+    '#tv-probe-focus-visible:focus-visible{outline:3px solid rgb(0,255,0)}',
+  ].join('');
+  document.head.append(style);
+
+  const probe = (id) => {
+    const element = document.createElement('button');
+    element.id = id;
+    document.body.append(element);
+    document.activeElement?.blur?.();
+    const before = paintOf(element);
+    element.focus({ focusVisible: true });
+    const painted =
+      document.activeElement === element &&
+      WATCHED.some((property) => before[property] !== paintOf(element)[property]);
+    element.blur();
+    element.remove();
+    return painted;
+  };
+
+  const result = { focus: probe('tv-probe-focus'), focusVisible: probe('tv-probe-focus-visible') };
+  style.remove();
+  return result;
+}
+
 /** The element and the two boxes it sits in — as far up as a ring may reasonably be drawn. */
 function ringCarriers(element) {
   const chain = [element];
@@ -99,6 +159,9 @@ function ringCarriers(element) {
 }
 
 const findings = [];
+// Taken before the walk and on every surface rather than once per run: the report a person reads
+// is per-surface, and a mechanism proven somewhere else is a sentence rather than evidence.
+const instrument = mechanism();
 const elements = [...document.querySelectorAll(FOCUSABLE)].filter(isVisible);
 
 for (const element of elements) {
@@ -157,6 +220,9 @@ await fetch('/__report__', {
     // did not reach the screen it was aimed at, and an audit that reported "0 problems" for it
     // would be the most reassuring possible way to test nothing.
     total: elements.length,
+    // What the findings below are worth. Reported on a clean surface as well as a failing one,
+    // because "the instrument worked" is the part of the evidence that was missing.
+    mechanism: instrument,
     findings,
   }),
 });

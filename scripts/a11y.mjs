@@ -28,13 +28,42 @@
  */
 
 import { spawn } from 'node:child_process';
-import { readFile, mkdir, rm } from 'node:fs/promises';
+import { readFile, mkdir, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { DIST, ROOT, SCENARIOS, SIZE, serve } from './harness.mjs';
 
 const PROFILE = join(ROOT, 'target/a11y-profile');
+/**
+ * The profile is built fresh on every run, so what it needs is written rather than remembered.
+ *
+ * **One pref, and it is not about accessibility.** On a fresh profile Mozilla's own build shows
+ * the data-collection privacy notice at startup, and whatever presents it takes window activation
+ * away from the page under test: `document.hasFocus()` is then `false`, `:focus` matches nothing,
+ * and `scripts/audits/focus.js` reports every control in the application as ringless while
+ * `contrast` and `taborder` — which do not care who is focused — stay clean. That is exactly what
+ * run 31937787913 did: **1 556 findings, 100 % of the focusable elements, in both themes.**
+ *
+ * This desktop never saw it because Ubuntu's Firefox snap suppresses that notice, so the audit
+ * was measured for two days against the one build that hides the problem. Measured on this
+ * machine with Mozilla's 153.0.4 tarball — the build `browser-actions/setup-firefox` installs,
+ * the same version as the snap beside it — `hasFocus` is `false` and every probe fails; with this
+ * one pref set, `hasFocus` is `true` and both probes paint. Nothing else in the environment
+ * matters: the audit is equally clean with `DISPLAY`, Wayland and D-Bus stripped, and under
+ * `env -i`.
+ *
+ * `focusmanager.testmode` — the pref Gecko's own harness uses to make focus work in an inactive
+ * window — was tried first and changes nothing here, so it is not carried.
+ *
+ * This does not relax what the audit asks for. The ring still has to come from the stylesheet,
+ * and `browser.display.show_focus_rings` — which would force one onto anything focused, keyboard
+ * or not — is deliberately **not** set. It gives the page a window that is actually focused; it
+ * does not make a missing ring pass.
+ */
+const PREFS = [
+  'user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);',
+].join('\n');
 const AUDITS = ['focus', 'contrast', 'taborder'];
 /** Long enough for a cold Firefox plus the longest scenario's own hold, and no longer. */
 const TIMEOUT_MS = 15000;
@@ -118,6 +147,7 @@ for (const audit of audits) {
 
 await rm(PROFILE, { recursive: true, force: true });
 await mkdir(PROFILE, { recursive: true });
+await writeFile(join(PROFILE, 'user.js'), `${PREFS}\n`);
 
 const reports = [];
 let announce = () => {};
@@ -168,6 +198,21 @@ for (const report of reports) {
       `  ${report.audit} ${where}: nothing to measure — the scenario drew no ${nothing[report.audit]}`,
     );
     silent += 1;
+    continue;
+  }
+
+  // The focus audit carries the result of its own instrument, and a broken instrument is reported
+  // as one failure of the audit rather than as a finding against every control on the surface.
+  // It still fails the run: the ring is S-09, and "the browser drew none of them" is not a pass.
+  if (report.mechanism && !report.mechanism.focusVisible) {
+    const how = report.mechanism.focus
+      ? 'it painted `:focus` but not `:focus-visible`, so `focus({ focusVisible: true })` is not producing a keyboard-focus paint here'
+      : 'it painted nothing at all, so this browser is applying no focus state — a window it does not consider active, which is what a startup notice stealing activation looks like (see PREFS above)';
+    console.error(
+      `  ${report.audit} ${where}: the audit's own probe failed — ${how}. ` +
+        `The ${report.findings.length} findings below would be about this browser, not the app.`,
+    );
+    problems += 1;
     continue;
   }
 

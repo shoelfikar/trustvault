@@ -182,7 +182,13 @@ capture() {
   printf '\nPress Enter when you have read the above. '
   read -r _
 
+  # Asked for once, up front, and then kept warm. sudo's credential cache is 15 minutes by
+  # default and an `off` run is 10 plus however long the app takes to quit, so without this the
+  # script stops to ask for a password at the one moment it must not: while it is trying to stop
+  # tcpdump, with the countdown still on screen and the operator reading that instead.
   sudo -v
+  ( while kill -0 "$$" 2>/dev/null; do sudo -n true 2>/dev/null || true; sleep 60; done ) &
+  keepalive=$!
 
   {
     echo "mode:      $setting"
@@ -218,6 +224,7 @@ capture() {
     pid=$(cat "$directory/tcpdump.pid" 2>/dev/null || true)
     [[ -n "$pid" ]] && sudo kill -INT "$pid" 2>/dev/null || true
     sleep 0.5
+    kill "$keepalive" 2>/dev/null || true
   }
   trap 'stop_capture' EXIT
 
@@ -246,6 +253,11 @@ capture() {
           }'
       )
       pattern=$(echo "$tree" | sort -u | sed 's/^/pid=/' | paste -sd'|')
+      # A heartbeat every pass, whether or not the tree holds a socket. Without it an app that
+      # never opened one is indistinguishable from an app that never launched, and the `off` run
+      # — whose whole claim is that no socket was opened — would pass vacuously on a crash. The
+      # report counts these and refuses a run with too few.
+      printf '%s\t# tree %s\n' "$(date +%s.%N)" "$(echo "$tree" | sort -u | wc -l)" >> "$directory/sockets.txt"
       if [[ -n "$pattern" ]]; then
         ss -tunapH 2>/dev/null | grep -E "$pattern" | while IFS= read -r line; do
           printf '%s\t%s\n' "$(date +%s.%N)" "$line"
@@ -284,12 +296,19 @@ capture() {
   touch "$directory/sockets.txt"
   say "Analysing"
   set +e
+  # 80 % of the heartbeats a full-length run would produce. Not 100 %: the app takes a moment to
+  # start and the operator takes a moment to quit it, and a run that is 95 % of the requested
+  # length is a run, while one that is 4 % is a crash being reported as silence.
+  local expected=0
+  [[ "$setting" == off ]] && expected=$(awk -v m="$minutes" -v i="$sample_interval" 'BEGIN { printf "%d", m * 60 / i * 0.8 }')
+
   python3 scripts/capture-report.py \
     --mode "$setting" \
     --pcap "$directory/capture.pcap" \
     --sockets "$directory/sockets.txt" \
     --manifest "$manifest" \
     --meta "$directory/run.txt" \
+    --min-samples "$expected" \
     --out "$directory/report.md"
   local status=$?
   set -e

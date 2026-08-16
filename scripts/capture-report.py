@@ -367,6 +367,14 @@ class Sockets:
     by_process: dict[str, set[tuple[str, int]]] = field(default_factory=dict)
     samples: int = 0
     lines: int = 0
+    #: Heartbeats — one per sampling pass, written whether or not the tree held a socket. This
+    #: is what tells "the app opened no socket" apart from "the app never started", and the `off`
+    #: run's entire claim is the first of those.
+    heartbeats: int = 0
+    #: The largest process tree seen. One is the app alone; a Tauri app under WebKitGTK is more.
+    tree: int = 0
+    #: Wall clock from the first sample to the last.
+    span: float = 0.0
 
 
 SS_ENDPOINT = re.compile(r"^\[?([0-9a-fA-F.:]+?)\]?:(\d+|\*)$")
@@ -378,6 +386,7 @@ def read_sockets(path: Path) -> Sockets:
     if not path.exists():
         return sockets
     seen_timestamps: set[str] = set()
+    stamps: list[float] = []
     for line in path.read_text(errors="replace").splitlines():
         if not line.strip() or line.startswith("#"):
             continue
@@ -385,6 +394,16 @@ def read_sockets(path: Path) -> Sockets:
         if len(parts) != 2:
             continue
         seen_timestamps.add(parts[0])
+        try:
+            stamps.append(float(parts[0]))
+        except ValueError:
+            pass
+        if parts[1].startswith("# tree"):
+            sockets.heartbeats += 1
+            size = parts[1].split()
+            if len(size) == 3 and size[2].isdigit():
+                sockets.tree = max(sockets.tree, int(size[2]))
+            continue
         fields = parts[1].split()
         if len(fields) < 6:
             continue
@@ -401,6 +420,7 @@ def read_sockets(path: Path) -> Sockets:
             if bucket is sockets.endpoints:
                 sockets.by_process.setdefault(name, set()).add((address, port))
     sockets.samples = len(seen_timestamps)
+    sockets.span = (max(stamps) - min(stamps)) if stamps else 0.0
     return sockets
 
 
@@ -480,6 +500,7 @@ def analyse(
     sockets_path: Path,
     manifest_path: Path,
     meta: str = "",
+    min_samples: int = 0,
 ) -> tuple[list[Check], str]:
     """Read the three inputs and return the verdicts plus the report text.
 
@@ -620,6 +641,24 @@ def analyse(
             )
         )
     else:
+        # Before the claim, the evidence that there was a run to make it about. "Zero packets"
+        # is the one verdict in this report that an app which crashed on launch would also earn,
+        # and gate line 4 is the phase's headline claim — so the vacuous case is refused by name
+        # rather than left to whoever reads the number.
+        checks.append(
+            Check(
+                "The run is not vacuous — the app was alive and watched throughout",
+                sockets.heartbeats >= max(min_samples, 1) and sockets.tree >= 1,
+                f"{sockets.heartbeats} heartbeats over {sockets.span:.0f} s, largest process tree {sockets.tree}"
+                + (f", against {min_samples} expected for the requested run length" if min_samples else "")
+                + (
+                    ""
+                    if sockets.heartbeats >= max(min_samples, 1)
+                    else " — **too few**: the app exited early or never started, and a capture of an "
+                    "application that is not running says nothing about the application"
+                ),
+            )
+        )
         checks.append(
             Check(
                 "Zero packets left the machine from the app's process tree — S-10, R-26, gate line 4",
@@ -729,6 +768,12 @@ def main() -> int:
     parser.add_argument("--sockets", type=Path)
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--meta", type=Path)
+    parser.add_argument(
+        "--min-samples",
+        type=int,
+        default=0,
+        help="heartbeats a full-length run would produce; fewer means the app did not stay up",
+    )
     parser.add_argument("--out", type=Path)
     parser.add_argument(
         "--self-test",
@@ -750,7 +795,12 @@ def main() -> int:
 
     meta = arguments.meta.read_text().strip() if arguments.meta and arguments.meta.exists() else ""
     checks, report = analyse(
-        arguments.mode, arguments.pcap, arguments.sockets, arguments.manifest, meta
+        arguments.mode,
+        arguments.pcap,
+        arguments.sockets,
+        arguments.manifest,
+        meta,
+        arguments.min_samples,
     )
     arguments.out.write_text(report)
 
@@ -914,11 +964,28 @@ def self_test() -> int:
             "a ClientHello naming another host fails the destination check",
         )
 
+        # An app that ran for ten minutes and opened no socket at all: heartbeats, no rows. This
+        # is what a passing `off` run looks like, and it is the only shape that may pass.
         idle = directory / "idle-sockets.txt"
-        idle.write_text("")
+        idle.write_text(
+            "".join(f"{1755300000 + tick * 0.2:.1f}\t# tree 4\n" for tick in range(3000))
+        )
         expect(
             all(verdicts("off", [], idle).values()),
-            "an empty capture passes every `off` check",
+            "a capture of a live app that opened nothing passes every `off` check",
+        )
+
+        # And the shape that must not: no heartbeats means nothing was watched, so "zero packets"
+        # is a statement about an application that was not running. A crash on launch would earn
+        # gate line 4 otherwise, which is the one vacuous pass in this report worth engineering
+        # against.
+        crashed = directory / "crashed-sockets.txt"
+        crashed.write_text("")
+        expect(
+            not any(
+                passed for name, passed in verdicts("off", [], crashed).items() if "not vacuous" in name
+            ),
+            "a run where the app never started fails as vacuous rather than passing as silent",
         )
 
         # Only the two S-10 checks, not every check: the traffic carries no password, so the

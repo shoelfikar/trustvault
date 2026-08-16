@@ -62,6 +62,13 @@ jobs:
       # about the runner and belongs in trustvault-state.md — not a bigger number.
       - name: Watchtower local scan within budget (S-07a)
         run: cargo bench --bench watchtower -p trustvault-core
+      # The packet capture itself cannot run here — nothing in CI runs the application, which has
+      # been true since next action 14 — but the script that decides whether a capture passes can,
+      # and it is the piece with logic in it. It builds a capture, analyses it, then breaks it on
+      # purpose: a planted password, a full SHA-1 in hex and in raw bytes, a ClientHello naming
+      # another host. No root, no network, no display; about a second.
+      - name: Packet-capture report agrees with itself (R-25)
+        run: python3 scripts/capture-report.py --self-test
 
   boundary:
     name: Vault core isolation (N-02)

@@ -49,6 +49,20 @@ TrustVault App.html
 # it is what makes the pictures reproducible on a machine that is not this one.
 /docs/screenshots/
 
+# --- Python bytecode, from the one Python script in the tree ---
+# scripts/capture-report.py is stdlib-only and imports nothing of ours, so this is CPython's
+# cache of the script itself and nothing else.
+__pycache__/
+
+# --- Packet captures, which scripts/capture.sh takes with no BPF filter at all ---
+# The strongest reason in this file after the vault lines. A capture is unfiltered on purpose
+# (scripts/capture.sh, D-88) — the negative claims it makes are only worth something if nothing
+# was excluded before they were made — so a run holds every packet this machine sent for ten
+# minutes: other applications' traffic, the names this machine looked up, its addresses. None
+# of that is TrustVault's to publish. What leaves the directory is the verdict table, pasted by
+# hand into the session log of trustvault-state.md, which is what the gate asks for.
+/captures/
+
 # Cargo.lock and package-lock.json are committed deliberately. A lock file is the only thing
 # that makes today's build reproducible next year, so it is source even though a machine
 # wrote it.

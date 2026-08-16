@@ -270,6 +270,23 @@ pub struct VaultStatus {
     /// and "unlocked, and nobody has filled it in" are different facts and the footer draws
     /// them differently.
     pub profile: Option<Profile>,
+    /// When the last local Watchtower scan finished, or `None` — §6.9.
+    ///
+    /// Two reasons for `None` and the surface must not merge them: the vault is **locked**, so
+    /// the timestamp cannot be read out of the sealed body (`item_count`'s reason, D-70's
+    /// precedent), or it is unlocked and **has never been scanned**. `state` is what tells them
+    /// apart.
+    ///
+    /// It rides on the status rather than the scan returning it, so that the screen can say
+    /// when the last scan ran **without running one** — a "last checked" that only appears after
+    /// you check is not a last-checked.
+    pub last_scan_at: Option<i64>,
+    /// When the last breach check finished, or `None` — §6.9.
+    ///
+    /// Always `None` today: nothing writes it until `watchtower_breach_check` ships. It is here
+    /// with its sibling because the two must never be collapsed into one — a local scan from
+    /// this morning would otherwise vouch for a breach check that has never run.
+    pub last_breach_check_at: Option<i64>,
 }
 
 /// Argon2id parameters, measured on this machine (R-02).

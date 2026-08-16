@@ -271,6 +271,15 @@ impl Vault {
         &self.body
     }
 
+    /// The decrypted body, mutably, for the modules of this crate that write into it.
+    ///
+    /// `pub(crate)` and it stays that way: a `&mut VaultBody` reaching the command layer would
+    /// be a second write path around every rule [`Vault`]'s own methods enforce. The scan uses
+    /// it to stamp `last_scan_at` beside the statuses it just wrote — see `crate::watchtower`.
+    pub(crate) fn body_mut(&mut self) -> &mut VaultBody {
+        &mut self.body
+    }
+
     /// Every item, in insertion order.
     pub fn items(&self) -> impl Iterator<Item = &Item> {
         self.body.items.iter()

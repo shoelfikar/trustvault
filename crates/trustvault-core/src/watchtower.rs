@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::model::{FieldId, FieldKind, ItemId, ItemStatus, now_ms};
+use crate::model::{FieldId, FieldKind, Item, ItemId, ItemStatus, now_ms};
 use crate::vault::Vault;
 
 /// The highest zxcvbn score still reported as weak — R-24, and the "not by length" half of the
@@ -366,6 +366,55 @@ pub fn scan(vault: &Vault) -> Report {
     }
 }
 
+/// Whether Watchtower has anything to say about this item at all.
+///
+/// The predicate behind the one asymmetry in [`scan_and_record`]: an item with no password
+/// field is not scanned, so it is not "clean" either.
+fn holds_a_password(item: &Item) -> bool {
+    item.fields
+        .iter()
+        .any(|field| field.kind == FieldKind::Password)
+}
+
+/// Scans, then writes what it concluded into the vault's status cache — R-23, R-24, D-26.
+///
+/// The cache is what the item list draws its pips from, and [`Report`] is what the Watchtower
+/// view draws from; they are the same conclusion stored twice on purpose, because a list of
+/// findings cannot be consulted per row while scrolling and a per-item status cannot say who a
+/// password is shared with.
+///
+/// Three properties, and each one is a test below.
+///
+/// **A scanned item with no finding becomes [`ItemStatus::Strong`].** Absence from
+/// [`Report::worst`] is the only evidence of a clean field there is — the report carries no row
+/// saying `strong` (§6.9) — so the writing happens here rather than being inferred by a caller.
+///
+/// **An item with no password field is left exactly as it was — D-81.** A secure note or a
+/// Wi-Fi entry holding no password has nothing R-23 or R-24 can judge, and writing `Strong`
+/// onto it would put a green pip and the word *Strong* on an item this function never examined.
+/// That is the false-promise class of D-49, D-55 and D-61, and it is worth a `Unknown` pip that
+/// reads as "not applicable" instead. The cost is real and is accepted: a vault of notes shows
+/// a row of unknowns forever, because nothing here can distinguish "nothing to check" from
+/// "never checked" in a vocabulary that has one word for both.
+///
+/// **`item.updated_at` does not move.** The status is written to the field directly rather than
+/// through an edit, for [`crate::model::VaultBody::record_reveal`]'s reason: a scan reads the
+/// vault, and a "last changed" column that meant "last scanned" would be worthless. The body's
+/// own `updated_at` does move, because the caller saves and every save touches it.
+pub fn scan_and_record(vault: &mut Vault) -> Report {
+    let report = scan(vault);
+    let worst = report.worst();
+    let body = vault.body_mut();
+    for item in &mut body.items {
+        if !holds_a_password(item) {
+            continue;
+        }
+        item.status = worst.get(&item.id).copied().unwrap_or(ItemStatus::Strong);
+    }
+    body.last_scan_at = Some(report.scanned_at);
+    report
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -626,6 +675,100 @@ mod tests {
             .find(|f| f.verdict == Verdict::Weak)
             .expect("a password that is the username plus two digits is not a strong one");
         assert!(scored.score <= WEAK_MAX_SCORE);
+    }
+
+    /// The status cache is written from the report, and the timestamp beside it — D-26, §6.9.
+    #[test]
+    fn recording_a_scan_caches_the_worst_verdict_per_item_and_stamps_the_time() {
+        let mut vault = vault();
+        let reused_one = with_password(&mut vault, "Forum", "password");
+        let reused_two = with_password(&mut vault, "Wiki", "password");
+        let weak = with_password(&mut vault, "Router", "hunter2");
+        let clean = with_password(&mut vault, "Stripe", "qX7#vn2Lp!4dRt");
+
+        assert!(vault.body().last_scan_at.is_none(), "never scanned");
+        let report = scan_and_record(&mut vault);
+
+        // Weak *and* reused caches as the louder of the two, and both rows are still in the
+        // report — the ranking happens in the cache, never in the findings.
+        for id in [reused_one, reused_two] {
+            assert_eq!(
+                vault.item(id).map(|item| item.status),
+                Some(ItemStatus::Reused)
+            );
+        }
+        assert_eq!(
+            vault.item(weak).map(|item| item.status),
+            Some(ItemStatus::Weak)
+        );
+        // The only evidence a clean field exists is its absence from the report.
+        assert_eq!(
+            vault.item(clean).map(|item| item.status),
+            Some(ItemStatus::Strong)
+        );
+        assert_eq!(vault.body().last_scan_at, Some(report.scanned_at));
+        assert!(
+            vault.body().last_breach_check_at.is_none(),
+            "a local scan does not vouch for a breach check that has never run"
+        );
+    }
+
+    /// D-81: an item with no password field is not scanned, so it is not called clean either.
+    #[test]
+    fn an_item_with_no_password_is_left_alone_rather_than_called_strong() {
+        let mut vault = vault();
+        let note = vault.add_item(ItemKind::Note, "Passport number".to_owned());
+        let item = vault.item_mut(note).expect("just added");
+        item.push_field(Field::new("Note", "X1234567", true).with_kind(FieldKind::Note));
+
+        scan_and_record(&mut vault);
+        assert_eq!(
+            vault.item(note).map(|item| item.status),
+            Some(ItemStatus::Unknown),
+            "a green Strong pip on an item nothing examined is the D-49 class of false promise"
+        );
+    }
+
+    /// A password that got better stops being reported, and the cache follows it down.
+    ///
+    /// The failure this exists for is a cache that only ever gets worse: statuses written by
+    /// one scan and never cleared by the next leave a fixed password wearing a *Weak* pip
+    /// until the vault is rebuilt, which teaches the user to ignore the pips.
+    #[test]
+    fn a_fixed_password_loses_its_status_on_the_next_scan() {
+        let mut vault = vault();
+        let id = with_password(&mut vault, "Forum", "password");
+        scan_and_record(&mut vault);
+        assert_eq!(
+            vault.item(id).map(|item| item.status),
+            Some(ItemStatus::Weak)
+        );
+
+        let item = vault.item_mut(id).expect("still there");
+        let field = item.fields.first_mut().expect("the password");
+        field.value = "correct horse battery staple".into();
+
+        scan_and_record(&mut vault);
+        assert_eq!(
+            vault.item(id).map(|item| item.status),
+            Some(ItemStatus::Strong),
+            "the cache has to be able to go down as well as up"
+        );
+    }
+
+    /// A scan is a read, and the item's own "last changed" must not move for one.
+    #[test]
+    fn recording_a_scan_does_not_move_an_items_updated_at() {
+        let mut vault = vault();
+        let id = with_password(&mut vault, "Forum", "password");
+        let before = vault.item(id).map(|item| item.updated_at);
+
+        scan_and_record(&mut vault);
+        assert_eq!(
+            vault.item(id).map(|item| item.updated_at),
+            before,
+            "a status pip is not an edit"
+        );
     }
 
     /// Two scans of an unchanged vault produce the same list in the same order.

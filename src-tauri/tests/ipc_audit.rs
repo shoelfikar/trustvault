@@ -14,8 +14,10 @@
 
 use std::path::PathBuf;
 
-use trustvault_core::{CharSets, FieldId, FieldKind, ItemId, ItemKind, KdfParams, Vault};
-use trustvault_lib::commands::{generator, import, items, search, totp, vault as vault_cmd};
+use trustvault_core::{CharSets, FieldId, FieldKind, ItemId, ItemKind, KdfParams, Vault, Verdict};
+use trustvault_lib::commands::{
+    generator, import, items, search, totp, vault as vault_cmd, watchtower,
+};
 use trustvault_lib::dto::{Copied, MASK};
 use trustvault_lib::error::ErrorKind;
 use trustvault_lib::state::AppState;
@@ -187,6 +189,10 @@ fn every_command_names_its_arguments_in_snake_case() {
         ("generator.rs", include_str!("../src/commands/generator.rs")),
         ("search.rs", include_str!("../src/commands/search.rs")),
         ("totp.rs", include_str!("../src/commands/totp.rs")),
+        (
+            "watchtower.rs",
+            include_str!("../src/commands/watchtower.rs"),
+        ),
     ];
 
     // `include_str!` needs a literal path, so the list above is written by hand — and a
@@ -480,6 +486,86 @@ fn every_vault_command_refuses_while_locked() {
             .unwrap_err()
             .kind,
         ErrorKind::Locked
+    );
+    // §6.9. Scoring every password means reading every password, so a scan that ran while
+    // locked would be the whole vault decrypted by a command that returns no secret and would
+    // therefore look harmless in every response this harness reads.
+    assert_eq!(
+        watchtower::watchtower_scan_inner(&state).unwrap_err().kind,
+        ErrorKind::Locked
+    );
+}
+
+/// A Watchtower report carries findings and **no password, and no hash of one** — §6.9, R-10.
+///
+/// The hash is the assertion worth having. The reuse grouping key is a SHA-256 of a password,
+/// and a hash of a short secret is a secret: it is a dictionary attack away from the value. So
+/// the check is not only "the plaintext is absent" but "nothing 64 hex characters long crossed",
+/// which is what a leaked key would look like however it was named — `group`, `group_id`, or a
+/// field somebody adds later thinking a digest is anonymous.
+#[test]
+fn a_watchtower_report_carries_no_password_and_no_hash_of_one() {
+    let (state, item, _, _) = unlocked();
+    // A second item with the same password, so the report has a reuse group in it: a report with
+    // no group cannot leak a grouping key, and this test would then be measuring nothing.
+    state.with(|inner| {
+        let vault = inner.vault.as_mut().expect("open");
+        let id = vault.add_item(ItemKind::Login, "GitLab");
+        let entry = vault.item_mut(id).expect("just added");
+        entry.set_field("Password", SECRET, true);
+    });
+
+    let report = watchtower::watchtower_scan_inner(&state)
+        // The fixture's path is not writable, so the save fails and the report never returns.
+        // The scan itself is what this test reads, and `scan` is the same call the command
+        // makes — the elision is a property of the shape, not of the save.
+        .unwrap_or_else(|_| {
+            state
+                .with(|inner| trustvault_core::scan(inner.vault.as_ref().expect("open")))
+                .expect("a vault is open")
+        });
+
+    let payload = serde_json::to_string(&report).unwrap();
+    assert!(!payload.contains(SECRET), "a finding carried the password");
+    assert!(
+        !payload.contains(SEED),
+        "a TOTP seed is not a password field and must not be scored or reported"
+    );
+
+    // Any 64-hex-character run is a SHA-256 in hex, which is the shape the grouping key would
+    // take if it ever escaped. Checked over the payload rather than over a named field, because
+    // the failure this exists for is a *new* field nobody reviewed.
+    let hex_runs = payload
+        .split(|c: char| !c.is_ascii_hexdigit())
+        .filter(|run| run.len() >= 64)
+        .count();
+    assert_eq!(
+        hex_runs, 0,
+        "something 64 hex characters long crossed the boundary — a SHA-256 of a short \
+         password is a secret, and the grouping key must never leave trustvault-core"
+    );
+
+    // The reuse group is reported, and it names items rather than a key.
+    let reused: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.verdict == Verdict::Reused)
+        .collect();
+    assert_eq!(reused.len(), 2, "both members of the group are reported");
+    for finding in reused {
+        assert_eq!(
+            finding.shared_with.len(),
+            1,
+            "each names the other, and nothing else"
+        );
+        assert_ne!(finding.shared_with[0], finding.item_id, "not itself");
+    }
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|finding| finding.item_id == item),
+        "the fixture's own item is in the report"
     );
 }
 

@@ -163,8 +163,8 @@ vault_status(): {
   display_name: string;        // see below
   item_count: number | null;   // null unless unlocked
   profile: { name: string; email: string } | null;   // null unless unlocked — D-70
-  last_scan_at: number | null;           // planned — Phase 4, §6.9
-  last_breach_check_at: number | null;   // planned — Phase 4, §6.9
+  last_scan_at: number | null;           // null unless unlocked and scanned — §6.9
+  last_breach_check_at: number | null;   // always null until the breach check ships — §6.9
 }
 ```
 
@@ -184,6 +184,12 @@ account**: nothing authenticates against it, nothing is sent anywhere (D-03), an
 is "locked, so unknown", and the footer falls back to the vault's own name. The empty pair is
 "unlocked, and nobody has filled it in" — every vault starts there, because the design's three
 onboarding steps are vault name, master password and recovery kit, and none of them asks.
+
+The two Watchtower timestamps landed 2026-08-16 with `watchtower_scan` and are the same wrinkle a
+third time: both live in the sealed body, so both are `null` while locked. **A `null` here has two
+causes and the surface must read `state` to tell them apart** — locked, or unlocked and never
+scanned. Rendering "never checked" on a lock screen would be a claim about a vault this build
+cannot read.
 
 ```ts
 default_vault_path({ name: string }): string
@@ -781,9 +787,17 @@ type BreachReport = {
   unchecked: { item_id: Uuid; field_id: Uuid; reason: "off" | "offline" | "http" }[];
 };
 
-watchtower_scan(): WatchtowerReport            // planned — R-23, R-24
+watchtower_scan(): WatchtowerReport            // R-23, R-24
 watchtower_breach_check(): BreachReport        // planned — R-25, R-26
 ```
+
+**`watchtower_scan` shipped 2026-08-16**, marker deleted in the commit that registered it, which is
+the tenth time that habit has held. It also **writes the status cache and stamps `last_scan_at`**
+before returning, and it saves: statuses kept in memory would draw fresh pips until the next
+relaunch and blank ones after it, which looks exactly like a scan that never ran. One asymmetry in
+that write is a decision rather than an oversight — **D-81**: an item with no password field is left
+at the status it had, because Watchtower examined nothing on it and `strong` would be a verdict
+nothing earned.
 
 **Both are vault-class. Neither returns a `Secret`, and nothing here needs a fifth sanctioned
 command** — a finding is not a secret, and if a Watchtower command ever appears to want a plaintext
@@ -850,13 +864,20 @@ be days apart. A single "last scanned" would let a local scan from this morning 
 check that has never run.
 
 ```ts
-last_scan_at: Millis | null;           // planned — Phase 4
-last_breach_check_at: Millis | null;   // planned — Phase 4
+last_scan_at: Millis | null;           // written by watchtower_scan
+last_breach_check_at: Millis | null;   // nothing writes it yet
 ```
 
-**Results are discarded if the vault locked while the scan was running.** A breach check over a
-thousand passwords outlives an auto-lock timeout by a wide margin, and the key to write the cache
-with is gone by then. The scan does not extend the lock, does not hold the vault open, and does not
+Both landed 2026-08-16 in the commit that implemented the scan, as this section said they would.
+`last_breach_check_at` is carried while still being written by nothing, deliberately: adding it now
+costs one key that is absent from every file (`vault-format.md` §6.7) and adding it later would be a
+second format change for the same feature.
+
+**Results are discarded if the vault locked while the scan was running.** This is a rule for the
+**breach check**, and `watchtower_scan` is exempt by construction rather than by care: it is
+synchronous and holds the vault for its whole 61 ms (S-07a), so there is no window for an auto-lock
+to open. A breach check over a thousand passwords outlives an auto-lock timeout by a wide margin,
+and the key to write the cache with is gone by then. The scan does not extend the lock, does not hold the vault open, and does not
 resurrect a key — it finishes, finds the vault closed, and drops what it computed. This is the one
 place where the open question about the auto-lock clock (`trustvault-state.md`) has a **wrong**
 answer available and worth naming: a scan that touches the lock timer would let a background task

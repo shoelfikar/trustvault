@@ -136,6 +136,9 @@ pub fn run() {
             commands::totp::totp_code,
             commands::import::import_preview,
             commands::import::import_commit,
+            // Watchtower — the local half only (D-76). `watchtower_breach_check` is the one
+            // command in this application that opens a socket, and it is not here yet.
+            commands::watchtower::watchtower_scan,
             // Sanctioned — exactly four, each returning exactly one secret.
             // The fourth arrived with D-44; a fifth is a decision log entry, not a patch.
             commands::vault::create_vault,

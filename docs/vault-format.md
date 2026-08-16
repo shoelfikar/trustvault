@@ -217,6 +217,8 @@ VaultBody {
   items:      [Item],
   profile:    Profile,       // §6.6; absent entirely when empty
   audit:      [AuditEntry],  // §6.4; absent entirely when empty
+  last_scan_at:         int, // §6.7; Unix milliseconds; absent entirely when never
+  last_breach_check_at: int, // §6.7; Unix milliseconds; absent entirely when never
   ...unknown                 // §6.2
 }
 
@@ -375,6 +377,28 @@ Four properties, and a second implementation must match all four:
 `unknown` on `Profile` counts toward "empty" in the N-09 direction: a profile holding only a key this
 build does not recognize is **not** empty, and skipping it on write would drop what a newer version
 stored.
+
+### 6.7 The two Watchtower timestamps — R-23…R-26
+
+`last_scan_at` and `last_breach_check_at` say when the local scan and the breach check last
+finished, in Unix milliseconds. Added 2026-08-16 with `watchtower_scan`, and permitted without a
+version bump by §9: a new key in the body is not a format change.
+
+Four properties, and the first two are the reason there are two keys rather than one:
+
+1. **Two passes, two timestamps.** `status: "strong"` means *clean at the last scan*, and the local
+   scan and the breach check can be days apart. A single "last scanned" would let this morning's
+   local scan vouch for a breach check that has never run, which is the one direction this cache
+   must never fail in.
+2. **`last_breach_check_at` is written by nothing in this version.** It is specified and reserved
+   because adding it now costs an absent key and adding it with the breach check would be a second
+   format change for the same feature. A reader MUST treat it as "never".
+3. **Absent when never.** A vault that has not been scanned writes no key at all, the rule `audit`
+   (§6.4) and `profile` (§6.6) already follow, and the reason the vectors in §10 stay valid.
+4. **They are the only thing that makes `status: "unknown"` legible.** Without a scan timestamp,
+   an item nobody ever scanned and an item Watchtower deliberately did not examine are the same
+   value — and both are written: an item with **no password field** keeps the status it had rather
+   than being called `strong`, because nothing was examined on it.
 
 ## 7. Reading a vault
 

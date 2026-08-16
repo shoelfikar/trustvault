@@ -35,6 +35,22 @@ export interface VaultStatus {
   displayName: string;
   itemCount: number | null;
   /**
+   * When the last local Watchtower scan finished, or `null` — §6.9.
+   *
+   * **`null` has two causes and they must not be merged**: the vault is locked, so the timestamp
+   * cannot be read out of the sealed body, or it is unlocked and has never been scanned. Read
+   * `state` to tell them apart before rendering "never checked" at anybody.
+   */
+  lastScanAt: number | null;
+  /**
+   * When the last breach check finished, or `null` — §6.9.
+   *
+   * Always `null` today: nothing writes it until the breach check ships. It is separate from
+   * `lastScanAt` on purpose — a local scan from this morning must never be shown as evidence
+   * that a breach check ran.
+   */
+  lastBreachCheckAt: number | null;
+  /**
    * Who the vault belongs to, or `null` while locked — §5, D-70.
    *
    * `null` and `{ name: '', email: '' }` are different answers and the footer draws them
@@ -212,6 +228,54 @@ export const ALL_SETS: CharSets = {
  * boundary a second time for a number the generating side already had the inputs for.
  */
 export type Generated = Strength & { password: string };
+
+/* ---- Watchtower, mirroring §6.9 ------------------------------------------ */
+
+/**
+ * What a finding says about one password field — §6.9.
+ *
+ * `breached` comes from the breach check and nothing produces it yet; `expired` is produced by
+ * **nothing at all** in v1 — no requirement defines a rotation date, so the view's group for it
+ * stays empty rather than implying a check that is not running.
+ */
+export type Verdict = 'weak' | 'reused' | 'breached' | 'expired';
+
+/**
+ * One verdict about one password field — §6.9, R-23, R-24.
+ *
+ * Carries no password and nothing derived from one. The reuse grouping key is a hash of a
+ * password and **a hash of a short secret is a secret**, so it never crosses: `sharedWith` names
+ * the other **items**, which are ids this side already holds from the item list.
+ *
+ * A field can be both weak and reused, and then there are **two** findings for it rather than
+ * one ranked verdict. The ranking happens only in the item's cached `status`, which is what the
+ * list draws its single pip from.
+ */
+export interface Finding {
+  itemId: string;
+  fieldId: string;
+  verdict: Verdict;
+  /** zxcvbn 0–4 — R-24. */
+  score: number;
+  /** zxcvbn's own phrasing: "31 minutes", "centuries" — R-24. */
+  crackTime: string;
+  /** The other items carrying the same value. Empty unless `verdict` is `reused`. */
+  sharedWith: string[];
+}
+
+/**
+ * What a local scan concluded — §6.9.
+ *
+ * **A clean field is the absence of a row**, never a row saying strong: `findings` holds only
+ * what is worth acting on, and an item that passes is absent. `distinct` is what a breach check
+ * would cost — one range request per distinct value, never per item (S-07b).
+ */
+export interface WatchtowerReport {
+  scannedAt: number;
+  passwords: number;
+  distinct: number;
+  findings: Finding[];
+}
 
 export type ErrorKind =
   | 'not_a_vault'
@@ -577,6 +641,21 @@ export const deleteItem = (itemId: string) => call<void>('delete_item', { itemId
  * `listItems`: a list of live codes is a list of secrets on a refresh timer.
  */
 export const totpCode = (itemId: string) => call<TotpCode>('totp_code', { itemId });
+
+/**
+ * Scores every password in the vault and groups the reused ones — §6.9, R-23, R-24.
+ *
+ * **The local half, and it touches no network.** The breach check is a separate command that
+ * does not exist yet, which is the shape of the S-10 promise rather than a note about it: with
+ * one combined command, "zero packets when breach checking is off" would be a branch inside the
+ * host; with two, it is a command nobody calls.
+ *
+ * It is not free — S-07a budgets 500 ms and it measures 61 ms for a thousand items — and it
+ * **writes to the vault**, caching a status per item so the list can draw its pips without
+ * re-scanning. Call it when the user opens Watchtower or asks for a re-check, not on every
+ * render.
+ */
+export const watchtowerScan = () => call<WatchtowerReport>('watchtower_scan');
 
 /* ---- Sanctioned — §7 ----------------------------------------------------- */
 /* Exactly four. A fifth entry in this group is a decision, not a patch.       */

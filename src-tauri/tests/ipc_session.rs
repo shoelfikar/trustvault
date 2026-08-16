@@ -31,8 +31,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use trustvault_core::{FieldKind, ItemKind, KdfParams};
-use trustvault_lib::commands::{items, vault as vault_cmd};
+use trustvault_core::{FieldKind, ItemKind, KdfParams, Verdict};
+use trustvault_lib::commands::{items, vault as vault_cmd, watchtower};
 use trustvault_lib::dto::{EditField, FieldSummary, KdfSummary, NewField};
 use trustvault_lib::state::AppState;
 
@@ -376,6 +376,77 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
         "the edit landed in the vault, not just in the response"
     );
 
+    // ---- Watchtower: a scan crosses findings, and a finding is not a secret ----------------
+    // §6.9 and R-10. The scan reads **every password in the vault** — it is the only command
+    // that does — so it is the one whose response a transcript is worth searching. A twin item
+    // is added first, carrying the same value as the one the edit stored: without a reuse group
+    // there is no grouping key in play, and this step would be proving nothing about the thing
+    // §6.9 actually forbids.
+    let twin = items::add_item_inner(
+        &state,
+        ItemKind::Login,
+        "GitHub (personal)".into(),
+        Vec::new(),
+        vec![NewField {
+            label: "Password".into(),
+            kind: FieldKind::Password,
+            value: EDITED_SECRET.into(),
+            secret: true,
+            custom: false,
+        }],
+    );
+    log.record("add_item", &twin);
+    let twin_id = twin.expect("a vault is open").item_id;
+
+    let scanned = watchtower::watchtower_scan_inner(&state);
+    log.record("watchtower_scan", &scanned);
+    let report = scanned.expect("a vault is open");
+    assert_eq!(report.passwords, 2, "both stored passwords were examined");
+    assert_eq!(report.distinct, 1, "and they are the same value");
+    let reused: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.verdict == Verdict::Reused)
+        .collect();
+    assert_eq!(reused.len(), 2, "each member of the group is reported");
+    for finding in reused {
+        assert_eq!(
+            finding.shared_with,
+            vec![if finding.item_id == item_id {
+                twin_id
+            } else {
+                item_id
+            }],
+            "a finding names the other item — never a key, and never itself"
+        );
+    }
+
+    // The cache landed in the vault, which is the half the report cannot show: the item list
+    // draws its pips from `status`, and a scan whose conclusions stayed in the response would
+    // leave the list saying `unknown` beside a Watchtower screen full of findings.
+    let after_scan = items::list_items_inner(&state);
+    log.record("list_items", &after_scan);
+    for summary in after_scan.expect("unlocked") {
+        assert_eq!(
+            summary.status,
+            trustvault_core::ItemStatus::Reused,
+            "the scan wrote the status cache, not just the response"
+        );
+    }
+    let scanned_status = state.status();
+    log.record_infallible("vault_status", &scanned_status);
+    assert_eq!(
+        scanned_status.last_scan_at,
+        Some(report.scanned_at),
+        "the vault remembers when it was scanned — §6.9"
+    );
+    assert!(
+        scanned_status.last_breach_check_at.is_none(),
+        "a local scan must never be read as evidence that a breach check ran"
+    );
+
+    log.record("delete_item", &items::delete_item_inner(&state, twin_id));
+
     // ---- Delete: the item goes, and so does every way of reading it ------------------------
     let deleted = items::delete_item_inner(&state, item_id);
     log.record("delete_item", &deleted);
@@ -499,6 +570,28 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
         assert!(
             !crossing.payload.contains(USERNAME),
             "list_items carried a field value"
+        );
+    }
+
+    // The scan's own crossing, read out of the transcript rather than out of its return type —
+    // §6.9, and the assertion the two `carrying` checks above cannot make. A grouping key is a
+    // SHA-256 of a password, so a leak of one is 64 hex characters and contains none of the
+    // plaintext either check searches for. Nothing else in the session emits a run that long:
+    // an item id is a hyphenated UUID, and a recovery code is groups of four.
+    for crossing in log
+        .crossings
+        .iter()
+        .filter(|c| c.command == "watchtower_scan")
+    {
+        let runs = crossing
+            .payload
+            .split(|c: char| !c.is_ascii_hexdigit())
+            .filter(|run| run.len() >= 64)
+            .count();
+        assert_eq!(
+            runs, 0,
+            "watchtower_scan crossed something 64 hex characters long — a hash of a short \
+             password is a secret, and the grouping key never leaves trustvault-core"
         );
     }
 

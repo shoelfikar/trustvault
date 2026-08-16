@@ -655,6 +655,25 @@ pub struct VaultBody {
     /// `tests/vectors/` valid without regenerating them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub audit: Vec<AuditEntry>,
+    /// When the last **local** Watchtower scan finished, Unix milliseconds UTC — §6.9.
+    ///
+    /// `None` means never, and it is what makes every [`ItemStatus::Unknown`] in the vault
+    /// legible: without it, "no findings" and "never looked" are the same empty list.
+    ///
+    /// Absent when `None`, for [`VaultBody::audit`]'s reason — a vault that has never been
+    /// scanned encodes exactly as it did before this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_scan_at: Option<i64>,
+    /// When the last breach check finished, Unix milliseconds UTC — §6.9.
+    ///
+    /// **Two timestamps and not one.** `strong` means "clean at the last scan", and the local
+    /// scan and the breach check can be days apart; a single "last scanned" would let this
+    /// morning's local scan vouch for a breach check that has never run.
+    ///
+    /// Nothing writes it yet — `watchtower_breach_check` is unimplemented — and it is here
+    /// rather than added later so the two are one format change rather than two.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_breach_check_at: Option<i64>,
     /// Keys written by a newer version, preserved untouched (N-09).
     #[serde(flatten)]
     pub unknown: Unknown,
@@ -679,6 +698,8 @@ impl VaultBody {
             items: Vec::new(),
             profile: Profile::default(),
             audit: Vec::new(),
+            last_scan_at: None,
+            last_breach_check_at: None,
             unknown: Unknown::new(),
         }
     }

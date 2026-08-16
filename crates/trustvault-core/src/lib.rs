@@ -74,7 +74,9 @@ pub use recovery::RecoveryCode;
 pub use secret::{SecretBytes, SecretString};
 pub use totp::{TotpAlgorithm, TotpSpec};
 pub use vault::Vault;
-pub use watchtower::{Finding, Report, Strength, Verdict, WEAK_MAX_SCORE, scan, score};
+pub use watchtower::{
+    Finding, Report, Strength, Verdict, WEAK_MAX_SCORE, scan, scan_and_record, score,
+};
 
 use thiserror::Error;
 

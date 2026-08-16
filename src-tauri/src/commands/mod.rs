@@ -18,6 +18,7 @@ pub mod settings;
 pub mod strength;
 pub mod totp;
 pub mod vault;
+pub mod watchtower;
 
 use crate::error::{ErrorKind, IpcError, IpcResult};
 use crate::state::{AppState, Inner};

@@ -136,6 +136,12 @@ const UNLOCKED = {
   path: '/home/shoel/Documents/personal.tvault',
   display_name: 'Personal Vault',
   item_count: ITEMS.length,
+  // §6.9, and the same rule as `ui_scale` above: a field added to `VaultStatus` and not added
+  // here does not fail anything, it quietly changes what every surface is measured against.
+  // A scan has run; a breach check has not, which is the state **every** vault in v1 is in and
+  // therefore the one the Watchtower screen should be photographed in.
+  last_scan_at: 1785600000000,
+  last_breach_check_at: null,
   // D-70. Empty, not absent, and not filled in: this is the state **every** vault is in until
   // somebody types a name, so it is what the twenty-odd existing surfaces should be measured
   // against. `NAMED` below is the other half, and it exists as a separate status for the three
@@ -156,6 +162,8 @@ export const SCENARIOS = {
       path: null,
       display_name: '',
       item_count: null,
+      last_scan_at: null,
+      last_breach_check_at: null,
       profile: null,
     },
   },
@@ -165,6 +173,11 @@ export const SCENARIOS = {
       path: '/home/shoel/Documents/personal.tvault',
       display_name: 'personal',
       item_count: null,
+      // Both null while locked, for `item_count`'s reason — they live in the sealed body and
+      // there is no key to read them with. A lock screen that drew "never checked" here would
+      // be making a claim about a vault it cannot read.
+      last_scan_at: null,
+      last_breach_check_at: null,
       // `null` rather than empty, and it is the assertion the lock screen is worth having: a
       // locked vault cannot read its own profile, so a surface that drew one here would be
       // drawing something the host can never send — D-70.
@@ -218,7 +231,9 @@ export const SCENARIOS = {
   // vault with nothing in it, and Trash — which is empty by construction and stays that way
   // (D-49), so it is the one whose copy nobody would otherwise ever look at again.
   emptyVault: {
-    status: { ...UNLOCKED, display_name: 'Fresh Vault', item_count: 0 },
+    // `last_scan_at: null` and not the inherited timestamp: a vault created a minute ago has
+    // never been scanned, and every empty state on this screen is drawn for that vault.
+    status: { ...UNLOCKED, display_name: 'Fresh Vault', item_count: 0, last_scan_at: null },
     items: [],
   },
   trash: { status: UNLOCKED, drive: `clickText('button', 'Trash')` },

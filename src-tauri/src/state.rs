@@ -323,6 +323,13 @@ impl AppState {
                     name: v.profile().name.clone(),
                     email: v.profile().email.clone(),
                 }),
+                // Out of the sealed body like the two above, so `None` while locked — and
+                // `None` while unlocked too until a scan has run. §6.9.
+                last_scan_at: inner.vault.as_ref().and_then(|v| v.body().last_scan_at),
+                last_breach_check_at: inner
+                    .vault
+                    .as_ref()
+                    .and_then(|v| v.body().last_breach_check_at),
             }
         })
         .unwrap_or_else(|| VaultStatus {
@@ -331,6 +338,8 @@ impl AppState {
             display_name: String::new(),
             item_count: None,
             profile: None,
+            last_scan_at: None,
+            last_breach_check_at: None,
         })
     }
 }

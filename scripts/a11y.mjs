@@ -28,13 +28,14 @@
  */
 
 import { spawn } from 'node:child_process';
-import { readFile, mkdir, rm, writeFile } from 'node:fs/promises';
+import { readFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { DIST, ROOT, SCENARIOS, SIZE, serve } from './harness.mjs';
 
-const PROFILE = join(ROOT, 'target/a11y-profile');
+const PROFILE_ROOT = join(ROOT, 'target');
+const PROFILE_PREFIX = join(PROFILE_ROOT, 'a11y-profile-');
 /**
  * The profile is built fresh on every run, so what it needs is written rather than remembered.
  *
@@ -65,8 +66,8 @@ const PREFS = [
   'user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);',
 ].join('\n');
 const AUDITS = ['focus', 'contrast', 'taborder'];
-/** Long enough for a cold Firefox plus the longest scenario's own hold, and no longer. */
-const TIMEOUT_MS = 15000;
+/** Long enough for a cold Firefox plus the longest scenario's own hold, and overrideable in CI. */
+const TIMEOUT_MS = Number(process.env.TRUSTVAULT_A11Y_TIMEOUT_MS ?? 30000);
 
 /**
  * Loads the audit sources as text.
@@ -95,7 +96,9 @@ async function loadAudits(names) {
  * then kill" produce a run that reports nothing and calls it clean. A dedicated `--profile` and
  * `--new-instance` keep it a process of its own; the report is what says the page got there.
  */
-function run(url, arrived) {
+async function run(url, arrived) {
+  const profile = await mkdtemp(PROFILE_PREFIX);
+  await writeFile(join(profile, 'user.js'), `${PREFS}\n`);
   return new Promise((done) => {
     const firefox = spawn(
       'firefox',
@@ -103,16 +106,26 @@ function run(url, arrived) {
         '--headless',
         '--new-instance',
         '--profile',
-        PROFILE,
+        profile,
         '--window-size',
         `${SIZE.width},${SIZE.height}`,
         url,
       ],
       { stdio: 'ignore' },
     );
+    firefox.on('error', () => {});
+    const killFirefox = () => {
+      try {
+        firefox.kill('SIGTERM');
+      } catch {
+        // Some desktop/browser launchers hand off to a process this user cannot signal. The
+        // audit result is the posted report or the timeout below, not whether cleanup could
+        // signal that process.
+      }
+    };
     const finish = () => {
       clearTimeout(stop);
-      firefox.kill('SIGTERM');
+      killFirefox();
       done();
     };
     const stop = setTimeout(finish, TIMEOUT_MS);
@@ -145,12 +158,12 @@ for (const audit of audits) {
   }
 }
 
-await rm(PROFILE, { recursive: true, force: true });
-await mkdir(PROFILE, { recursive: true });
-await writeFile(join(PROFILE, 'user.js'), `${PREFS}\n`);
+await mkdir(PROFILE_ROOT, { recursive: true });
 
 const reports = [];
 let announce = () => {};
+const sameRun = (report, audit, scenario, theme) =>
+  report.audit === audit && report.scenario === scenario && report.theme === theme;
 const { server, port } = await serve({
   onReport: (report) => {
     reports.push(report);
@@ -164,12 +177,13 @@ for (const audit of audits) {
     for (const theme of themes) {
       const arrived = new Promise((resolve) => (announce = resolve));
       const url = `http://127.0.0.1:${port}/?scenario=${scenario}&theme=${theme}&audit=${audit}`;
+      const before = reports.length;
       await run(url, arrived);
-      if (reports.at(-1)?.scenario !== scenario || reports.at(-1)?.audit !== audit) {
+      if (!reports.slice(before).some((report) => sameRun(report, audit, scenario, theme))) {
         // Silence is a result. A run whose page never posted is reported as its own failure
         // rather than left out of the tally, because a missing surface and a clean one look
         // identical in a summary that only counts findings.
-        reports.push({ audit, scenario, theme, total: 0, findings: [] });
+        reports.push({ audit, scenario, theme, total: 0, findings: [], timedOut: true });
       }
     }
   }
@@ -179,14 +193,30 @@ server.close();
 
 /* ---- The report ----------------------------------------------------------- */
 
+const reportsForOutput = reports.filter((report, index) => {
+  if (report.total !== 0) return true;
+  return !reports.some(
+    (other, otherIndex) =>
+      otherIndex !== index &&
+      sameRun(other, report.audit, report.scenario, report.theme) &&
+      other.total > 0,
+  );
+});
+
 let problems = 0;
 let silent = 0;
 
-for (const report of reports) {
+for (const report of reportsForOutput) {
   const where = `${report.scenario} (${report.theme})`;
   if (report.error) {
     console.error(`  ${where}: the audit itself failed — ${report.error}`);
     problems += 1;
+    continue;
+  }
+
+  if (report.timedOut) {
+    console.error(`  ${report.audit} ${where}: the page did not post an audit report before timeout`);
+    silent += 1;
     continue;
   }
 
@@ -287,7 +317,7 @@ for (const report of reports) {
 
 console.log(
   problems === 0 && silent === 0
-    ? `\n${reports.length} surface-audits, no findings.`
-    : `\n${reports.length} surface-audits, ${problems} findings, ${silent} surfaces measured nothing.`,
+    ? `\n${reportsForOutput.length} surface-audits, no findings.`
+    : `\n${reportsForOutput.length} surface-audits, ${problems} findings, ${silent} surfaces measured nothing.`,
 );
 process.exit(problems === 0 && silent === 0 ? 0 : 1);

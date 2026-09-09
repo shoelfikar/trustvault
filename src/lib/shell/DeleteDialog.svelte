@@ -7,40 +7,91 @@
    * thing standing between a mis-aimed click and a file whose contents cannot be reconstructed
    * from anywhere.
    *
-   * Neither action fires yet. `delete_item` and vault deletion are Phase 3 commands, so the
-   * confirm button carries the reason rather than a handler.
+   * **Both halves fire as of 2026-08-06.** They differ in one way that is not cosmetic: the
+   * item's confirmation is checked *here* and nowhere else, and the vault's is checked **again
+   * in Rust**. The contract says why — a wrong item delete costs one entry, and a wrong vault
+   * delete costs everything with no undo anywhere in the product, so R-18's typed name is not
+   * left to the layer the contract does not trust. The gate below is therefore a courtesy that
+   * keeps the button quiet until the name matches; the real check is the host's, and its
+   * `confirmation_mismatch` is rendered like any other error.
    */
   import Button from '../components/Button.svelte';
   import Dialog from '../components/Dialog.svelte';
   import Icon from '../icons/Icon.svelte';
+  import { asIpcError, deleteItem, deleteVault } from '../ipc';
 
   interface Props {
     /** `item` names the item; `vault` demands the name typed back. */
     target: 'item' | 'vault';
     name: string;
+    /** Which item to delete. Required when `target` is `item`. */
+    itemId?: string | null;
+    /** Which vault file to delete. Required when `target` is `vault`. */
+    vaultPath?: string | null;
     itemCount?: number;
     onclose: () => void;
+    ondeleted?: () => void;
   }
 
-  const { target, name, itemCount = 0, onclose }: Props = $props();
+  const {
+    target,
+    name,
+    itemId = null,
+    vaultPath = null,
+    itemCount = 0,
+    onclose,
+    ondeleted,
+  }: Props = $props();
 
   let typed = $state('');
+  let deleting = $state(false);
+  let error = $state('');
 
   const confirmed = $derived(target === 'item' || typed.trim() === name);
 
-  /**
-   * No command exists behind either action yet, so the button never enables.
-   *
-   * Written as a named constant rather than a hard-coded `disabled` so that landing
-   * `delete_item` is a one-line change here and the naming gate above is already wired.
-   */
-  const CAN_DELETE = false;
+  const canDelete = $derived(target === 'item' ? Boolean(itemId) : Boolean(vaultPath));
 
+  /**
+   * The copy says what actually happens.
+   *
+   * It said "It goes to Trash for 30 days first", which was written against a Trash view that
+   * holds nothing and a command that does not have one: `delete_item` removes the item and
+   * saves, and the removed value is zeroized on drop. A password manager promising a recovery
+   * window it does not have is the worst kind of wrong copy — it is the sentence someone reads
+   * right before they click, and it is the reason they click.
+   */
   const body = $derived(
     target === 'item'
-      ? `“${name}” and every field on it are removed from this vault. It goes to Trash for 30 days first.`
+      ? `“${name}” and every field on it are removed from this vault straight away. There is no Trash and no undo.`
       : `${itemCount} items will be gone for good. The file is deleted from this computer and there is no copy anywhere else.`,
   );
+
+  /**
+   * Named `remove`, not `confirm`, since 2026-08-06 — D-59.
+   *
+   * `tauri-plugin-dialog`'s init script replaces `window.confirm` with an **async** function, so
+   * the global that this declaration used to shadow no longer means what its name says: a
+   * `if (confirm(…))` anywhere tests a promise and is therefore always true. The local shadow
+   * was safe, and that is the problem — it is safe until somebody moves the call, and the thing
+   * it guards is the irreversible one. `ipc_audit.rs` now forbids the identifier outright.
+   */
+  async function remove() {
+    if (!confirmed || !canDelete || deleting) return;
+    deleting = true;
+    error = '';
+    try {
+      // What the user typed, **never the `name` prop**: sending the prop would have the host
+      // compare a string against itself, which is exactly the check being in Rust undone.
+      // Trimmed, because the gate above trims — the two must agree, or a trailing space
+      // enables the button and then the host says the name does not match.
+      if (target === 'vault') await deleteVault(vaultPath as string, typed.trim());
+      else await deleteItem(itemId as string);
+      ondeleted?.();
+    } catch (thrown) {
+      error = asIpcError(thrown).message;
+      deleting = false;
+    }
+  }
 </script>
 
 <Dialog width={420} bare {onclose}>
@@ -60,14 +111,22 @@
       </div>
     {/if}
 
+    {#if error}
+      <p class="error" role="alert"><Icon name="alert" size={13} />{error}</p>
+    {/if}
+
     <div class="actions">
       <Button onclick={onclose}>Cancel</Button>
       <Button
         variant="primary"
-        disabled={!confirmed || !CAN_DELETE}
-        title="Deletion arrives with the mutation commands"
+        disabled={!confirmed || !canDelete || deleting}
+        onclick={() => void remove()}
       >
-        {target === 'item' ? 'Delete item' : 'Delete vault'}
+        {#if deleting}
+          Deleting…
+        {:else}
+          {target === 'item' ? 'Delete item' : 'Delete vault'}
+        {/if}
       </Button>
     </div>
   </div>
@@ -136,5 +195,15 @@
     gap: var(--space-3);
     justify-content: flex-end;
     margin-top: var(--space-6);
+  }
+
+  /* Status is never colour alone — §2. The icon and the sentence carry it. */
+  .error {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: var(--space-5);
+    font-size: var(--text-sm);
+    color: var(--danger);
   }
 </style>

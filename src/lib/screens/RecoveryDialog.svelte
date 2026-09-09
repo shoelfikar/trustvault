@@ -144,14 +144,14 @@
         </span>
       </p>
 
-      <div class="load">
-        <!-- A file picker means `tauri-plugin-dialog`, and the manifest's standing rule is that
-             a plugin arrives when a requirement needs one and not before — a plugin is widened
-             attack surface in a process holding decrypted secrets. Typing the key works today. -->
-        <Button icon="note" disabled title="Loading a kit file arrives with the file picker">
-          Load recovery kit PDF…
-        </Button>
-      </div>
+      <!-- The prototype draws a "Load recovery kit PDF…" button here, and it was removed on
+           2026-08-07 by the D-36 sweep rather than wired — D-61. Its disabled `title` said the
+           feature arrived "with the file picker", and the picker arrived with D-59, which is
+           what made it worth reading again: there is no kit *file* to load. R-07's kit is
+           produced by `window.print()`, so what the user has is whatever their print dialog
+           wrote — a PDF whose layout is their platform's, not ours. Reading a key back out of
+           one means text extraction over a document we do not control the shape of, to save
+           typing 24 characters into the field directly above. -->
     </div>
   {:else}
     <div class="pane">
@@ -262,10 +262,6 @@
   /* Never colour alone — the glyph swaps with the state, not just the colour. */
   .hint.danger {
     color: var(--danger);
-  }
-
-  .load {
-    margin-top: 14px;
   }
 
   .accepted {

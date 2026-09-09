@@ -15,25 +15,59 @@ chacha20poly1305.workspace = true
 ciborium.workspace = true
 data-encoding.workspace = true
 getrandom.workspace = true
+hmac.workspace = true
 serde.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+serde_json.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
+# D-78. Brings `fancy-regex`, `regex`, `itertools` and `time` into a Tier-1 crate, which is the
+# cost of the move and is written here rather than discovered in a tree: none of them is on
+# N-02's list, and `time` is already in the lockfile at the version D-18 raised the MSRV for.
+zxcvbn.workspace = true
+
+[features]
+# The fixture vaults. Off in the shipped library on purpose: a fixture generator compiled into
+# the application is a way to create a thousand fake items in somebody's real vault.
+#
+# Two vaults behind one flag, because they are one risk and opposite trades — `benchfixture`
+# is the reference vault of trustvault-requirements.md (1 000 items, 4 fields each, no reuse
+# and one repeated score: a timing floor), and `auditfixture` is twenty-one items built to have
+# reuse groups of known size and a password at every zxcvbn score (D-77). The name is the first
+# fixture that needed the flag, not the only one that lives behind it.
+benchfixture = []
 
 [dev-dependencies]
-# Tests only. The vault body itself is CBOR (decision D-10) — JSON is used here purely to
-# assert that the serde field names, which are part of the on-disk format, stay stable.
-serde_json = "1"
 # R-01 asks for a round-trip over 10 000 generated vaults; generating them by hand is how
 # the interesting shapes get missed.
 proptest = "1.11"
 tempfile = "3"
+# The crate depending on itself is how a feature is turned on for benchmarks and tests only.
+# It is a dev-edge, so `cargo tree --edges normal` — which is what the N-02 boundary job in CI
+# reads — does not see it, and the shipped library is built without the fixture.
+trustvault-core = { path = ".", features = ["benchfixture"] }
 
 # S-03 is measured, not asserted: `cargo bench --bench kdf`. No criterion — the measurement
 # is one wall-clock number and a harness would be more code than the thing it measures.
 [[bench]]
 name = "kdf"
+harness = false
+
+# S-04's host half, on the reference vault: `cargo bench --bench search`. Same reasoning as
+# above, plus one of its own — the number that matters is a p95, and a percentile over a few
+# thousand samples is three lines of `sort`.
+[[bench]]
+name = "search"
+harness = false
+
+# S-07a, whose target number this benchmark is what *sets* — the criterion was written blank on
+# purpose (D-77) the way S-03's 511 ms was, and the rule is that the first reading goes into
+# trustvault-requirements.md the same day it is taken: `cargo bench --bench watchtower`.
+[[bench]]
+name = "watchtower"
 harness = false
 
 [lints.rust]

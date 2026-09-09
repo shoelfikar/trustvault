@@ -1,0 +1,323 @@
+#!/usr/bin/env node
+/**
+ * Walks every surface in both themes and reports what a keyboard and a pair of eyes would hit.
+ *
+ *   npm run build && node scripts/a11y.mjs [--audit focus] [--scenario shell] [--theme dark]
+ *                                          [--stops]
+ *
+ * Three audits, all from `MASTER.md` §10's checklist and all previously unmeasurable:
+ *
+ * * **focus** — every interactive element changes appearance when it takes keyboard focus (§7).
+ * * **contrast** — every text node clears 4.5:1 against the background actually behind it (§9).
+ * * **taborder** — every operable control is in the tab order, once (`docs/keyboard-audit.md`).
+ *
+ * `--stops` prints the tab order itself, in document order, for the surfaces selected. It is how
+ * finding 7 was found and it fails nothing: how many stops a surface *should* have is a row in
+ * `docs/keyboard-audit.md`, not a property of the DOM.
+ *
+ * It runs against `scripts/harness.mjs`, the same fake host and the same fixtures the screenshot
+ * tool photographs, so a finding here is about the surface in the shot and not about a second
+ * application assembled for testing.
+ *
+ * **What it cannot see** is worth as much as what it can, and it is the same blind spot the
+ * screenshot harness has: it stubs `invoke`, so nothing about the real host is exercised. Nor
+ * can any of the three press Tab — `taborder` reads what the browser *would* treat as a stop,
+ * which answers "is this reachable at all" but not "does Tab escape this dialog". Focus traps
+ * and the order a person was actually reading in stay rows in `docs/keyboard-audit.md`, walked
+ * by hand with the pointer unplugged, which is what S-08 asks for.
+ */
+
+import { spawn } from 'node:child_process';
+import { readFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { DIST, ROOT, SCENARIOS, SIZE, serve } from './harness.mjs';
+
+const PROFILE_ROOT = join(ROOT, 'target');
+const PROFILE_PREFIX = join(PROFILE_ROOT, 'a11y-profile-');
+/**
+ * The profile is built fresh on every run, so what it needs is written rather than remembered.
+ *
+ * **One pref, and it is not about accessibility.** On a fresh profile Mozilla's own build shows
+ * the data-collection privacy notice at startup, and whatever presents it takes window activation
+ * away from the page under test: `document.hasFocus()` is then `false`, `:focus` matches nothing,
+ * and `scripts/audits/focus.js` reports every control in the application as ringless while
+ * `contrast` and `taborder` — which do not care who is focused — stay clean. That is exactly what
+ * run 31937787913 did: **1 556 findings, 100 % of the focusable elements, in both themes.**
+ *
+ * This desktop never saw it because Ubuntu's Firefox snap suppresses that notice, so the audit
+ * was measured for two days against the one build that hides the problem. Measured on this
+ * machine with Mozilla's 153.0.4 tarball — the build `browser-actions/setup-firefox` installs,
+ * the same version as the snap beside it — `hasFocus` is `false` and every probe fails; with this
+ * one pref set, `hasFocus` is `true` and both probes paint. Nothing else in the environment
+ * matters: the audit is equally clean with `DISPLAY`, Wayland and D-Bus stripped, and under
+ * `env -i`.
+ *
+ * `focusmanager.testmode` — the pref Gecko's own harness uses to make focus work in an inactive
+ * window — was tried first and changes nothing here, so it is not carried.
+ *
+ * This does not relax what the audit asks for. The ring still has to come from the stylesheet,
+ * and `browser.display.show_focus_rings` — which would force one onto anything focused, keyboard
+ * or not — is deliberately **not** set. It gives the page a window that is actually focused; it
+ * does not make a missing ring pass.
+ */
+const PREFS = [
+  'user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);',
+].join('\n');
+const AUDITS = ['focus', 'contrast', 'taborder'];
+/** Long enough for a cold Firefox plus the longest scenario's own hold, and overrideable in CI. */
+const TIMEOUT_MS = Number(process.env.TRUSTVAULT_A11Y_TIMEOUT_MS ?? 30000);
+
+/**
+ * Loads the audit sources as text.
+ *
+ * They live in `scripts/audits/*.js` rather than as strings in this file for one reason: a
+ * hundred lines of JavaScript inside a template literal is a hundred lines nothing checks, and
+ * `node --check` reads a file.
+ */
+async function loadAudits(names) {
+  const entries = await Promise.all(
+    names.map(async (name) => [
+      name,
+      await readFile(join(ROOT, 'scripts/audits', `${name}.js`), 'utf8'),
+    ]),
+  );
+  return Object.fromEntries(entries);
+}
+
+/**
+ * Opens `url` in headless Firefox and resolves when its audit has posted, or after `TIMEOUT_MS`.
+ *
+ * **It waits for the report and not for the process**, which is the one thing about driving
+ * Firefox from a script that has to be got right here. With no `--screenshot` argument the
+ * browser has no reason to exit at all, and a `firefox` that finds an existing instance exits
+ * *immediately* after handing the URL over — so both "wait for exit" and "wait a fixed time
+ * then kill" produce a run that reports nothing and calls it clean. A dedicated `--profile` and
+ * `--new-instance` keep it a process of its own; the report is what says the page got there.
+ */
+async function run(url, arrived) {
+  const profile = await mkdtemp(PROFILE_PREFIX);
+  await writeFile(join(profile, 'user.js'), `${PREFS}\n`);
+  return new Promise((done) => {
+    const firefox = spawn(
+      'firefox',
+      [
+        '--headless',
+        '--new-instance',
+        '--profile',
+        profile,
+        '--window-size',
+        `${SIZE.width},${SIZE.height}`,
+        url,
+      ],
+      { stdio: 'ignore' },
+    );
+    firefox.on('error', () => {});
+    const killFirefox = () => {
+      try {
+        firefox.kill('SIGTERM');
+      } catch {
+        // Some desktop/browser launchers hand off to a process this user cannot signal. The
+        // audit result is the posted report or the timeout below, not whether cleanup could
+        // signal that process.
+      }
+    };
+    const finish = () => {
+      clearTimeout(stop);
+      killFirefox();
+      done();
+    };
+    const stop = setTimeout(finish, TIMEOUT_MS);
+    void arrived.then(finish);
+  });
+}
+
+/* ---- Main ----------------------------------------------------------------- */
+
+const args = process.argv.slice(2);
+const flag = (name) => {
+  const at = args.indexOf(`--${name}`);
+  return at === -1 ? null : args[at + 1];
+};
+const has = (name) => args.includes(`--${name}`);
+
+if (!existsSync(join(DIST, 'index.html'))) {
+  console.error('dist/index.html is missing — run `npm run build` first.');
+  process.exit(1);
+}
+
+const audits = flag('audit') ? [flag('audit')] : AUDITS;
+const scenarios = flag('scenario') ? [flag('scenario')] : Object.keys(SCENARIOS);
+const themes = flag('theme') ? [flag('theme')] : ['light', 'dark'];
+
+for (const audit of audits) {
+  if (!AUDITS.includes(audit)) {
+    console.error(`unknown audit "${audit}" — one of ${AUDITS.join(', ')}`);
+    process.exit(1);
+  }
+}
+
+await mkdir(PROFILE_ROOT, { recursive: true });
+
+const reports = [];
+let announce = () => {};
+const sameRun = (report, audit, scenario, theme) =>
+  report.audit === audit && report.scenario === scenario && report.theme === theme;
+const { server, port } = await serve({
+  onReport: (report) => {
+    reports.push(report);
+    announce();
+  },
+  audits: await loadAudits(AUDITS),
+});
+
+for (const audit of audits) {
+  for (const scenario of scenarios) {
+    for (const theme of themes) {
+      const arrived = new Promise((resolve) => (announce = resolve));
+      const url = `http://127.0.0.1:${port}/?scenario=${scenario}&theme=${theme}&audit=${audit}`;
+      const before = reports.length;
+      await run(url, arrived);
+      if (!reports.slice(before).some((report) => sameRun(report, audit, scenario, theme))) {
+        // Silence is a result. A run whose page never posted is reported as its own failure
+        // rather than left out of the tally, because a missing surface and a clean one look
+        // identical in a summary that only counts findings.
+        reports.push({ audit, scenario, theme, total: 0, findings: [], timedOut: true });
+      }
+    }
+  }
+}
+
+server.close();
+
+/* ---- The report ----------------------------------------------------------- */
+
+const reportsForOutput = reports.filter((report, index) => {
+  if (report.total !== 0) return true;
+  return !reports.some(
+    (other, otherIndex) =>
+      otherIndex !== index &&
+      sameRun(other, report.audit, report.scenario, report.theme) &&
+      other.total > 0,
+  );
+});
+
+let problems = 0;
+let silent = 0;
+
+for (const report of reportsForOutput) {
+  const where = `${report.scenario} (${report.theme})`;
+  if (report.error) {
+    console.error(`  ${where}: the audit itself failed — ${report.error}`);
+    problems += 1;
+    continue;
+  }
+
+  if (report.timedOut) {
+    console.error(`  ${report.audit} ${where}: the page did not post an audit report before timeout`);
+    silent += 1;
+    continue;
+  }
+
+  // A surface that reported nothing to look at is not a clean surface: it is a drive that did
+  // not reach its screen, and it would otherwise be indistinguishable from a perfect one.
+  if (report.total === 0) {
+    const nothing = { focus: 'focusable element', contrast: 'text', taborder: 'tab stop' };
+    console.error(
+      `  ${report.audit} ${where}: nothing to measure — the scenario drew no ${nothing[report.audit]}`,
+    );
+    silent += 1;
+    continue;
+  }
+
+  // The focus audit carries the result of its own instrument, and a broken instrument is reported
+  // as one failure of the audit rather than as a finding against every control on the surface.
+  // It still fails the run: the ring is S-09, and "the browser drew none of them" is not a pass.
+  if (report.mechanism && !report.mechanism.focusVisible) {
+    const how = report.mechanism.focus
+      ? 'it painted `:focus` but not `:focus-visible`, so `focus({ focusVisible: true })` is not producing a keyboard-focus paint here'
+      : 'it painted nothing at all, so this browser is applying no focus state — a window it does not consider active, which is what a startup notice stealing activation looks like (see PREFS above)';
+    console.error(
+      `  ${report.audit} ${where}: the audit's own probe failed — ${how}. ` +
+        `The ${report.findings.length} findings below would be about this browser, not the app.`,
+    );
+    problems += 1;
+    continue;
+  }
+
+  const failures = report.findings.filter(
+    (finding) => finding.verdict === 'no-indicator' || finding.verdict === 'fail',
+  );
+  const unfocusable = report.findings.filter((finding) => finding.verdict === 'unfocusable');
+
+  // Exemptions are printed on the clean line rather than hidden by it. A surface that passes
+  // because six things were excused is a different fact from one that passes because six things
+  // are readable, and the difference has to survive the summary.
+  const excused = report.exempt ? `, ${report.exempt} exempt` : '';
+  // The tab-order audit counts stops rather than checks, and the difference matters in the
+  // output: "13 checked" reads as a coverage number, "13 tab stops" is the thing itself — the
+  // number a person compares against the surface in front of them.
+  const counted = report.audit === 'taborder' ? 'tab stops' : 'checked';
+  // A modal narrows what the audit measured, so it is printed on every line rather than left to
+  // be inferred from a count that got smaller.
+  const within = report.modal ? ` within ${report.modal}` : '';
+
+  // Printed on a clean surface as well as a failing one: the sequence is evidence, not a
+  // diagnostic, and the defect it exists to expose (a surface that is thirteen consecutive
+  // stops) fails no rule here.
+  const sequence = () => {
+    if (!has('stops') || !report.stops) return;
+    report.stops.forEach((stop, index) =>
+      console.log(`      ${String(index).padStart(2)}  ${stop}`),
+    );
+  };
+
+  if (failures.length === 0 && unfocusable.length === 0) {
+    console.log(`  ${report.audit} ${where}: ${report.total} ${counted}${within}${excused}, clean`);
+    sequence();
+    continue;
+  }
+
+  problems += failures.length + unfocusable.length;
+  console.log(`  ${report.audit} ${where}: ${report.total} ${counted}${within}`);
+
+  if (report.audit === 'taborder') {
+    for (const finding of failures) {
+      console.log(`      ${finding.kind}: ${finding.name} — ${finding.detail}`);
+      for (const member of finding.members ?? []) console.log(`          ${member}`);
+    }
+    sequence();
+    continue;
+  }
+
+  if (report.audit === 'focus') {
+    for (const finding of [...failures, ...unfocusable]) {
+      console.log(`      ${finding.verdict}: ${finding.name}`);
+    }
+    continue;
+  }
+
+  // Contrast findings are grouped by the *pair* rather than listed one text node at a time.
+  // A token used in forty places fails in forty places, and forty lines saying the same thing
+  // buries the second colour that failed in three. The pair is the thing that gets fixed.
+  const pairs = new Map();
+  for (const finding of failures) {
+    const key = `${finding.colour} on ${finding.on}`;
+    const seen = pairs.get(key) ?? { ...finding, count: 0, example: finding.text };
+    seen.count += 1;
+    pairs.set(key, seen);
+  }
+  for (const pair of pairs.values()) {
+    console.log(
+      `      ${pair.ratio}:1 (needs ${pair.required})  ${pair.colour} on ${pair.on}  ×${pair.count}  e.g. "${pair.example}"`,
+    );
+  }
+}
+
+console.log(
+  problems === 0 && silent === 0
+    ? `\n${reportsForOutput.length} surface-audits, no findings.`
+    : `\n${reportsForOutput.length} surface-audits, ${problems} findings, ${silent} surfaces measured nothing.`,
+);
+process.exit(problems === 0 && silent === 0 ? 0 : 1);

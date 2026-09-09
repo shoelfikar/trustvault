@@ -46,22 +46,38 @@
 #![forbid(unsafe_code)]
 
 mod aead;
+#[cfg(feature = "benchfixture")]
+pub mod auditfixture;
+#[cfg(feature = "benchfixture")]
+pub mod benchfixture;
 mod format;
+mod generate;
+pub mod import;
 mod kdf;
 mod model;
 mod recovery;
+mod search;
 mod secret;
+mod totp;
 mod vault;
+mod watchtower;
 
 pub use format::{HEADER_LEN, Header, WRAP_AAD_LEN};
+pub use generate::{CharSets, MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, PasswordRecipe};
+pub use import::{Converted, ImportReport, KindCount, Refusal};
 pub use kdf::KdfParams;
 pub use model::{
-    AuditEntry, Field, FieldId, FieldKind, HistoryEntry, Item, ItemId, ItemKind, ItemStatus,
-    VaultBody,
+    AuditEntry, Field, FieldEdit, FieldId, FieldKind, HistoryEntry, Item, ItemId, ItemKind,
+    ItemStatus, Profile, VaultBody,
 };
 pub use recovery::RecoveryCode;
 pub use secret::{SecretBytes, SecretString};
+pub use totp::{TotpAlgorithm, TotpSpec};
 pub use vault::Vault;
+pub use watchtower::{
+    BreachQuery, Finding, Report, Strength, Verdict, WEAK_MAX_SCORE, breach_queries,
+    record_breaches, scan, scan_and_record, score,
+};
 
 use thiserror::Error;
 
@@ -155,6 +171,26 @@ pub enum Error {
     /// A field whose value is already in the item list is not revealed by asking again.
     #[error("field is not secret")]
     NotSecret,
+
+    /// The TOTP seed will not decode, or its parameters are outside RFC 4226's bounds.
+    ///
+    /// Safe to distinguish for the same reason as [`Error::MalformedRecoveryCode`]: it is
+    /// decided before any key material or vault content is involved. It is a string the user
+    /// is typing or a string an import carried, and saying so while the field is still on
+    /// screen is the entire point — the alternative is a wrong six-digit code discovered a
+    /// month later at a login prompt.
+    #[error("TOTP secret is malformed")]
+    MalformedTotpSecret,
+
+    /// The file offered for import is not an unencrypted Bitwarden JSON export.
+    ///
+    /// Deliberately coarse — malformed JSON, the wrong schema, and an *encrypted* export are
+    /// one error, because the user's next action is the same for all three. Unlike
+    /// [`Error::Unreadable`] the coarseness is not a security property: an import file is one
+    /// the user chose and nothing about it is secret, so a caller may say more in a message
+    /// (`docs/ipc-contract.md` §4).
+    #[error("not an unencrypted Bitwarden JSON export")]
+    NotImportable,
 
     /// An I/O failure while reading or writing the vault file.
     #[error("vault file I/O failed")]

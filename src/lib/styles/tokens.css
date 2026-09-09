@@ -20,19 +20,32 @@
   --border-strong: #45403a; /* input outlines, focus track */
   --fg: #ede9e3; /* titles, values — warm off-white, never #FFF */
   --fg-muted: #a8a19a; /* usernames, metadata */
-  --fg-subtle: #766f68; /* placeholders, empty states */
+  --fg-subtle: #948d85; /* placeholders, empty states — was #766f68, D-63 */
 
   /* Brass. Brand and interaction only — it never means "good" or "warning". */
   --accent: #c08a2e;
   --accent-hover: #d6a044;
   --on-accent: #17150f;
   --accent-wash: rgb(192 138 46 / 0.12);
+  /*
+   * `--accent-wash` already flattened onto `--bg-base` — D-70, and the same kind of token D-63
+   * added for the same reason.
+   *
+   * The wash is translucent, so an avatar drawn on it is read against whatever is *behind* the
+   * avatar, and the sidebar footer is where that moves: the row tints to `--bg-hover` on hover
+   * and while the profile popover is open. Measured 2026-08-08 — brass over the wash over
+   * `--bg-hover` is **4.09:1**, under §9's 4.5, and 5.3:1 here. A chip whose legibility depends
+   * on the state of the row under it is not a chip, so this is the opaque colour it always had
+   * on the untidied row and it stops moving. `color-mix` was the first attempt and is not
+   * usable: it computes to `color(srgb …)`, which `scripts/audits/contrast.js` cannot read.
+   */
+  --accent-chip: #282014;
 
   /* Status. Desaturated so an all-red Watchtower is not a fire alarm.
      Never used alone: every status carries an icon and a text label. */
   --ok: #4e9e63;
-  --warn: #c2643a;
-  --danger: #ce5148;
+  --warn: #ca724c; /* was #c2643a — 4.05:1 on --bg-raised, D-63 */
+  --danger: #d4675f; /* was #ce5148 — 3.83:1 on --bg-raised, D-63 */
   --info: #6e93b8;
 
   /* Elevation — MASTER.md §4. Hairlines do the work; shadows are for true overlays only. */
@@ -129,12 +142,13 @@
   --border-strong: #c9c1b4;
   --fg: #211f1c;
   --fg-muted: #5f594f;
-  --fg-subtle: #8c857a;
+  --fg-subtle: #656157; /* was #8c857a — 3.02:1 on --bg-hover, D-63 */
 
-  --accent: #8a5d0f; /* darkened for 5.2:1 on light */
+  --accent: #7a520d; /* darkened again for 4.6:1 on its own wash — D-63 */
   --accent-hover: #6f4a0b;
   --on-accent: #ffffff;
-  --accent-wash: rgb(138 93 15 / 0.1);
+  --accent-wash: rgb(122 82 13 / 0.1);
+  --accent-chip: #e3dccf; /* the wash flattened onto --bg-base — D-70; 6.1:1 */
 
   --ok: #2f6b41;
   --warn: #8f4520;
@@ -160,12 +174,13 @@
     --border-strong: #c9c1b4;
     --fg: #211f1c;
     --fg-muted: #5f594f;
-    --fg-subtle: #8c857a;
+    --fg-subtle: #656157; /* D-63 */
 
-    --accent: #8a5d0f;
+    --accent: #7a520d; /* D-63 */
     --accent-hover: #6f4a0b;
     --on-accent: #ffffff;
-    --accent-wash: rgb(138 93 15 / 0.1);
+    --accent-wash: rgb(122 82 13 / 0.1);
+    --accent-chip: #e3dccf; /* D-70 */
 
     --ok: #2f6b41;
     --warn: #8f4520;

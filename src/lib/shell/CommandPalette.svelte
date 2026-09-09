@@ -11,13 +11,14 @@
    * clear is scheduled by Rust. This file never sees a value; it looks up which field to copy
    * and hands the host two ids. That round trip is the reason `run` is async.
    */
+  import { tick } from 'svelte';
   import Dialog from '../components/Dialog.svelte';
+  import EmptyState from '../components/EmptyState.svelte';
   import Icon, { type IconName } from '../icons/Icon.svelte';
-  import { asIpcError, copyField, getItem, type ItemSummary } from '../ipc';
+  import { asIpcError, copyField, getItem, searchItems, type ItemSummary } from '../ipc';
   import { TYPE_GLYPHS, type View } from './views';
 
   interface Props {
-    items: ItemSummary[];
     onclose: () => void;
     onopen: (id: string) => void;
     onview: (next: View) => void;
@@ -28,11 +29,15 @@
     oncopied: (clearsAt: number) => void;
   }
 
-  const { items, onclose, onopen, onview, onlock, ongenerate, onadd, oncopied }: Props = $props();
+  const { onclose, onopen, onview, onlock, ongenerate, onadd, oncopied }: Props = $props();
+
+  /** How many item rows the palette draws, and therefore how many it asks the host for. */
+  const ROWS = 6;
 
   let query = $state('');
   let cursor = $state(0);
   let error = $state('');
+  let matched = $state<ItemSummary[]>([]);
 
   interface Row {
     key: string;
@@ -71,13 +76,51 @@
 
   const needle = $derived(query.trim().toLowerCase());
 
-  const matched = $derived(
-    needle
-      ? items.filter((item) =>
-          `${item.title} ${item.tags.join(' ')}`.toLowerCase().includes(needle),
-        )
-      : items.slice(0, 5),
-  );
+  /**
+   * Which query the rows on screen belong to.
+   *
+   * A round trip per keystroke means two answers can be in flight at once, and the slower one
+   * must not win: typing `gi` then `git` would otherwise leave `gi`'s rows under a cursor bound
+   * to Enter, which copies a password. The counter is the guard — a reply for anything but the
+   * latest request is dropped.
+   */
+  let issued = 0;
+
+  /**
+   * Ask the host to rank the vault — R-16, D-46.
+   *
+   * Every keystroke crosses IPC and nothing is filtered here, because nothing here has the
+   * usernames and URLs R-16 asks to search. The `performance` marks are S-04's measurement
+   * instrument: the criterion is *keystroke to filtered results rendered*, so the mark is set
+   * before the call and the measure is taken after `tick()`, once Svelte has flushed the rows.
+   * Read them from the devtools console with
+   * `performance.getEntriesByName('palette-keystroke-to-render')`. The host half of the same
+   * path is measured by `cargo bench --bench search`.
+   *
+   * Take the reading from a **release** build with devtools turned on —
+   * `npm run tauri build -- --no-bundle --features measure`, D-65 — and not from `tauri dev`.
+   * The dev profile leaves our own crates unoptimized, where the same matching costs 6.63 ms p95
+   * instead of 0.85 ms, so a number taken there is 12 % of the budget spent by a build nobody
+   * ships and is indistinguishable from a number that is not.
+   */
+  $effect(() => {
+    const asked = ++issued;
+    const text = query;
+    performance.mark('palette-keystroke');
+    void searchItems(text, ROWS)
+      .then(async (hits) => {
+        if (asked !== issued) return;
+        matched = hits;
+        error = '';
+        await tick();
+        performance.measure('palette-keystroke-to-render', 'palette-keystroke');
+      })
+      .catch((thrown) => {
+        if (asked !== issued) return;
+        matched = [];
+        error = asIpcError(thrown).message;
+      });
+  });
 
   const commands = $derived(
     (
@@ -102,7 +145,7 @@
   );
 
   const itemRows = $derived<Row[]>(
-    matched.slice(0, 6).map((item) => ({
+    matched.map((item) => ({
       key: `item:${item.id}`,
       title: item.title,
       sub: item.tags.join(' · '),
@@ -212,7 +255,20 @@
     {/if}
 
     {#if rows.length === 0}
-      <p class="none">No results for “{query.trim()}”</p>
+      <!-- R-19: the palette's results are a list, so it gets an empty state rather than a line
+           of grey text. The action is not the duplicate it looks like — a query that matches no
+           item has also filtered the New item *command* row away, so this is the only way to
+           act on what was just typed and found missing. -->
+      <EmptyState
+        icon="search"
+        message={`Nothing matches “${query.trim()}”.`}
+        actionLabel="New item"
+        onaction={() => {
+          onadd();
+          onclose();
+        }}
+        quiet
+      />
     {/if}
 
     {#if error}
@@ -246,6 +302,23 @@
     color: var(--fg);
     font-family: var(--font-sans);
     font-size: var(--text-md);
+  }
+  /* The ring lives on the row, not on the input — `TextField` does the same thing and for the
+     same reason: the input has no border of its own, so a 2px ring around it would float inside
+     a row that already looks like the field. `outline: none` here is only safe because of the
+     rule above it, which is why the two sit together.
+
+     Found 2026-08-07 by `scripts/a11y.mjs`, and it was the finding that made the tool worth
+     writing: the input had cancelled the global ring and replaced it with nothing since Phase 2.
+     Nobody had noticed because the palette opens with this field already focused, so the only
+     way to see the missing ring is to Tab to a result and back — which is what a keyboard user
+     does and what nobody testing by clicking ever does.
+
+     `inset` box-shadow rather than a thicker border: a 2px border would move the results list
+     down by a pixel when focus arrived, and a layout that shifts on focus is §9's own ban. */
+  .search:focus-within {
+    box-shadow: inset 0 -2px 0 0 var(--accent);
+    color: var(--accent);
   }
   .search input:focus {
     outline: none;
@@ -329,12 +402,6 @@
     white-space: nowrap;
   }
 
-  .none {
-    padding: var(--space-7);
-    text-align: center;
-    font-size: var(--text-base);
-    color: var(--fg-subtle);
-  }
   .error {
     display: flex;
     align-items: center;

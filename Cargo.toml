@@ -15,6 +15,9 @@ authors = ["Sulfikardi"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
+# The only dependency D-42 cost. A Bitwarden export is JSON and nothing else in the vault
+# format is — the body is CBOR (D-10) — so this crate is here for the importer alone.
+serde_json = "1"
 thiserror = "2"
 zeroize = { version = "1.9", features = ["derive"] }
 
@@ -34,7 +37,27 @@ ciborium = "0.2.2"
 data-encoding = "2.11"
 getrandom = "0.4"
 subtle = "2.6"
+
+# Phase 3, D-54: the primitives under RFC 6238. The same RustCrypto family as the three
+# above, and taken as primitives rather than as a TOTP crate — the RFC publishes its own
+# test vectors, so the 40 lines above HMAC are pinned by upstream's numbers.
+# `zeroize` is on for all three and is the reason the 0.13/0.11 line was chosen over the
+# 0.12/0.10 one: the HMAC state holds the seed, and N-01 wants it wiped on drop. The cost is
+# `digest 0.11` beside the `digest 0.10` argon2 pulls through blake2, until argon2 0.6.
+hmac = { version = "0.13", features = ["zeroize"] }
+sha1 = { version = "0.11", default-features = false, features = ["zeroize"] }
+sha2 = { version = "0.11", default-features = false, features = ["zeroize"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+
+# D-12, decided at kickoff: the design's crack-time strings ("takes ~8 centuries to crack") are
+# zxcvbn's own output format, so anything else means reimplementing its phrasing.
+#
+# **In the core since D-78**, not in `src-tauri`. The original reason it was in the host — the
+# ~400 kB of dictionaries against S-01's 800 ms cold start — was an argument against the
+# *webview* and is untouched by the move. What decides between host and core is that scoring
+# every password means reading every password, and the core is where they already are. N-02 is
+# unaffected: nothing in this tree is Tauri, a webview, or a socket.
+zxcvbn = { version = "3.1", default-features = false }
 
 # Release profile. A password manager spends its life idle in the dock, so size and
 # startup (S-01, S-06) matter more than throughput.

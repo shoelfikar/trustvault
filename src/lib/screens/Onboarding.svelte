@@ -19,8 +19,10 @@
   import {
     asIpcError,
     calibrateKdf,
+    commitVault,
     createVault,
     defaultVaultPath,
+    pickNewVaultPath,
     scorePassword,
     type KdfSummary,
     type Strength,
@@ -122,8 +124,27 @@
   const canCreate = $derived(passwordsMatch && !busy && Boolean(kdf));
 
   const canAdvance = $derived(
-    step === 1 ? nameValid && pathValid : step === 2 ? canCreate : kitAcknowledged,
+    step === 1 ? nameValid && pathValid : step === 2 ? canCreate : kitAcknowledged && !busy,
   );
+
+  /**
+   * The path field's "Change" — a native save dialog, D-60.
+   *
+   * `pathTouched` is set on the way **in**, before the dialog is awaited, and not only on the
+   * way out: opening the picker is the user taking the path over, and the name-watching
+   * `$effect` above would otherwise overwrite whatever they chose the next time the name
+   * changed. A cancelled dialog leaves the path alone, which is what a cancelled dialog means.
+   */
+  async function browse() {
+    pathTouched = true;
+    error = '';
+    try {
+      const chosen = await pickNewVaultPath(path.trim() || 'vault.tvault');
+      if (chosen) path = chosen;
+    } catch (thrown) {
+      error = asIpcError(thrown).message;
+    }
+  }
 
   async function toStepTwo() {
     error = '';
@@ -154,7 +175,13 @@
       strength = null;
       step = 3;
     } catch (thrown) {
-      error = asIpcError(thrown).message;
+      const failure = asIpcError(thrown);
+      error = failure.message;
+      // The refusal is about a field on the *previous* step, so the flow goes back to it —
+      // D-62. An error naming a path, shown under a password field, is one the user reads
+      // twice and then re-types their password for nothing. `pathTouched` stays set, so the
+      // name no longer moves the path out from under them while they fix it.
+      if (failure.kind === 'path_in_use') step = 1;
     } finally {
       busy = false;
     }
@@ -163,23 +190,90 @@
   function next() {
     if (step === 1) void toStepTwo();
     else if (step === 2) void create();
-    else finish();
+    else void finish();
   }
 
   function back() {
     if (step === 1) oncancel?.();
     else if (step === 2) step = 1;
-    // Step 3 has no way back: the vault exists and the kit is on screen. The button is hidden.
+    // Step 3 still has no way back, and since D-69 the reason has changed: the vault does not
+    // exist yet, so going back is now *possible* — but the kit on screen belongs to the vault
+    // that would be discarded, and R-07 shows it once. A back button here would have to say it
+    // throws the kit away, which is a decision rather than a hidden button.
   }
 
-  function finish() {
-    // Cleared before routing, not after: the next screen must not be able to observe it.
-    recoveryCode = '';
-    ondone();
+  /**
+   * The acknowledgement is what writes the vault — D-69.
+   *
+   * Until this was split, `create_vault` wrote the file at the end of step 2, so closing the
+   * window while reading the kit left a `.tvault` whose kit had never been recorded: shown
+   * exactly once (R-07), no command to fetch it again, and the remembered path sending the next
+   * launch to a lock screen with no recovery route out of it. Nothing is on disk until here.
+   *
+   * The code is cleared **after** the write rather than before, and only on success: a failed
+   * commit leaves the user on step 3 with the kit still on screen, which is the only screen it
+   * will ever be on. A failure here is a real possibility rather than a formality — the
+   * directory can have gone away, or filled up, while the kit was being read.
+   */
+  async function finish() {
+    if (busy) return;
+    busy = true;
+    error = '';
+    try {
+      await commitVault();
+      recoveryCode = '';
+      ondone();
+    } catch (thrown) {
+      error = asIpcError(thrown).message;
+    } finally {
+      busy = false;
+    }
   }
 
   /** Six groups of four, which is how R-07 says it is transcribed. */
   const groups = $derived(recoveryCode.split('-'));
+
+  /**
+   * Step 3's two keyboard defects, both found by walking row 3 on 2026-08-08 — finding 4.
+   *
+   * **Focus.** Steps 1 and 2 land focus with `autofocus` on their text field; step 3 has no text
+   * field, so it had nothing, and the password field being removed from the DOM dropped focus to
+   * `document.body` — the first Tab then restarted from the top of the *document* rather than
+   * from the kit on screen. The first control in the step gets focus instead, which is the same
+   * place `autofocus` puts it on the two steps before. Not the acknowledgement checkbox, though
+   * it is the required action: starting there puts Print and Save PDF *behind* the user, and the
+   * kit is the one thing on this screen that cannot be shown again.
+   *
+   * **Enter.** `onenter` lives on the input inside `TextField`, so a step with no text field had
+   * no Enter path at all — the row's "Enter finishes" was never implemented rather than broken.
+   *
+   * Once focus lands in the step, *most* of Enter is native and wants no handler: Enter on Print
+   * prints, and Enter on the CTA finishes, which is the row's clause satisfied by a button being
+   * a button. The one place it was still dead is the acknowledgement checkbox — a checkbox
+   * toggles on **Space** and does nothing on Enter, in every browser, and that is the control the
+   * whole step exists to collect. Reported twice from the walk, which is what it looks like when
+   * a key does nothing: correct by the row's letter and wrong at the keyboard.
+   *
+   * So Enter toggles it, exactly as Space does. Row 3 is unchanged and is now more true rather
+   * than less: Space still toggles, and Enter still finishes — from the CTA, which is where Tab
+   * lands the moment the box is ticked and the button stops being disabled.
+   */
+  let kitStep = $state<HTMLDivElement | null>(null);
+
+  $effect(() => {
+    if (step !== 3) return;
+    kitStep?.querySelector<HTMLElement>('button, input')?.focus();
+  });
+
+  function onKitKeydown(event: KeyboardEvent) {
+    const target = event.target;
+    if (event.key !== 'Enter') return;
+    if (!(target instanceof HTMLInputElement) || target.type !== 'checkbox') return;
+    // Not `finish()` even when the box is already ticked: the same key on the same control doing
+    // two different things depending on state is worse than the dead key this replaces.
+    event.preventDefault();
+    kitAcknowledged = !kitAcknowledged;
+  }
 </script>
 
 <div class="onboarding">
@@ -236,16 +330,12 @@
             onenter={() => canAdvance && next()}
           >
             {#snippet trailing()}
-              <!-- R-08 asks for "name & location", which a resolved default and an editable
-                   path satisfies. A browse button means `tauri-plugin-dialog`, and a plugin
-                   arrives when a requirement needs one and not before. -->
-              <button
-                class="change"
-                type="button"
-                disabled
-                title="Type the path; a file picker
-                would mean adding a plugin to a process that holds decrypted secrets"
-              >
+              <!-- Drawn-and-disabled from D-36 until 2026-08-07, with "a file picker would mean
+                   adding a plugin" in its `title`. The plugin arrived with D-59 and that
+                   sentence died with it; D-60 is the third door, a save dialog, because the
+                   file being named does not exist yet. Typing the path still works — this is
+                   the surface, not the mechanism. -->
+              <button class="change" type="button" disabled={busy} onclick={() => void browse()}>
                 Change
               </button>
             {/snippet}
@@ -285,37 +375,49 @@
             </Callout>
           </div>
         {:else}
-          <div class="kit">
-            <p class="kit-label">Recovery key</p>
-            <div class="groups">
-              {#each groups as group, index (index)}
-                <span class="group">{group}</span>
-              {/each}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div bind:this={kitStep} onkeydown={onKitKeydown}>
+            <div class="kit">
+              <p class="kit-label">Recovery key</p>
+              <div class="groups">
+                {#each groups as group, index (index)}
+                  <span class="group">{group}</span>
+                {/each}
+              </div>
+              <div class="kit-actions">
+                <Button icon="copy" onclick={() => window.print()} title="Print or save as PDF">
+                  Print
+                </Button>
+                <Button icon="note" onclick={() => window.print()} title="Print or save as PDF">
+                  Save PDF
+                </Button>
+              </div>
             </div>
-            <div class="kit-actions">
-              <Button icon="copy" onclick={() => window.print()} title="Print or save as PDF">
-                Print
-              </Button>
-              <Button icon="note" onclick={() => window.print()} title="Print or save as PDF">
-                Save PDF
-              </Button>
-            </div>
-          </div>
 
-          <label class="ack">
-            <input type="checkbox" bind:checked={kitAcknowledged} />
-            <span>I have saved this kit somewhere safe</span>
-          </label>
+            <label class="ack">
+              <input type="checkbox" bind:checked={kitAcknowledged} />
+              <span>I have saved this kit somewhere safe</span>
+            </label>
+          </div>
         {/if}
 
         {#if error}
-          <p class="note danger"><Icon name="alert" size={13} />{error}</p>
+          <p class="note danger" role="alert"><Icon name="alert" size={13} />{error}</p>
         {/if}
       </div>
 
       <div class="cta">
+        <!-- `create_vault` derives the key at the settings `calibrateKdf` just measured, so this
+             is the slowest thing the application ever does and it is deliberately slow — R-02.
+             `canCreate` already held the button disabled through it, which on its own is the
+             worst signal available: a dead control is what a frozen window looks like. The label
+             is the same pattern the other five long operations use (`Unlocking…`, `Saving…`,
+             `Importing…`, `Deleting…`) rather than a spinner, because §5 bans the theatre and a
+             present participle says which operation is running where a spinner does not. -->
         <Button variant="primary" tall disabled={!canAdvance} onclick={next}>
-          {copy[step].cta}
+          {#if busy && step === 2}Creating vault…{:else if busy && step === 3}Saving vault…{:else}{copy[
+              step
+            ].cta}{/if}
         </Button>
         {#if step !== 3 && (step !== 1 || oncancel)}
           <Button tall onclick={back}>{copy[step].back}</Button>
@@ -394,10 +496,16 @@
     font-weight: var(--weight-semibold);
     color: var(--fg-subtle);
   }
+  /* The numeral is `--fg` and not `--accent`, which is the one place in the app where brass on
+     its own wash was doing the reading: 4.4:1 in both themes, and the last two findings
+     `scripts/a11y.mjs` had left (D-63). Brass still marks the step — it is the border and the
+     wash — and the digit is the part that has to be legible. Filling it like `li.done` would
+     have been the other fix and is wrong: the current step and a finished step would then look
+     the same, which is the whole thing the rail is for. */
   .steps li.on .num {
     border-color: var(--accent);
     background: var(--accent-wash);
-    color: var(--accent);
+    color: var(--fg);
   }
   .steps li.done .num {
     border-color: var(--accent);
@@ -487,6 +595,10 @@
     font-family: var(--font-sans);
     font-size: var(--text-sm);
     color: var(--fg-muted);
+  }
+  .change:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--fg);
   }
   .change:disabled {
     opacity: 0.45;

@@ -18,9 +18,13 @@
   import CommandPalette from './CommandPalette.svelte';
   import DeleteDialog from './DeleteDialog.svelte';
   import DetailPane from './DetailPane.svelte';
+  import EditItemDialog from './EditItemDialog.svelte';
+  import EditProfileDialog from './EditProfileDialog.svelte';
   import GeneratorDialog from './GeneratorDialog.svelte';
+  import ImportDialog from './ImportDialog.svelte';
   import ItemList from './ItemList.svelte';
   import NewItemDialog from './NewItemDialog.svelte';
+  import ProfileMenu from './ProfileMenu.svelte';
   import SettingsPane from './SettingsPane.svelte';
   import Sidebar from './Sidebar.svelte';
   import VaultSwitcher from './VaultSwitcher.svelte';
@@ -29,33 +33,122 @@
     asIpcError,
     listItems,
     lock,
+    onWatchtowerProgress,
     setSettings,
+    watchtowerBreachCheck,
+    watchtowerScan,
+    type BreachReport,
     type ItemSummary,
     type Settings,
     type VaultStatus,
+    type WatchtowerReport,
   } from '../ipc';
+  import { initialsOf } from './profile';
   import { isFullWidth, matches, viewTitle, type View } from './views';
 
   interface Props {
     status: VaultStatus;
     settings: Settings;
     onsettings: (next: Settings) => void;
+    /**
+     * The open vault was switched away from or deleted — R-22, R-18.
+     *
+     * The host has already locked and zeroized by the time this fires, so what is left is for
+     * the router to re-read `vault_status` and stop drawing this shell. It re-reads rather than
+     * being told which screen to show: the host owns lock state, and a frontend that decided
+     * "so we go to the lock screen now" would be the second source of truth §9 check 6 exists
+     * to keep from existing.
+     */
+    onvaultchanged: () => void;
+    /**
+     * The user asked for a second vault from the switcher — R-22, D-62.
+     *
+     * Routed up to the router rather than handled here, for the reason above one line: this
+     * shell is what gets replaced by the onboarding flow, and a screen that swaps itself out
+     * would be deciding what is on screen instead of the state that owns it.
+     */
+    oncreatevault: () => void;
+    /**
+     * Something inside the vault body that `vault_status` reports has changed — today only the
+     * profile (D-70).
+     *
+     * Separate from `onvaultchanged`, which means *this vault is gone* and tears the shell
+     * down. This one only asks the router to re-read: the state stays `unlocked`, the shell
+     * keeps rendering, and the new values arrive as props. Re-reading rather than being handed
+     * the values is the same rule the mutation commands follow — the host is the source, and a
+     * frontend that patched its own copy would be a second one.
+     */
+    onstatuschanged: () => void;
   }
 
-  const { status, settings, onsettings }: Props = $props();
+  const { status, settings, onsettings, onvaultchanged, oncreatevault, onstatuschanged }: Props =
+    $props();
 
   let items = $state<ItemSummary[]>([]);
   let view = $state<View>({ kind: 'all' });
   let selectedId = $state<string | null>(null);
   let error = $state('');
+  /** A settings write the host refused. Only `launch_at_login` can produce one. */
+  let settingsError = $state('');
+
+  type Overlay =
+    | 'none'
+    | 'palette'
+    | 'generator'
+    | 'add'
+    | 'edit'
+    | 'editProfile'
+    | 'import'
+    | 'vaults'
+    | 'profileMenu'
+    | 'deleteItem'
+    | 'deleteVault';
 
   /** Which overlay is up. One at a time — the prototype never stacks two. */
-  let overlay = $state<
-    'none' | 'palette' | 'generator' | 'add' | 'vaults' | 'deleteItem' | 'deleteVault'
-  >('none');
+  let overlay = $state<Overlay>('none');
+
+  /**
+   * The footer button the profile popover is placed against — D-70.
+   *
+   * Kept beside `overlay` rather than inside `Sidebar.svelte` because the popover is rendered
+   * here: the sidebar scrolls, so a menu parented inside it would be clipped by its own
+   * overflow. The element arrives from the click that opened the menu, and is what the menu
+   * measures and gives focus back to.
+   */
+  let profileAnchor = $state<HTMLElement | null>(null);
+
+  /**
+   * Close an overlay only if it is still the one on screen.
+   *
+   * One state for every overlay means "run the command, then close me" is two synchronous writes
+   * to the same variable, and the close was winning: the palette's *New item* row set
+   * `overlay = 'add'` and had it overwritten by `'none'` in the next statement, so the dialog
+   * never rendered. *Generate password* was broken identically, while *Lock vault*, *Watchtower*
+   * and *Settings* worked because they route through `onlock`/`onview` and never touch `overlay`
+   * — three of five working is why it survived, and why the palette looked alive.
+   *
+   * Reordering the two calls would have fixed the same two rows and left the next one to be
+   * written broken, because it would still be ordering that decided. Guarding on identity makes
+   * the rule structural: a handler that navigated somewhere keeps where it went, and a close that
+   * is only a close still closes. Found on 2026-08-08 in the manual keyboard pass, though the
+   * pointer path was identically broken — `docs/keyboard-audit.md`, finding 5.
+   */
+  function closeOverlay(which: Overlay) {
+    if (overlay === which) overlay = 'none';
+  }
 
   /** Epoch-ms the clipboard is scheduled to clear at. Owned here; see DetailPane's note. */
   let clipboardUntil = $state(0);
+
+  /**
+   * Bumped after any mutation, which is what makes both panes re-read.
+   *
+   * The mutation commands return the identifier at most — `update_item` and `delete_item`
+   * return nothing at all — because `get_item` is deliberately the one path that decides what
+   * may cross (§6.4). The cost of that is exactly this: the frontend never learns the new state
+   * from a response, so it asks again.
+   */
+  let mutations = $state(0);
 
   /**
    * Live pane widths, committed to the settings file when a drag ends.
@@ -68,10 +161,126 @@
   let listWidth = $state(untrack(() => settings.listWidth));
 
   $effect(() => {
+    void mutations;
     void listItems()
       .then((loaded) => (items = loaded))
       .catch((thrown) => (error = asIpcError(thrown).message));
   });
+
+  /* ---- Watchtower — §6.9, R-23, R-24 --------------------------------------- */
+
+  /** The last scan's report. `null` until one has run in this session. */
+  let report = $state<WatchtowerReport | null>(null);
+  let scanning = $state(false);
+  let scanError = $state('');
+  /**
+   * The `mutations` generation `report` was taken at, or `-1` for "no scan yet".
+   *
+   * This is what makes the scan run **once** rather than on every visit to the screen. The scan
+   * is not free — it re-scores every password (S-07a) and **saves the vault**, because the
+   * statuses it writes are a cache the item list draws from — so navigating away and back must
+   * not re-encrypt the file. Bumping `mutations` is what invalidates it, which means an added,
+   * edited or deleted item makes the next visit re-scan: exactly the cases where a finding could
+   * have appeared or been fixed.
+   */
+  let scannedAt = $state(-1);
+
+  /**
+   * Scan when the screen is opened and the held report is older than the last mutation.
+   *
+   * **The generation is marked as attempted before the call, not after it**, and that ordering is
+   * the whole of this effect's correctness. Marking it on success only would leave a *failed*
+   * scan eligible to run again the instant `scanning` flips back — a retry loop against the host
+   * at whatever rate the failure returns at, on a screen the user is only reading. Attempted-once
+   * is the rule; the way back from an error is the button in the error state, which is a person
+   * asking rather than a loop.
+   *
+   * The same assignment is the termination proof: the effect reads `scannedAt`, so the write
+   * re-triggers it, and the re-run returns on the first line.
+   */
+  $effect(() => {
+    const generation = mutations;
+    if (view.kind !== 'watchtower' || scannedAt === generation) return;
+    scannedAt = generation;
+    scanning = true;
+    scanError = '';
+    void watchtowerScan()
+      .then((scanned) => {
+        report = scanned;
+        // The scan wrote a status per item and stamped `last_scan_at`. Neither is in the
+        // response, so both are re-read rather than patched in here — the host is the source,
+        // and the pips in the item list are the visible half of the same write.
+        return listItems().then((loaded) => (items = loaded));
+      })
+      .then(() => onstatuschanged())
+      .catch((thrown) => (scanError = asIpcError(thrown).message))
+      .finally(() => (scanning = false));
+  });
+
+  /* ---- The breach half — §6.9, R-25, R-26 ---------------------------------- */
+
+  /** The last breach check's report. `null` until one has run **in this session**. */
+  let breach = $state<BreachReport | null>(null);
+  let checking = $state(false);
+  let breachProgress = $state<{ done: number; total: number } | null>(null);
+  let breachError = $state('');
+
+  /**
+   * Run the breach check, because a person pressed the button.
+   *
+   * **There is no effect that starts this**, and that is the difference between this command and
+   * the scan above. The scan is local, 61 ms, and re-runs itself whenever an item changes; this
+   * one is minutes long and is the only thing in the product that opens a socket, so it happens
+   * when it is asked for and never as a side effect of opening a screen. With the setting off it
+   * still runs — and returns `requested: 0` without contacting anything, which is the host
+   * refusing rather than this side deciding it may not ask.
+   */
+  function runBreachCheck() {
+    if (checking) return;
+    checking = true;
+    breachError = '';
+    breachProgress = null;
+    void watchtowerBreachCheck()
+      .then((report) => {
+        breach = report;
+        // A hit is written into the status cache, so the pips and the sidebar badge change with
+        // it. Re-read rather than patch, for the scan's reason: the host is the source.
+        return listItems().then((loaded) => (items = loaded));
+      })
+      .then(() => onstatuschanged())
+      .catch((thrown) => (breachError = asIpcError(thrown).message))
+      .finally(() => {
+        checking = false;
+        breachProgress = null;
+      });
+  }
+
+  /**
+   * `watchtower-progress` — §8, two integers and nothing else.
+   *
+   * Subscribed for the life of the shell rather than for the life of a check: an event that
+   * arrives after the promise resolves is then ignored by the `checking` guard in the view,
+   * instead of racing an unsubscribe.
+   */
+  $effect(() => {
+    const unlisten = onWatchtowerProgress((done, total) => {
+      if (checking) breachProgress = { done, total };
+    });
+    return () => void unlisten.then((stop) => stop());
+  });
+
+  /**
+   * Scan again because the user asked — the error state's only action.
+   *
+   * There is no *Re-check* control on the screen itself, and that is the prototype's design
+   * rather than an omission: the scan runs on opening the screen and after any change to an item,
+   * which covers every case where a finding could appear or be fixed. This exists for the case
+   * the prototype does not draw at all — a scan the host refused — where the alternative is a
+   * dead end until the vault is locked and reopened.
+   */
+  function rescanWatchtower() {
+    scannedAt = -1;
+  }
 
   const visible = $derived(items.filter((item) => matches(view, item)));
 
@@ -81,6 +290,11 @@
   );
 
   const selectedTitle = $derived(items.find((item) => item.id === selectedId)?.title ?? '');
+
+  /** The popover's avatar: the person's initials, or the vault's when nobody is named — D-70. */
+  const profileInitials = $derived(
+    initialsOf(status.profile?.name ?? '', initialsOf(status.displayName, 'TV')),
+  );
 
   /**
    * Keep the selection inside the current view, and land on the first row when it falls out.
@@ -141,8 +355,51 @@
     target.addEventListener('pointerup', done);
   }
 
+  /**
+   * Saves a settings change, and shows the one that can be refused.
+   *
+   * `launch_at_login` writes outside this process — a desktop entry, a `LaunchAgent`, a
+   * registry value — so the host rejects with `io` and **stores nothing** when the platform
+   * will not take it. This side therefore does not update its own copy on failure either: the
+   * toggle snaps back to what the host still holds, which is the truth about the machine, and
+   * the sentence beside it says why it moved. Optimistically keeping the new value would leave
+   * a screen promising the app starts at login when nothing registered it.
+   */
   function saveSettings(next: Settings) {
-    void setSettings(next).then(onsettings);
+    settingsError = '';
+    void setSettings(next)
+      .then(onsettings)
+      .catch((thrown) => (settingsError = asIpcError(thrown).message));
+  }
+
+  /**
+   * A new item landed. Select it, and leave a filtered view if it would hide it.
+   *
+   * The view change is not a nicety: adding a login while the sidebar is on the Cards filter
+   * would otherwise save the item and show nothing, which is indistinguishable from the save
+   * having failed.
+   */
+  function itemSaved(itemId: string) {
+    overlay = 'none';
+    mutations += 1;
+    view = { kind: 'all' };
+    selectedId = itemId;
+  }
+
+  /** An edit landed. Both panes re-read; the selection is already right. */
+  function itemChanged() {
+    overlay = 'none';
+    mutations += 1;
+  }
+
+  /**
+   * A delete landed. The selection is dropped first, so the detail pane stops asking for an
+   * item the vault no longer has — the `$effect` below then lands it on the next row.
+   */
+  function itemDeleted() {
+    overlay = 'none';
+    selectedId = null;
+    mutations += 1;
   }
 
   /**
@@ -167,6 +424,15 @@
     } else if (meta && key === 'l') {
       event.preventDefault();
       void lock();
+    } else if (meta && event.key === ',') {
+      // D-70. Bound because the profile popover prints "⌘," beside its Settings row, and a
+      // shortcut drawn on screen that nothing listens for is the same defect as a disabled
+      // control that promises a feature — it is just cheaper to fix. It is also the platform
+      // convention for preferences on all three targets, which is why the design drew it.
+      // Matched on `event.key` rather than the lowercased copy: `,` has no case, and the
+      // shifted character on this key differs per layout.
+      event.preventDefault();
+      goto({ kind: 'settings' });
     } else if (event.key === 'Escape' && overlay !== 'none') {
       overlay = 'none';
     }
@@ -211,8 +477,13 @@
         {view}
         vaultName={status.displayName}
         {vaultFile}
+        profile={status.profile}
+        menuOpen={overlay === 'profileMenu'}
         onview={goto}
-        onvaults={() => (overlay = 'vaults')}
+        onmenu={(trigger) => {
+          profileAnchor = trigger;
+          overlay = 'profileMenu';
+        }}
       />
     </div>
 
@@ -226,14 +497,33 @@
     ></div>
 
     {#if view.kind === 'watchtower'}
-      <Watchtower {items} onopen={openItem} />
+      <Watchtower
+        {items}
+        {report}
+        {scanning}
+        error={scanError}
+        lastScanAt={status.lastScanAt}
+        breachEnabled={settings.breachCheckEnabled}
+        {breach}
+        {checking}
+        progress={breachProgress}
+        {breachError}
+        lastBreachCheckAt={status.lastBreachCheckAt}
+        onopen={openItem}
+        onretry={rescanWatchtower}
+        oncheck={runBreachCheck}
+        onsettings={() => goto({ kind: 'settings' })}
+      />
     {:else if view.kind === 'settings'}
       <SettingsPane
         {settings}
         {status}
         itemCount={items.length}
+        error={settingsError}
         onchange={saveSettings}
         ondeletevault={() => (overlay = 'deleteVault')}
+        onimport={() => (overlay = 'import')}
+        oneditprofile={() => (overlay = 'editProfile')}
       />
     {:else}
       <div class="pane" style="width: {listWidth}px">
@@ -245,6 +535,7 @@
           onselect={(id) => (selectedId = id)}
           ongenerate={() => (overlay = 'generator')}
           onadd={() => (overlay = 'add')}
+          onview={goto}
         />
       </div>
 
@@ -261,7 +552,9 @@
         itemId={selectedId}
         listEmpty={visible.length === 0}
         {clipboardUntil}
+        reloadSignal={mutations}
         oncopied={(clearsAt) => (clipboardUntil = clearsAt)}
+        onedit={() => (overlay = 'edit')}
         ondelete={() => (overlay = 'deleteItem')}
       />
     {/if}
@@ -269,8 +562,7 @@
 
   {#if overlay === 'palette'}
     <CommandPalette
-      {items}
-      onclose={() => (overlay = 'none')}
+      onclose={() => closeOverlay('palette')}
       onopen={openItem}
       onview={goto}
       onlock={() => void lock()}
@@ -279,29 +571,83 @@
       oncopied={(clearsAt) => (clipboardUntil = clearsAt)}
     />
   {:else if overlay === 'generator'}
-    <GeneratorDialog onclose={() => (overlay = 'none')} />
+    <GeneratorDialog onclose={() => closeOverlay('generator')} />
   {:else if overlay === 'add'}
     <NewItemDialog
       vaultName={status.displayName}
       {vaultFile}
       {tags}
-      onclose={() => (overlay = 'none')}
+      onclose={() => closeOverlay('add')}
+      onsaved={itemSaved}
     />
-  {:else if overlay === 'vaults'}
-    <VaultSwitcher
+  {:else if overlay === 'edit' && selectedId}
+    <EditItemDialog
+      itemId={selectedId}
       vaultName={status.displayName}
       {vaultFile}
+      {tags}
+      onclose={() => closeOverlay('edit')}
+      onsaved={itemChanged}
+    />
+  {:else if overlay === 'editProfile'}
+    <!-- The one editor, reached from the sidebar popover and from the Settings card. It closes
+         on success and the router re-reads, which is what repaints the footer, the popover
+         header and the card together. -->
+    <EditProfileDialog
+      name={status.profile?.name ?? ''}
+      email={status.profile?.email ?? ''}
+      onclose={() => closeOverlay('editProfile')}
+      onsaved={() => {
+        closeOverlay('editProfile');
+        onstatuschanged();
+      }}
+    />
+  {:else if overlay === 'profileMenu' && profileAnchor}
+    <ProfileMenu
+      anchor={profileAnchor}
+      name={status.profile?.name ?? ''}
+      email={status.profile?.email ?? ''}
+      initials={profileInitials}
+      vaultName={status.displayName}
+      onclose={() => closeOverlay('profileMenu')}
+      oneditprofile={() => (overlay = 'editProfile')}
+      onvaults={() => (overlay = 'vaults')}
+      onsettings={() => goto({ kind: 'settings' })}
+      onlock={() => void lock()}
+    />
+  {:else if overlay === 'import'}
+    <!-- The dialog stays open after a successful import and shows the commit's report; only
+         `mutations` moves here, so the list and the tag sidebar re-read behind it. Closing on
+         success would take the refusal list off screen at the moment it becomes permanent —
+         it is the one record of what did *not* come across. -->
+    <ImportDialog onclose={() => closeOverlay('import')} onimported={() => (mutations += 1)} />
+  {:else if overlay === 'vaults'}
+    <VaultSwitcher
+      openPath={status.path}
       itemCount={items.length}
-      onclose={() => (overlay = 'none')}
+      onclose={() => closeOverlay('vaults')}
+      onswitched={onvaultchanged}
+      oncreate={() => {
+        closeOverlay('vaults');
+        oncreatevault();
+      }}
     />
   {:else if overlay === 'deleteItem'}
-    <DeleteDialog target="item" name={selectedTitle} onclose={() => (overlay = 'none')} />
+    <DeleteDialog
+      target="item"
+      name={selectedTitle}
+      itemId={selectedId}
+      onclose={() => closeOverlay('deleteItem')}
+      ondeleted={itemDeleted}
+    />
   {:else if overlay === 'deleteVault'}
     <DeleteDialog
       target="vault"
       name={status.displayName}
+      vaultPath={status.path}
       itemCount={items.length}
-      onclose={() => (overlay = 'none')}
+      onclose={() => closeOverlay('deleteVault')}
+      ondeleted={onvaultchanged}
     />
   {/if}
 

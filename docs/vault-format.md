@@ -215,8 +215,17 @@ VaultBody {
   created_at: int,           // Unix milliseconds, UTC
   updated_at: int,           // Unix milliseconds, UTC
   items:      [Item],
+  profile:    Profile,       // §6.6; absent entirely when empty
   audit:      [AuditEntry],  // §6.4; absent entirely when empty
+  last_scan_at:         int, // §6.7; Unix milliseconds; absent entirely when never
+  last_breach_check_at: int, // §6.7; Unix milliseconds; absent entirely when never
   ...unknown                 // §6.2
+}
+
+Profile {
+  name:       text,          // §6.6; may be empty
+  email:      text,          // §6.6; may be empty, never used to sign in
+  ...unknown
 }
 
 Item {
@@ -239,6 +248,7 @@ Field {
   value:      text,
   kind:       text,          // "text" | "username" | "password" | "url" | "email" | "otp" | "note" | "date"
   secret:     bool,          // §6.3
+  custom:     bool,          // §6.5; absent entirely when false
   ...unknown
 }
 
@@ -305,6 +315,92 @@ The log is inside the sealed body for the same reason `history` is: a record of 
 read *when* is sensitive on its own, whatever it omits. It is **not tamper-evidence** and must never
 be argued as such — anyone who can read it holds the master key and can therefore rewrite it. Its
 reader is the vault's owner reviewing their own activity.
+
+### 6.5 `custom` is stored, never inferred, and there is no folder
+
+Two questions that an import forces and the design never had to answer, settled together in
+**D-43** because they have the same shape: the model gets one new bit, and no new container.
+
+**Custom fields.** `custom` marks a field the user or an import added, as against one of the item
+type's own. It is stored for the reason `secret` is stored (§6.3), one step along. The tempting
+alternative — derive it, by asking whether the label is in the type's standard set — fails in both
+directions on real data: a login whose password field someone renamed becomes "custom", and an
+imported custom field that happens to be called "Username" becomes the login's own. The second
+direction is the dangerous one, because it silently merges an imported value into a real credential.
+
+Three consequences a second implementation must match:
+
+1. **Absent when false.** A field that is not custom writes no `custom` key at all, so a vault with
+   no custom field anywhere encodes exactly as it did before this key existed — which is what keeps
+   the vectors in §10 valid without regenerating them. A reader MUST treat an absent `custom` as
+   `false`, not as an error.
+2. **Custom fields are never addressed by label.** Setting a field by label searches only
+   non-custom fields. Two fields may carry the same label as long as at most one of them is not
+   custom.
+3. **Duplicate custom labels are legal and are not merged.** Bitwarden permits two custom fields
+   with the same name, and merging them on import would be a field dropped in silence — the exact
+   failure R-29 refuses to call an import.
+
+**Folders.** There is no `folder` key and there will not be one. A folder is a single-parent
+grouping, `tags` is a many-to-many one, and every folder is expressible as a tag while the reverse
+is not — so a `folder` key would be a second taxonomy over the same items, with the sidebar then
+owing two filters that mean nearly the same thing. On import a folder becomes a tag, and a **nested
+path is kept verbatim as one tag string** (`Work/Clients`, not `Clients`): flattening to the leaf
+name collides across parents, and splitting into two tags claims a hierarchy that tags do not have.
+
+### 6.6 The profile is a label, not an account — D-70
+
+`profile` holds a name and an e-mail address, and it exists because the design draws a person in two
+places: the sidebar footer and the Settings card, both with an avatar of initials. TrustVault has no
+account and no sync (D-03), so there was nothing behind those pixels — for two phases they carried
+the *vault's* initials, name and file instead, which is honest and is a different thing from what
+was drawn. D-70 chose the third option: store the two strings, so that the person on screen is one
+the user actually named.
+
+Four properties, and a second implementation must match all four:
+
+1. **It is not a credential and it is not validated.** Nothing authenticates against these strings.
+   `email` is not checked for an `@` — its job is to label a profile and a printed recovery kit, and
+   refusing a string the user chose for their own label would be the format inventing a rule.
+2. **Absent when empty.** A profile whose `name`, `email` and unknown keys are all empty writes no
+   `profile` key at all, so a vault that predates this field encodes exactly as it did before — the
+   same rule `custom` (§6.5) and `audit` (§6.4) follow, and the reason the vectors in §10 stay valid
+   without being regenerated. A reader MUST treat an absent `profile` as two empty strings.
+3. **Empty is the starting state.** Onboarding's three steps are vault name, master password and
+   recovery kit; none of them asks. Every vault begins with no owner named, and the UI treats that
+   as an invitation rather than as missing data.
+4. **It is inside the sealed body, and that is the point.** A name and an e-mail identify a person,
+   so they belong in the part of the file that is unreadable without a key — not beside the settings
+   (D-33), which are plaintext JSON in a config directory. The cost is that they cannot be read while
+   locked, which is why the lock screen names the vault and never its owner.
+
+`unknown` on `Profile` counts toward "empty" in the N-09 direction: a profile holding only a key this
+build does not recognize is **not** empty, and skipping it on write would drop what a newer version
+stored.
+
+### 6.7 The two Watchtower timestamps — R-23…R-26
+
+`last_scan_at` and `last_breach_check_at` say when the local scan and the breach check last
+finished, in Unix milliseconds. Added 2026-08-16 with `watchtower_scan`, and permitted without a
+version bump by §9: a new key in the body is not a format change.
+
+Four properties, and the first two are the reason there are two keys rather than one:
+
+1. **Two passes, two timestamps.** `status: "strong"` means *clean at the last scan*, and the local
+   scan and the breach check can be days apart. A single "last scanned" would let this morning's
+   local scan vouch for a breach check that has never run, which is the one direction this cache
+   must never fail in.
+2. **`last_breach_check_at` is written only by a check that finished** — D-86, and it is the one
+   key in the body whose absence is load-bearing rather than incidental. A breach check that
+   reached three values out of a thousand writes the breaches it found and leaves this key alone,
+   because it is the only part of a check that survives a relaunch: `unchecked` lives in the IPC
+   response and is gone with the window. A reader MUST treat absence as "never", never as "clean".
+3. **Absent when never.** A vault that has not been scanned writes no key at all, the rule `audit`
+   (§6.4) and `profile` (§6.6) already follow, and the reason the vectors in §10 stay valid.
+4. **They are the only thing that makes `status: "unknown"` legible.** Without a scan timestamp,
+   an item nobody ever scanned and an item Watchtower deliberately did not examine are the same
+   value — and both are written: an item with **no password field** keeps the status it had rather
+   than being called `strong`, because nothing was examined on it.
 
 ## 7. Reading a vault
 

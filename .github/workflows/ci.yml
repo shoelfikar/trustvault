@@ -51,6 +51,24 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      # S-07a is the one measured criterion in this project that a runner can re-take, so it is
+      # the one that gets to be a build failure rather than a number in a document. The others
+      # need this desktop (S-03's Argon2id calibration), a display (the clipboard pair), or the
+      # running app (S-04's end-to-end half) — see trustvault-requirements.md.
+      #
+      # The budget lives in the benchmark, not here: `BUDGET_MS` in benches/watchtower.rs, set
+      # to 8x the first reading with the multiplier for a slower machine written into it (D-80).
+      # If this step starts failing on the runner rather than on a change, that is evidence
+      # about the runner and belongs in trustvault-state.md — not a bigger number.
+      - name: Watchtower local scan within budget (S-07a)
+        run: cargo bench --bench watchtower -p trustvault-core
+      # The packet capture itself cannot run here — nothing in CI runs the application, which has
+      # been true since next action 14 — but the script that decides whether a capture passes can,
+      # and it is the piece with logic in it. It builds a capture, analyses it, then breaks it on
+      # purpose: a planted password, a full SHA-1 in hex and in raw bytes, a ClientHello naming
+      # another host. No root, no network, no display; about a second.
+      - name: Packet-capture report agrees with itself (R-25)
+        run: python3 scripts/capture-report.py --self-test
 
   boundary:
     name: Vault core isolation (N-02)
@@ -81,6 +99,39 @@ jobs:
           if [ -n "$strays" ]; then
             echo "$strays"
             echo "::error::invoke() is called outside src/lib/ipc.ts — every IPC call goes through that file (R-10)"
+            exit 1
+          fi
+      # R-21 and D-57. `MASTER.md` §3 describes the UI Scale setting as "scaling the whole rem
+      # root"; tokens.css implements it as `--ui-scale` multiplying px `calc()`s instead, and
+      # the two are indistinguishable today only because nothing in this codebase uses `rem`.
+      # The first `rem` someone writes is the one the setting silently stops applying to — a
+      # control that scales most of a screen is harder to diagnose than one that scales none of
+      # it, because it looks like a layout bug rather than a broken setting.
+      - name: Assert nothing is sized in rem, which UI Scale does not reach (R-21, D-57)
+        run: |
+          strays=$(grep -rEn '[0-9.]+rem\b' src --include='*.css' --include='*.svelte' || true)
+          if [ -n "$strays" ]; then
+            echo "$strays"
+            echo "::error::a size is written in rem — every size comes from a token multiplied by --ui-scale (R-21, D-57)"
+            exit 1
+          fi
+      # D-65. The `measure` feature turns on devtools so S-04's end-to-end number can be read off
+      # the build that ships rather than off a `tauri dev` build whose matching is 7.8x slower.
+      # Devtools is an inspector attached to a process holding decrypted secrets, so the feature
+      # is passed by hand for one measurement and by nothing that produces a binary a user runs.
+      # There are exactly two ways it stops being opt-in: it becomes a default feature, or a
+      # workflow starts passing it.
+      #
+      # The bracket in the second pattern stops the check matching its own source; without it
+      # grep finds this step and fails on it.
+      - name: Assert devtools stay opt-in (D-65)
+        run: |
+          if grep -En '^ *default *=' src-tauri/Cargo.toml; then
+            echo "::error::src-tauri gained default features — devtools must never be among them (D-65)"
+            exit 1
+          fi
+          if grep -rEn '(--features|-F|-f)[^#]*[m]easure' .github/workflows; then
+            echo "::error::a workflow builds with the measure feature, which ships devtools (D-65)"
             exit 1
           fi
 
@@ -151,6 +202,46 @@ jobs:
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  a11y:
+    name: Accessibility audits (S-08, S-09)
+    runs-on: ubuntu-latest
+    # Twenty scenarios, two themes, three audits, one cold Firefox each. It is the longest job
+    # here by a distance and it is still the cheapest way to hold these three lines: a contrast
+    # failure is invisible in a diff and invisible in review, and a control that leaves the tab
+    # order changes no pixel at all.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      # Firefox is what `scripts/harness.mjs` drives, and `ubuntu-latest` ships it as a snap
+      # transitional package that apt cannot usefully install in CI. This action downloads
+      # Mozilla's own build and puts it on PATH — MIT, actively maintained, all three runner
+      # platforms, and it replaces nothing we own. The alternative was the mozillateam PPA with
+      # apt pinning: a third-party binary source either way, and more moving parts.
+      - uses: browser-actions/setup-firefox@v1
+      - run: npm ci
+      # `npm run a11y` builds first; the audits run against `dist/`, the same bundle the
+      # screenshots are taken from, so a finding here is about the surface in the picture.
+      - name: focus, contrast and tab order
+        run: npm run a11y
+      # Not a pixel comparison, and the difference is worth being explicit about. Baselines
+      # taken on a developer's machine fail against a runner's font rendering on the first run,
+      # so what this step tests is that every screen still *renders*: a scenario whose drive
+      # broke produces no file and fails the job. The PNGs are uploaded for a person to look at
+      # when they want to; comparing them mechanically needs baselines produced by this runner
+      # image, which is a decision for the phase that has a release to protect.
+      - name: Render every screen
+        run: npm run shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: docs/screenshots/
+          retention-days: 14
 
   build:
     name: Build ${{ matrix.os }}

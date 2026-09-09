@@ -2,42 +2,68 @@
   /**
    * Settings — the prototype's grouped rows, carrying the four values D-33 actually persists.
    *
-   * The prototype's Profile card is a *vault* card here. There is no account, no email and no
-   * sync (D-03), so a profile would be three invented fields on the one screen where a user
-   * goes to check what is true about their vault. The geometry is unchanged; the content is the
-   * vault's own.
+   * **Two cards at the top, where the prototype has one — D-70.** The design's single Profile
+   * card was a *vault* card here for two phases, because there was no account, no e-mail and no
+   * sync (D-03) and a profile would have been three invented fields on the one screen a user
+   * opens to check what is true. D-70 made the profile real, so the card the design drew comes
+   * back — and the vault card stays, because what it answers (which file, how many items, where
+   * it is) is the thing the prototype had nowhere else to put and this screen still owes. The
+   * stats row belongs to the vault card for the same reason: *Items stored*, *Sync* and *Vault
+   * file* are facts about the file, not about the person.
    *
-   * Two of the prototype's rows are absent rather than disabled: **UI scale** and **Launch at
-   * login** are settings the host does not store, and a control that forgets on relaunch is
-   * worse than one that is not there. Both are named in the session log so the gap is a task
-   * rather than an oversight.
+   * **UI scale** and **Launch at login** were absent rather than disabled until 2026-08-06,
+   * because the host had nowhere to keep them and a control that forgets on relaunch is worse
+   * than one that is not there. Both are here now, and the second is the only control in the
+   * application whose change can be **refused by the operating system** — see `error` below.
    */
   import Button from '../components/Button.svelte';
+  import Icon from '../icons/Icon.svelte';
   import Segmented from '../components/Segmented.svelte';
   import Toggle from '../components/Toggle.svelte';
-  import type { Settings, Theme, VaultStatus } from '../ipc';
+  import type { Settings, Theme, UiScale, VaultStatus } from '../ipc';
+  import { initialsOf } from './profile';
 
   interface Props {
     settings: Settings;
     status: VaultStatus;
     itemCount: number;
+    /** Rejected by the host — today only `launch_at_login`, which writes outside this process. */
+    error?: string;
     onchange: (next: Settings) => void;
     ondeletevault: () => void;
+    onimport: () => void;
+    oneditprofile: () => void;
   }
 
-  const { settings, status, itemCount, onchange, ondeletevault }: Props = $props();
+  const {
+    settings,
+    status,
+    itemCount,
+    error = '',
+    onchange,
+    ondeletevault,
+    onimport,
+    oneditprofile,
+  }: Props = $props();
 
   const fileName = $derived((status.path ?? '').split(/[/\\]/).pop() || 'vault.tvault');
 
-  const initials = $derived(
-    status.displayName
-      .trim()
-      .split(/\s+/)
-      .map((word) => word[0] ?? '')
-      .slice(0, 2)
-      .join('')
-      .toUpperCase() || 'TV',
+  const vaultInitials = $derived(initialsOf(status.displayName, 'TV'));
+
+  /**
+   * The profile card's own two lines, and what they say when nobody has filled one in — D-70.
+   *
+   * The empty state is an invitation rather than a blank card: every vault starts here, because
+   * onboarding's three steps are vault name, master password and recovery kit and none of them
+   * asks. The prototype's second line reads "budi@warungpintar.id · Lifetime license"; the
+   * licence half is gone for the reason `EditProfileDialog` gives — there is no purchase and
+   * nothing to manage.
+   */
+  const profileName = $derived(status.profile?.name || 'No profile set');
+  const profileEmail = $derived(
+    status.profile?.email || 'A name and e-mail for this vault and its recovery kit.',
   );
+  const profileInitials = $derived(initialsOf(status.profile?.name ?? '', '—'));
 
   const facts = $derived([
     { k: 'Items stored', v: `${itemCount} items` },
@@ -63,6 +89,14 @@
     { value: 30, label: '30s' },
   ];
 
+  /* The percentages are in the labels, not only in the names. "Compact" alone asks the user to
+     find out by trying it, and this is a control they change once. */
+  const scaleChoices: { value: UiScale; label: string }[] = [
+    { value: 'compact', label: 'Compact' },
+    { value: 'default', label: 'Default' },
+    { value: 'large', label: 'Large' },
+  ];
+
   const patch = (next: Partial<Settings>) => onchange({ ...settings, ...next });
 </script>
 
@@ -70,15 +104,38 @@
   <div class="column">
     <h1>Settings</h1>
 
+    <!-- The design's Profile card, real since D-70. `Edit profile` is the same dialog the
+         sidebar popover opens; there is one editor, reached from the two places the design
+         draws an avatar. -->
+    <p class="group-label">Profile</p>
+    <div class="card">
+      <div class="vault-head">
+        <span class="avatar" class:unset={!status.profile?.name}>{profileInitials}</span>
+        <div class="vault-titles">
+          <p class="vault-name" class:muted={!status.profile?.name}>{profileName}</p>
+          <p class="profile-email">{profileEmail}</p>
+        </div>
+        <Button onclick={oneditprofile}>
+          {status.profile?.name || status.profile?.email ? 'Edit profile' : 'Add profile'}
+        </Button>
+      </div>
+    </div>
+
     <p class="group-label">Vault</p>
     <div class="card vault">
       <div class="vault-head">
-        <span class="avatar">{initials}</span>
+        <span class="avatar">{vaultInitials}</span>
         <div class="vault-titles">
           <p class="vault-name">{status.displayName}</p>
           <p class="vault-path">{status.path ?? ''}</p>
         </div>
-        <Button disabled title="Renaming arrives with the mutation commands">Rename vault</Button>
+        <!-- A "Rename vault" button sat here, drawn-and-disabled since D-36 with "renaming
+             arrives with the mutation commands" in its `title`. The mutation commands arrived
+             on 2026-08-06 and none of them renames a vault, which is what the D-36 sweep found
+             — D-61. It is removed rather than re-worded: the prototype draws no rename, no
+             requirement asks for one, and the display name a user sees is the file's own stem
+             whenever the vault is closed (`display_name_for`), so renaming inside the app would
+             change a label the file name goes on contradicting. -->
       </div>
       <div class="facts">
         {#each facts as fact, index (fact.k)}
@@ -102,6 +159,24 @@
           options={themes}
           value={settings.theme}
           onchange={(next) => patch({ theme: next as Theme })}
+        />
+      </div>
+      <div class="row">
+        <div class="row-text">
+          <p class="row-label">Interface size</p>
+          <!-- The percentages belong in the description rather than in the chip labels: three
+               words read as three sizes, and "Compact 92%" in a 40px chip does not fit at
+               115% scale, which is exactly the setting that would break it. -->
+          <p class="row-desc">
+            Scales everything together — text, rows and controls. Compact 92 %, Default 100 %, Large
+            115 %.
+          </p>
+        </div>
+        <Segmented
+          label="Interface size"
+          options={scaleChoices}
+          value={settings.uiScale}
+          onchange={(next) => patch({ uiScale: next as UiScale })}
         />
       </div>
     </div>
@@ -151,7 +226,79 @@
           onchange={(next) => patch({ auditLogEnabled: next })}
         />
       </div>
+      <div class="row">
+        <div class="row-text">
+          <p class="row-label">Check for breached passwords</p>
+          <!-- R-26, and the copy is the requirement rather than a description of it. The row
+               says what leaves, what does not, and where it goes — in that order, because a
+               toggle labelled "check for breaches" invites exactly the reading this product
+               exists to refuse. No password, no item, no vault: five characters of a hash, and
+               the answer is matched here. The prototype draws no such row (it has no settings
+               for Watchtower at all), so the wording is this project's, like D-48's dialog. -->
+          <p class="row-desc">
+            Sends the <strong>first five characters</strong> of each password's SHA-1 hash to Have I Been
+            Pwned — never a password, never an item name, never anything identifying this vault or you.
+            The answer is matched on this device. Off by default; with it off, TrustVault makes no network
+            connection at all.
+          </p>
+        </div>
+        <Toggle
+          label="Check for breached passwords"
+          checked={settings.breachCheckEnabled}
+          onchange={(next) => patch({ breachCheckEnabled: next })}
+        />
+      </div>
     </div>
+
+    <p class="group-label">System</p>
+    <div class="card">
+      <div class="row first">
+        <div class="row-text">
+          <p class="row-label">Start at login</p>
+          <!-- It says "locked" because that is what happens, and a user who expects to find
+               their vault open would otherwise read this as a security regression. -->
+          <p class="row-desc">
+            Open TrustVault when you sign in to this computer. It starts locked — you still unlock
+            it yourself.
+          </p>
+        </div>
+        <Toggle
+          label="Start at login"
+          checked={settings.launchAtLogin}
+          onchange={(next) => patch({ launchAtLogin: next })}
+        />
+      </div>
+    </div>
+
+    <!-- Import lives in Settings because the prototype draws it nowhere (D-42 postdates the
+         design) and this is the screen that already answers "what is true about my vault".
+         It is a **row with a button**, matching the shape every other row on this screen has,
+         rather than a card of its own competing with the vault card at the top.
+
+         Export is not here and is not disabled-with-a-reason either: `trustvault-project.md`
+         puts it out of scope for v1, so a greyed control would be a promise the product has
+         decided not to make. A group named "Import" says what it is. -->
+    <p class="group-label">Import</p>
+    <div class="card">
+      <div class="row first">
+        <div class="row-text">
+          <p class="row-label">Import from Bitwarden</p>
+          <p class="row-desc">
+            Reads an unencrypted JSON export. You see exactly what will be added — and what cannot
+            be — before anything is written.
+          </p>
+        </div>
+        <Button icon="note" onclick={onimport}>Import…</Button>
+      </div>
+    </div>
+
+    <!-- The only place in Settings a save can fail. It sits under the card whose toggle can
+         cause it, and it is announced: a toggle that snapped back with nothing said would read
+         as the app being broken rather than as the OS refusing. §2 — icon and text, never
+         colour alone. -->
+    {#if error}
+      <p class="error" role="alert"><Icon name="alert" size={13} />{error}</p>
+    {/if}
 
     <div class="danger">
       <div class="row-text">
@@ -230,6 +377,21 @@
     font-size: var(--text-md);
     font-weight: var(--weight-medium);
   }
+  /* The empty profile: the placeholder reads as a prompt rather than as a name. */
+  .vault-name.muted {
+    color: var(--fg-muted);
+  }
+  .avatar.unset {
+    background: transparent;
+    border: 1px dashed var(--border-strong);
+    color: var(--fg-subtle);
+  }
+  .profile-email {
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-lh);
+    color: var(--fg-muted);
+    text-wrap: pretty;
+  }
   /* Left-to-right with a plain ellipsis. Truncating from the *left* would be more useful for a
      long path, but `direction: rtl` moves the leading slash to the end and prints a path that
      does not exist — the first thing anyone reads here is whether it is the file they think. */
@@ -294,6 +456,16 @@
     line-height: var(--text-sm-lh);
     color: var(--fg-muted);
     text-wrap: pretty;
+  }
+
+  /* Status is never colour alone — §2. The icon and the sentence carry it. */
+  .error {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: -14px 0 26px;
+    font-size: var(--text-sm);
+    color: var(--danger);
   }
 
   .danger {

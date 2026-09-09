@@ -22,10 +22,30 @@ A substitution is a glyph that means something adjacent. Each row states what is
 
 | Surface | Wanted | Used | What is lost |
 |---------|--------|------|--------------|
-| Item list, detail pane | `id-card` / `passport` for `identity` | `user` | `user` reads as "a person", not "documents about a person". A vault holding a passport and a driving licence shows the same glyph as a login's username field. Worth drawing when the identity type gets its own surface in Phase 3. |
-| Item list, detail pane | `key-round` or similar for `ssh_key` | `terminal` | `ssh_key` and `api_key` now share `terminal`, so the two are indistinguishable in the list. This is the **worst gap in the set** — two of seven item types collapse into one glyph. `key` is already taken by `login`. |
+| Item list, detail pane | `id-card` / `passport` for `identity` | `user` | `user` reads as "a person", not "documents about a person". A vault holding a passport and a driving licence shows the same glyph as a login's username field. Worth drawing when the identity type gets its own surface in Phase 3. **Still not drawn 2026-08-06, when all seven types became creatable**: unlike the row below it, `user` collides with no other *type* glyph, so what it costs is meaning and not distinguishability. Re-read at the §10 sweep. |
+| ~~Item list, detail pane~~ | ~~`key-round` or similar for `ssh_key`~~ | ~~`terminal`~~ | **Closed 2026-08-06 by drawing, not by substitution — see below.** It read: `ssh_key` and `api_key` share `terminal`, so two of seven item types collapse into one glyph, the worst gap in the set. |
 | Sidebar Watchtower entry | a distinct "shield with count" | `shield` | None materially. `shield-check` is reserved for the *strong* status, and using it for the nav entry would make a nav item look like a verdict. |
 | Status chip, `reused` | `copy-check` or a duplicate-document glyph | `copy` | `copy` also means the copy-to-clipboard action elsewhere in the same window. The chip carries the word "Reused" beside it, which is what keeps it unambiguous — and is the reason §2 requires the word. |
+
+## Resolved by drawing
+
+| Surface | Glyph | Drawn for | What it is |
+|---------|-------|-----------|------------|
+| Item list, detail pane, palette | `code` | `api_key` | 2026-08-06. Left and right chevrons around a slash — `< / >`. |
+
+The row above was written as *two* missing glyphs and closed with **one**, which is worth the
+paragraph because the reasoning is not the obvious one. The collision looks like `ssh_key` needing a
+glyph of its own, and the fix went the other way: `MASTER.md` §8 **assigns `terminal` to the ssh
+key** by name, so `terminal` was never the substitute there — it is that type's glyph. What §8 does
+is list six of the seven item types and omit `api_key`, and a type with nothing assigned to it is
+how the two came to share one. Drawing a second key-shaped glyph would have left the real gap open
+and put three key silhouettes in one list.
+
+`code` names the world the credential belongs to, which is the pattern §8 already uses when it gives
+the ssh key a `terminal` rather than a key. What is lost is that it does not say *key* at all: at
+16px `< / >` reads "code", and it is the item's title beside it that says which credential. The
+alternative that would have said key — a second key with a squared bow — loses more, because two
+key silhouettes at 16px are told apart by their bow and nobody scanning a list looks at the bow.
 
 ## Still open
 

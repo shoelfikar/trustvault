@@ -14,9 +14,11 @@
 
 use std::path::PathBuf;
 
-use trustvault_core::{FieldId, ItemId, ItemKind, KdfParams, Vault};
-use trustvault_lib::commands::{items, vault as vault_cmd};
-use trustvault_lib::dto::MASK;
+use trustvault_core::{CharSets, FieldId, FieldKind, ItemId, ItemKind, KdfParams, Vault, Verdict};
+use trustvault_lib::commands::{
+    generator, import, items, search, totp, vault as vault_cmd, watchtower,
+};
+use trustvault_lib::dto::{Copied, MASK};
 use trustvault_lib::error::ErrorKind;
 use trustvault_lib::state::AppState;
 
@@ -25,6 +27,9 @@ use trustvault_lib::state::AppState;
 const SECRET: &str = "correct-horse-battery-staple";
 /// A non-secret field value, which is allowed to cross freely (`docs/ipc-contract.md` §6.1).
 const USERNAME: &str = "octocat";
+/// A TOTP seed, base32 of the RFC 6238 test key. As secret as the password beside it: the code
+/// it produces may cross this boundary (D-45), the seed never may.
+const SEED: &str = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
 
 /// An unlocked state holding one login with one secret and one public field.
 fn unlocked() -> (AppState, ItemId, FieldId, FieldId) {
@@ -34,6 +39,16 @@ fn unlocked() -> (AppState, ItemId, FieldId, FieldId) {
     let entry = vault.item_mut(item).expect("just added");
     let public = entry.set_field("Username", USERNAME, false);
     let secret = entry.set_field("Password", SECRET, true);
+    // The seed goes into the shared fixture rather than into the TOTP test alone, so that
+    // every check below — the list, the detail, the search, the session — is asserting against
+    // a vault that holds one. A second secret shape only the test that knows about it can see
+    // is a secret shape the other checks are not checking.
+    let seed = entry.set_field("2FA secret", SEED, true);
+    if let Some(field) = entry.fields.iter_mut().find(|field| field.id == seed) {
+        // Set explicitly, as both real write paths do: `set_field` guesses `password` from
+        // `secret`, which is the trap D-53 records one requirement over.
+        field.kind = FieldKind::Otp;
+    }
 
     let state = AppState::default();
     state.with(|inner| {
@@ -66,10 +81,15 @@ fn registered_commands() -> Vec<String> {
         .collect()
 }
 
-/// Reads the command names the contract documents, from its fenced `ts` blocks.
-fn documented_commands() -> Vec<String> {
+/// Reads the command names the contract documents, split into shipped and planned.
+///
+/// A declaration carrying a trailing `// planned` marker is specified but not yet registered
+/// — §1 of the contract. The marker exists so the contract can go on being written before the
+/// code, which is the practice that caught D-25 and four Phase 2 findings; it is checked in
+/// **both** directions by the caller, so it cannot be used to park a command that shipped.
+fn documented_commands() -> (Vec<String>, Vec<String>) {
     let contract = include_str!("../../docs/ipc-contract.md");
-    let mut names = Vec::new();
+    let (mut shipped, mut planned) = (Vec::new(), Vec::new());
     for line in contract.lines() {
         // A command declaration in the contract looks like `name({...}): Shape` or `name():`.
         let Some(open) = line.find('(') else { continue };
@@ -80,12 +100,18 @@ fn documented_commands() -> Vec<String> {
                 .all(|c| c.is_ascii_lowercase() || c == '_' || c.is_ascii_digit())
             && line[open..].contains("):")
         {
-            names.push(name.to_owned());
+            if line.contains("// planned") {
+                planned.push(name.to_owned());
+            } else {
+                shipped.push(name.to_owned());
+            }
         }
     }
-    names.sort();
-    names.dedup();
-    names
+    for set in [&mut shipped, &mut planned] {
+        set.sort();
+        set.dedup();
+    }
+    (shipped, planned)
 }
 
 /// Check 1 — the registered set and the documented set are the same set.
@@ -96,41 +122,147 @@ fn documented_commands() -> Vec<String> {
 fn every_command_is_documented_and_every_documented_command_exists() {
     let mut registered = registered_commands();
     registered.sort();
-    let documented = documented_commands();
+    let (shipped, planned) = documented_commands();
 
     let undocumented: Vec<_> = registered
         .iter()
-        .filter(|name| !documented.contains(name))
+        .filter(|name| !shipped.contains(name))
         .collect();
     assert!(
         undocumented.is_empty(),
         "commands registered but absent from docs/ipc-contract.md: {undocumented:?}"
     );
 
-    let unimplemented: Vec<_> = documented
+    let unimplemented: Vec<_> = shipped
         .iter()
         .filter(|name| !registered.contains(name))
         .collect();
     assert!(
         unimplemented.is_empty(),
-        "commands documented but not registered: {unimplemented:?}"
+        "commands documented but not registered: {unimplemented:?} — \
+         if one is still being built, mark its declaration `// planned`"
+    );
+
+    // The other direction, which is the half that keeps the marker honest. A command that
+    // shipped while its declaration still says `// planned` is invisible to the check above:
+    // it would be registered, documented, and excluded from both comparisons at once.
+    let stale: Vec<_> = planned
+        .iter()
+        .filter(|name| registered.contains(name))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "registered but still marked `// planned` in docs/ipc-contract.md: {stale:?} — \
+         delete the marker in the commit that implements the command"
     );
 }
 
-/// Check 3 — exactly three commands may return a secret, and they are the named three.
+/// Every command names its arguments in `snake_case`, which is the wire format the contract
+/// documents.
+///
+/// Found 2026-08-06 by reading the built binary rather than by any test: Tauri v2's
+/// `#[tauri::command]` renames argument keys to **camelCase** by default, and
+/// `tauri::ipc::CommandItem` looks that key up exactly, with no fallback. So the host was
+/// asking for `itemId` while `src/lib/ipc.ts` — which converts to snake_case on purpose, so
+/// the wire format is exactly what `docs/ipc-contract.md` §6 prints — sent `item_id`. Every
+/// command taking a multi-word argument was unreachable from the webview: `get_item`,
+/// `reveal_field`, `copy_field`.
+///
+/// It survived two phases because nothing had exercised one. The `_inner` split that lets this
+/// harness drive real command bodies also skips the argument decoding, and until `add_item`
+/// landed the item list was always empty, so no id was ever passed from the frontend.
+///
+/// The attribute is asserted on **every** command rather than only the ones that need it
+/// today: what makes the bug expensive is that adding a two-word argument reintroduces it
+/// silently, and a uniform rule has no such edge.
 #[test]
-fn the_sanctioned_set_is_exactly_three_and_unchanged() {
+fn every_command_names_its_arguments_in_snake_case() {
+    const REQUIRED: &str = r#"#[tauri::command(rename_all = "snake_case")]"#;
+
+    let modules = [
+        ("items.rs", include_str!("../src/commands/items.rs")),
+        ("vault.rs", include_str!("../src/commands/vault.rs")),
+        ("settings.rs", include_str!("../src/commands/settings.rs")),
+        ("strength.rs", include_str!("../src/commands/strength.rs")),
+        ("import.rs", include_str!("../src/commands/import.rs")),
+        ("picker.rs", include_str!("../src/commands/picker.rs")),
+        ("generator.rs", include_str!("../src/commands/generator.rs")),
+        ("search.rs", include_str!("../src/commands/search.rs")),
+        ("totp.rs", include_str!("../src/commands/totp.rs")),
+        (
+            "watchtower.rs",
+            include_str!("../src/commands/watchtower.rs"),
+        ),
+    ];
+
+    // `include_str!` needs a literal path, so the list above is written by hand — and a
+    // hand-written list of the files in a directory is exactly the thing that goes stale on
+    // the day someone adds one. This reads the directory to prove it has not: a new command
+    // module that nobody added above would otherwise be silently exempt from the whole check.
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands");
+    for entry in std::fs::read_dir(&directory).unwrap() {
+        let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+        if name == "mod.rs" {
+            continue;
+        }
+        assert!(
+            modules.iter().any(|(module, _)| *module == name),
+            "src/commands/{name} is not in this test's module list, so its commands are \
+             unchecked — add it beside the others"
+        );
+    }
+
+    for (module, source) in modules {
+        for (number, line) in source.lines().enumerate() {
+            let line = line.trim();
+            if line.starts_with("#[tauri::command") {
+                assert_eq!(
+                    line,
+                    REQUIRED,
+                    "src/commands/{module}:{} declares a command without \
+                     `rename_all = \"snake_case\"` — Tauri v2 would then look its arguments up \
+                     in camelCase and every call from src/lib/ipc.ts would miss",
+                    number + 1
+                );
+            }
+        }
+    }
+}
+
+/// Check 3 — exactly four commands may return a secret, and they are the named four.
+///
+/// The count moved from three to four on 2026-08-05, which is the one change this test exists
+/// to make expensive: it asserts the sentence **and** that a decision is cited beside it by
+/// number, so the budget cannot be raised by editing prose alone.
+///
+/// It cannot check that the decision log actually holds that row, and the reason is worth
+/// recording rather than working around: `trustvault-state.md` is gitignored — the process
+/// record stays on the author's disk while the code is public — so a test that read it would
+/// compile here and fail to compile in CI. Written that way first, and caught by looking at
+/// `.gitignore` rather than by CI, which is the cheaper of the two.
+#[test]
+fn the_sanctioned_set_is_exactly_four_and_unchanged() {
     let contract = include_str!("../../docs/ipc-contract.md");
-    for name in ["create_vault", "unlock_recovery_kit", "reveal_field"] {
+    for name in [
+        "create_vault",
+        "unlock_recovery_kit",
+        "reveal_field",
+        "generate_password",
+    ] {
         assert!(
             contract.contains(name),
             "{name} is a sanctioned command and must stay documented"
         );
     }
     assert!(
-        contract.contains("There are **three** sanctioned commands"),
-        "the budget of three is the contract's load-bearing sentence; if it changed, \
+        contract.contains("There are **four** sanctioned commands"),
+        "the budget is the contract's load-bearing sentence; if it changed, \
          a decision log entry should have changed with it"
+    );
+
+    assert!(
+        contract.contains("since **D-44** — `generate_password`"),
+        "the budget may only move with a decision cited beside it, by number"
     );
 }
 
@@ -159,6 +291,85 @@ fn no_list_or_detail_response_carries_a_secret() {
     );
 }
 
+/// Checks 2 and 4 for the palette — a search response is a list, and lists carry no values.
+///
+/// The second assertion is the one worth having. It is not about the response shape, which is
+/// `ItemSummary` and could not hold a value if it wanted to: it is that a query **equal to a
+/// stored password matches nothing**. A palette that ranked on secret values would confirm a
+/// guessed password through the order of its rows, with nothing crossing this boundary and no
+/// audit entry written — a leak with no payload to find afterwards.
+#[test]
+fn a_search_response_carries_no_values_and_secrets_are_not_searchable() {
+    let (state, _, _, _) = unlocked();
+
+    let hits = search::search_items_inner(&state, "github", 10).unwrap();
+    assert_eq!(hits.len(), 1, "the fixture's one item is found by title");
+
+    let encoded = serde_json::to_string(&hits).unwrap();
+    assert!(
+        !encoded.contains(SECRET),
+        "search_items leaked the password"
+    );
+    assert!(
+        !encoded.contains(USERNAME),
+        "search results carry no field values at all — not even the one that matched (D-46)"
+    );
+
+    // The username *is* searchable, which is R-16, and the value still does not come back.
+    assert_eq!(
+        search::search_items_inner(&state, USERNAME, 10)
+            .unwrap()
+            .len(),
+        1,
+        "a non-secret username is one of the four haystacks R-16 names"
+    );
+
+    assert!(
+        search::search_items_inner(&state, SECRET, 10)
+            .unwrap()
+            .is_empty(),
+        "a query equal to a stored password must not identify the item holding it"
+    );
+}
+
+/// Check 7 — `totp_code` returns a code and never the seed — §6.6, §7.1, D-45.
+///
+/// D-45 draws the line at the seed rather than at the code, and the argument it explicitly
+/// refuses is "the code expires soon" — that one would also license returning a password about
+/// to be rotated. So what has to be pinned is not that the code crosses, which is the decision,
+/// but the two limits the decision came with: the seed does not, and no *list* carries a code.
+/// The second is the shape §2 exists to prevent — a list of live codes is a list of secrets on
+/// a refresh timer, and it is one convenience commit away at any moment.
+#[test]
+fn totp_returns_a_code_and_never_the_seed() {
+    let (state, item, _, _) = unlocked();
+
+    let response = totp::totp_code_inner(&state, item).unwrap();
+    assert_eq!(response.code.len(), 6, "a code did come back");
+
+    let encoded = serde_json::to_string(&response).unwrap();
+    assert!(!encoded.contains(SEED), "totp_code leaked the seed");
+    assert!(
+        !encoded.contains(SECRET),
+        "and it is not a second path to the password beside it"
+    );
+
+    // The seed is elided everywhere a field is listed, exactly like the password: `kind: otp`
+    // changes how it renders, never whether it crosses.
+    let detail = serde_json::to_string(&items::get_item_inner(&state, item).unwrap()).unwrap();
+    assert!(!detail.contains(SEED), "get_item leaked the seed");
+
+    // No code in any list. Asserted on the *key* rather than on the six digits, because six
+    // digits can occur inside a UUID by chance and a flaky boundary check is one that gets
+    // deleted.
+    let list = serde_json::to_string(&items::list_items_inner(&state).unwrap()).unwrap();
+    assert!(!list.contains(SEED), "list_items leaked the seed");
+    assert!(
+        !list.contains("\"code\""),
+        "no code appears in a list, however cheap it would be to add (§6.6)"
+    );
+}
+
 /// Check 2 — the one sanctioned response carries exactly one secret and nothing else.
 #[test]
 fn reveal_returns_one_secret_and_copy_returns_none() {
@@ -178,6 +389,36 @@ fn reveal_returns_one_secret_and_copy_returns_none() {
     // has one field and it is an integer -- and that is asserted in the unit tests instead.
     // Named rather than silently skipped, because a check that quietly does not run is worse
     // than one that is documented as not running.
+}
+
+/// Check 2 again, for the fourth sanctioned command — R-10, D-44.
+///
+/// The generator is the one sanctioned command that returns a secret the vault has never seen,
+/// so the two things worth pinning are both about its *class*: exactly one secret in the
+/// response, and no vault required to get it. The second is why it is absent from the
+/// locked-state check below — a generator that refused while locked could not fill the
+/// password field of the first item in a brand-new vault.
+#[test]
+fn the_generator_returns_one_secret_and_needs_no_vault() {
+    let (state, _, _, _) = unlocked();
+    state.lock();
+
+    let generated = generator::generate_password_inner(24, CharSets::ALL, true).unwrap();
+    assert_eq!(generated.password.chars().count(), 24);
+
+    let encoded = serde_json::to_string(&generated).unwrap();
+    assert_eq!(
+        encoded.matches(&generated.password).count(),
+        1,
+        "exactly one secret per invocation (R-10)"
+    );
+
+    // `copy_generated` is not exercised for the same reason `copy_field` is not: it writes to
+    // the real system clipboard, which a CI runner may not have. What can be checked without
+    // one is that its response shape carries no value at all — `Copied` has a single integer
+    // field, so there is nowhere for the password it just copied to ride along.
+    let copied = serde_json::to_string(&Copied { clears_at: 0 }).unwrap();
+    assert_eq!(copied, r#"{"clears_at":0}"#);
 }
 
 /// Check 6 — every vault-class and sanctioned command answers `locked` when it is.
@@ -209,6 +450,162 @@ fn every_vault_command_refuses_while_locked() {
             .unwrap_err()
             .kind,
         ErrorKind::Locked
+    );
+    assert_eq!(
+        search::search_items_inner(&state, "github", 10)
+            .unwrap_err()
+            .kind,
+        ErrorKind::Locked
+    );
+    // `totp_code` is vault-class and refuses; `totp_preview` is ambient and does not appear
+    // here, for the same reason the generator does not — it reads no vault, and a seed being
+    // typed into a dialog protects nothing yet.
+    assert_eq!(
+        totp::totp_code_inner(&state, item).unwrap_err().kind,
+        ErrorKind::Locked
+    );
+    // The import pair refuses **before** it reads the file, which is why the path here does
+    // not exist: a locked vault that still parses a foreign vault into this process would
+    // have loaded plaintext nothing is going to lock.
+    assert_eq!(
+        import::import_preview_inner(&state, "/nonexistent/export.json")
+            .unwrap_err()
+            .kind,
+        ErrorKind::Locked
+    );
+    assert_eq!(
+        import::import_commit_inner(&state, "/nonexistent/export.json")
+            .unwrap_err()
+            .kind,
+        ErrorKind::Locked
+    );
+    // D-70. It writes to the sealed body, so it is vault-class like every other mutation — a
+    // profile that could be set while locked would be a write to a vault with no key open.
+    assert_eq!(
+        vault_cmd::set_profile_inner(&state, "Budi".to_owned(), "budi@example.com".to_owned())
+            .unwrap_err()
+            .kind,
+        ErrorKind::Locked
+    );
+    // §6.9. Scoring every password means reading every password, so a scan that ran while
+    // locked would be the whole vault decrypted by a command that returns no secret and would
+    // therefore look harmless in every response this harness reads.
+    assert_eq!(
+        watchtower::watchtower_scan_inner(&state).unwrap_err().kind,
+        ErrorKind::Locked
+    );
+    // The breach half refuses **before** it builds a query, which is stronger than refusing
+    // before it sends one: a locked vault that still hashed every password would have decrypted
+    // the vault to do it. The endpoint is a port nothing listens on, so a version of this command
+    // that reached the network would make this test slow rather than merely red.
+    assert_eq!(
+        watchtower::breach_check_inner(
+            &state,
+            &trustvault_lib::hibp::RangeClient::new("http://127.0.0.1:1"),
+            &|_, _| {},
+        )
+        .unwrap_err()
+        .kind,
+        ErrorKind::Locked
+    );
+}
+
+/// A Watchtower report carries findings and **no password, and no hash of one** — §6.9, R-10.
+///
+/// The hash is the assertion worth having. The reuse grouping key is a SHA-256 of a password,
+/// and a hash of a short secret is a secret: it is a dictionary attack away from the value. So
+/// the check is not only "the plaintext is absent" but "nothing 64 hex characters long crossed",
+/// which is what a leaked key would look like however it was named — `group`, `group_id`, or a
+/// field somebody adds later thinking a digest is anonymous.
+#[test]
+fn a_watchtower_report_carries_no_password_and_no_hash_of_one() {
+    let (state, item, _, _) = unlocked();
+    // A second item with the same password, so the report has a reuse group in it: a report with
+    // no group cannot leak a grouping key, and this test would then be measuring nothing.
+    state.with(|inner| {
+        let vault = inner.vault.as_mut().expect("open");
+        let id = vault.add_item(ItemKind::Login, "GitLab");
+        let entry = vault.item_mut(id).expect("just added");
+        entry.set_field("Password", SECRET, true);
+    });
+
+    let report = watchtower::watchtower_scan_inner(&state)
+        // The fixture's path is not writable, so the save fails and the report never returns.
+        // The scan itself is what this test reads, and `scan` is the same call the command
+        // makes — the elision is a property of the shape, not of the save.
+        .unwrap_or_else(|_| {
+            state
+                .with(|inner| trustvault_core::scan(inner.vault.as_ref().expect("open")))
+                .expect("a vault is open")
+        });
+
+    let payload = serde_json::to_string(&report).unwrap();
+    assert!(!payload.contains(SECRET), "a finding carried the password");
+    assert!(
+        !payload.contains(SEED),
+        "a TOTP seed is not a password field and must not be scored or reported"
+    );
+
+    // Any 64-hex-character run is a SHA-256 in hex, which is the shape the grouping key would
+    // take if it ever escaped. Checked over the payload rather than over a named field, because
+    // the failure this exists for is a *new* field nobody reviewed.
+    let hex_runs = payload
+        .split(|c: char| !c.is_ascii_hexdigit())
+        .filter(|run| run.len() >= 64)
+        .count();
+    assert_eq!(
+        hex_runs, 0,
+        "something 64 hex characters long crossed the boundary — a SHA-256 of a short \
+         password is a secret, and the grouping key must never leave trustvault-core"
+    );
+
+    // The reuse group is reported, and it names items rather than a key.
+    let reused: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.verdict == Verdict::Reused)
+        .collect();
+    assert_eq!(reused.len(), 2, "both members of the group are reported");
+    for finding in reused {
+        assert_eq!(
+            finding.shared_with.len(),
+            1,
+            "each names the other, and nothing else"
+        );
+        assert_ne!(finding.shared_with[0], finding.item_id, "not itself");
+    }
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|finding| finding.item_id == item),
+        "the fixture's own item is in the report"
+    );
+}
+
+/// `vault_status` reports no profile at all while locked — D-70.
+///
+/// The distinction `Option` carries. "Locked, so unknown" and "unlocked, and nobody has filled
+/// it in" are different facts, and the sidebar footer draws them differently: the first falls
+/// back to the vault's own name, the second is an invitation to fill it in. Collapsing them
+/// into an empty `Profile` would have made the footer claim a nameless owner on the lock
+/// screen, which is the one place it cannot know. The write half — that it persists, and that
+/// it is trimmed — is in `ipc_session.rs`, because setting it saves the file.
+#[test]
+fn a_profile_is_none_while_locked_and_empty_on_a_fresh_vault() {
+    let (state, _, _, _) = unlocked();
+
+    let fresh = state.status().profile.expect("a vault is open");
+    assert_eq!(
+        fresh.name, "",
+        "onboarding does not ask, so it starts empty"
+    );
+    assert_eq!(fresh.email, "");
+
+    state.lock();
+    assert!(
+        state.status().profile.is_none(),
+        "there is no key to read the body with"
     );
 }
 
@@ -308,6 +705,94 @@ fn the_csp_has_no_wildcard_origin() {
     assert!(
         csp.contains("style-src 'self' 'unsafe-inline'"),
         "the one relaxation is on style-src and nowhere else"
+    );
+}
+
+/// N-07 again, from the side a plugin widens — the webview is granted nothing but `core:default`.
+///
+/// D-59 added the first plugin in this application, and the argument for it was that the
+/// *webview* gains nothing: `tauri-plugin-dialog` is registered in `lib.rs` so that
+/// `commands::picker` can open a native dialog from the host, and the plugin's own `open`,
+/// `save` and `message` commands stay denied because no capability names them.
+///
+/// That argument is one line of JSON away from being false, which is exactly why it is a test
+/// and not a comment. An `dialog:allow-open` added here would let anything running in the
+/// webview open a file dialog and read what came back — and the second plugin somebody adds
+/// will arrive with a `permissions` line in a pull request that looks like configuration.
+#[test]
+fn the_webview_is_granted_no_plugin_permission() {
+    let capability: serde_json::Value =
+        serde_json::from_str(include_str!("../capabilities/default.json"))
+            .expect("valid capability");
+    let granted: Vec<&str> = capability["permissions"]
+        .as_array()
+        .expect("a permission list")
+        .iter()
+        .map(|entry| entry.as_str().expect("permissions are strings"))
+        .collect();
+
+    assert_eq!(
+        granted,
+        ["core:default"],
+        "the webview's capability has grown beyond core:default — a plugin permission here is \
+         reachable by anything running in the page, and D-59's whole argument is that the \
+         picker is a host command instead"
+    );
+}
+
+/// The dialog plugin rewrites two webview globals, and nothing in the frontend may use them.
+///
+/// Its init script replaces `window.alert` and `window.confirm` with calls to
+/// `plugin:dialog|message` and `plugin:dialog|confirm`. Both are denied by the capability
+/// above, so both now fail — but the sharper problem is `confirm`, which upstream replaces
+/// with an **async** function. `if (confirm("Delete this?"))` tests a Promise, which is always
+/// truthy, so a guard written the way every web tutorial writes it would delete without asking.
+///
+/// TrustVault has never used either; this is what keeps that true now that the cost of using
+/// one has changed. The `Dialog` component is the app's own and is unaffected.
+#[test]
+fn the_frontend_calls_neither_alert_nor_confirm() {
+    let mut offenders = Vec::new();
+    let mut stack = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src")];
+    while let Some(directory) = stack.pop() {
+        for entry in std::fs::read_dir(&directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let is_source = matches!(
+                path.extension().and_then(|extension| extension.to_str()),
+                Some("ts" | "svelte")
+            );
+            if !is_source {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).unwrap();
+            for (number, line) in source.lines().enumerate() {
+                let line = line.trim();
+                // Comment lines are skipped, and the reason is that this test's own first run
+                // flagged one: the note in `DeleteDialog.svelte` that *explains* why the name
+                // was changed has to spell the call out to be worth reading. A rule that
+                // forbids describing itself is one that gets deleted rather than obeyed. What
+                // is left unchecked is a call hiding behind a `//` on a line of its own, which
+                // is not a call.
+                if line.starts_with("//") || line.starts_with('*') || line.starts_with("/*") {
+                    continue;
+                }
+                // `window.`-prefixed or bare, called rather than merely named.
+                if line.contains("confirm(") || line.contains("alert(") {
+                    offenders.push(format!("{}:{}", path.display(), number + 1));
+                }
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "window.alert / window.confirm are replaced by tauri-plugin-dialog (D-59) and denied \
+         by the capability, and the replacement `confirm` returns a promise that is always \
+         truthy: {offenders:?}"
     );
 }
 

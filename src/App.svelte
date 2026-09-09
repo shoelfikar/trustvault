@@ -24,6 +24,18 @@
   let settings = $state<Settings | null>(null);
   let lockReason = $state<LockReason | null>(null);
 
+  /**
+   * The one screen the host cannot ask for — D-62.
+   *
+   * `vault_status` answers `no_vault` exactly once in a vault's life, so onboarding was
+   * unreachable ever after and the switcher's *New vault* had nowhere to go. This flag is the
+   * user having asked for that screen, and it is deliberately the **only** thing on this side
+   * that decides what is drawn: it can show the create flow, and it cannot show the shell. Lock
+   * state stays the host's — §9 check 6 — because creating a vault is a request, not a claim
+   * about whether one is open.
+   */
+  let creating = $state(false);
+
   async function refresh() {
     status = await vaultStatus();
   }
@@ -57,14 +69,44 @@
       root.dataset.theme = settings.theme;
     }
   });
+
+  /**
+   * R-21 — the interface scale, applied to the root and nowhere else.
+   *
+   * `tokens.css` derives every size from `--ui-scale`, so setting one attribute here moves
+   * text, row heights, controls and spacing **together**. That is the whole point of it living
+   * in the tokens: a scale implemented by growing the type alone gives you large text in rows
+   * that did not grow with it, which is worse than not scaling at all.
+   *
+   * Set on `documentElement` rather than on the app's own root because the lock screen, the
+   * onboarding flow and every dialog are children of `<body>` — a scale that stopped at the
+   * shell would be a setting that only applies once you are inside.
+   */
+  $effect(() => {
+    const root = document.documentElement;
+    if (!settings || settings.uiScale === 'default') {
+      delete root.dataset.uiScale;
+    } else {
+      root.dataset.uiScale = settings.uiScale;
+    }
+  });
 </script>
 
 {#if !status}
   <!-- One frame at most: vault_status is a memory read. No skeleton shimmer -- MASTER.md §5
        forbids theatre over a local read that finishes in microseconds. -->
   <div class="boot"></div>
-{:else if status.state === 'no_vault'}
-  <Onboarding ondone={refresh} />
+{:else if status.state === 'no_vault' || creating}
+  <!-- `oncancel` is passed only for the second case, which is what draws step 1's Cancel: at
+       first launch there is nothing to go back to, and a Cancel that lands on an empty window
+       is worse than no Cancel. -->
+  <Onboarding
+    ondone={() => {
+      creating = false;
+      void refresh();
+    }}
+    oncancel={creating ? () => (creating = false) : undefined}
+  />
 {:else if status.state === 'locked'}
   <LockScreen
     path={status.path ?? ''}
@@ -77,7 +119,14 @@
     }}
   />
 {:else if settings}
-  <Shell {status} {settings} onsettings={(next) => (settings = next)} />
+  <Shell
+    {status}
+    {settings}
+    onsettings={(next) => (settings = next)}
+    onvaultchanged={refresh}
+    oncreatevault={() => (creating = true)}
+    onstatuschanged={refresh}
+  />
 {/if}
 
 <style>

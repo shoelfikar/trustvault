@@ -21,6 +21,17 @@ tauri-build = { version = "2.6", features = [] }
 # holds decrypted secrets, so a plugin is added when a requirement needs it and not before.
 # Notably absent: tauri-plugin-opener — nothing in TrustVault opens arbitrary URLs.
 tauri = { version = "2.11", features = [] }
+# D-59, and the only plugin in the manifest. Two Phase 3 surfaces need a file chosen by the
+# user -- the Bitwarden import (R-29) and the switcher's "Open vault file..." -- and the
+# webview must not be the thing that reads it: an `<input type="file">` would put a foreign
+# vault's plaintext into the JS heap, which is the one thing CLAUDE.md says can never be
+# wiped. So the picker lives in the host and returns a **path**, never bytes.
+#
+# It is registered in Rust and granted to the webview **nowhere**: `capabilities/default.json`
+# is still `core:default` alone, so `dialog:allow-open` is denied and the plugin's own JS
+# commands are unreachable from the frontend. `ipc_audit.rs` asserts that, because the
+# widening this dependency makes cheap is a one-line edit to a JSON file.
+tauri-plugin-dialog = "2.7"
 trustvault-core = { path = "../crates/trustvault-core" }
 serde.workspace = true
 serde_json = "1"
@@ -29,11 +40,56 @@ serde_json = "1"
 # not to record the entry -- and because it documents the Wayland ownership caveat rather than
 # hiding it. The hint is advisory on every platform; see docs/ipc-contract.md §6.3.
 arboard = "3"
-# D-12, decided at kickoff: the design's crack-time strings ("takes ~8 centuries to crack") are
-# zxcvbn's own output format, so anything else means reimplementing its phrasing. Lives in the
-# host rather than the webview because the dictionaries are ~400 kB and the frontend budget
-# (S-01, cold start <= 800 ms) is the thing this app is judged on.
-zxcvbn = { version = "3.1", default-features = false }
+# zxcvbn was here until 2026-08-15. It is a `trustvault-core` dependency now (D-78) and reaches
+# this crate through it: `score_password` is a pass-through, and Watchtower needs the scoring
+# where the passwords already are. Nothing about the webview changed -- the dictionaries were
+# never shipped to it and still are not.
+#
+# The only HTTP client in the application, and the only thing in it that opens a socket -- D-83,
+# after a survey rather than a `cargo add`. It is confined to `src-tauri/src/hibp.rs`; the N-02
+# job in ci.yml already names `ureq` among the crates `trustvault-core` may not reach.
+#
+# `default-features = false` drops nothing we want and one thing we do not: ureq's default set
+# is `["rustls", "gzip"]`, so this line is the default written out, and writing it out is what
+# makes a later feature arrive as an edit rather than as an upgrade.
+#
+# What the survey measured, because "reqwest is already in the lockfile" is true and irrelevant:
+# `tauri` declares reqwest only under `cfg(any(target_os = "android", all(target_vendor =
+# "apple", not(target_os = "macos"))))`, so on the three desktop triples the baseline has no
+# HTTP client at all and `cargo tree --target all` says otherwise. Crates added to the real
+# per-target trees: ureq +12/+12/+12 (linux/windows/macos, an identical set on all three),
+# reqwest+rustls +30/+31/+35. `gzip` costs **zero** additional crates -- flate2 is already
+# under tauri -- and halves the transfer (80 MB -> ~45 MB for the reference vault) without
+# measurably narrowing what `Add-Padding` masks: across five prefixes the padded size spread is
+# 1.30x uncompressed and 1.31x gzipped.
+#
+# The configuration is where the risk actually sits, not the choice. ureq's `Config::default`
+# calls `Proxy::try_from_env()`, defaults `https_only` to false, and follows up to 10 redirects.
+# All three are overridden in `hibp.rs` and each override is a test there: a redirect followed
+# off api.pwnedpasswords.com sends the prefix somewhere R-25's packet capture would not look.
+ureq = { version = "3.4", default-features = false, features = ["rustls", "gzip"] }
+
+[features]
+# S-04 is a number about the application that ships, and the only way to read it is a devtools
+# console -- `CommandPalette.svelte` records the keystroke-to-render path with
+# `performance.measure`, and nothing else in the product can print it.
+#
+# Tauri opens devtools automatically in a debug build, which is the trap this feature exists to
+# avoid rather than the convenience it looks like: `tauri dev` compiles our own crates
+# unoptimized (`[profile.dev.package."*"]` in the workspace manifest optimizes dependencies and
+# deliberately not us), and the matching that costs **0.85 ms p95** in a release build costs
+# **6.63 ms** there -- 13 % of the 50 ms budget instead of 1.7 %, measured with
+# `cargo bench --bench search --profile dev`. A measurement taken that way is a measurement of a
+# build no user will ever run, and it looks exactly like one that is not.
+#
+# So: build the real thing and give it a console.
+#
+#     npm run tauri build -- --no-bundle --features measure
+#
+# Off by default and never passed by CI, because a released password manager with devtools is a
+# process holding plaintext that any local prompt can be attached to. The `devtools` job in
+# `.github/workflows/ci.yml` asserts the default build does not carry it.
+measure = ["tauri/devtools"]
 
 [lints.clippy]
 unwrap_used = "warn"

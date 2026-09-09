@@ -115,6 +115,24 @@ fn a_vault_survives_repeated_save_and_reopen_cycles() {
 }
 
 #[test]
+fn a_profile_survives_a_round_trip_and_an_empty_one_stays_empty() {
+    // D-70. The profile is the only thing in the body that is neither an item nor bookkeeping,
+    // so it is the one field a seal/open cycle could drop without any test noticing.
+    let (mut vault, _) = common::populated_vault();
+    assert!(vault.profile().is_empty(), "a new vault has no owner named");
+
+    let bytes = vault.to_bytes().expect("seal");
+    let untouched = Vault::open(&bytes, PASSWORD).expect("open");
+    assert!(untouched.profile().is_empty());
+
+    assert!(vault.set_profile("Budi Santoso", "budi@warungpintar.id"));
+    let bytes = vault.to_bytes().expect("re-seal");
+    let reopened = Vault::open(&bytes, PASSWORD).expect("re-open");
+    assert_eq!(reopened.profile().name, "Budi Santoso");
+    assert_eq!(reopened.profile().email, "budi@warungpintar.id");
+}
+
+#[test]
 fn every_item_kind_survives_a_round_trip() {
     // R-01 names all seven explicitly, so they are asserted explicitly rather than trusted to
     // the generator's sampling.

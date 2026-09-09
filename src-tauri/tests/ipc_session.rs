@@ -1,4 +1,5 @@
-//! The instrumented session — Phase 2 gate line 4, `docs/ipc-contract.md` §9 check 5.
+//! The instrumented session — Phase 2 gate line 4 and part of Phase 3's first gate line,
+//! `docs/ipc-contract.md` §9 check 5.
 //!
 //! §9 listed this check as **not automated**, for an honest reason: it needs a shell to drive,
 //! and when the contract was written there was none. There is one now, so the check is here.
@@ -14,9 +15,12 @@
 //! * It drives the **command bodies**, not a live webview. It therefore proves what the host
 //!   sends, not what the frontend asks for; the second half is covered by `src/lib/ipc.ts`
 //!   being the only file that calls `invoke`, which CI greps for.
-//! * The item it reveals is **seeded through the core's API**, because Phase 2 ships no
-//!   mutation command (D-38). Creating an item through the UI and reading it back is the
-//!   Phase 3 gate.
+//! * It creates its item through `add_item`, quits, relaunches and reads it back — which is
+//!   the Phase 3 exit gate's first line **minus the human at the keyboard**. Phase 2 had to
+//!   seed through the core's API because it shipped no mutation command (D-38); that is no
+//!   longer true, and what remains un-automated is the UI half: that the dialog submits what
+//!   the user typed and the detail pane renders what came back. The gate still asks a person
+//!   to do it once on a real app.
 
 // An integration test is its own crate with no `#[cfg(test)]` module, so clippy's
 // `allow-unwrap-in-tests` does not reach it and the workspace's Tier-1 lints apply at full
@@ -27,9 +31,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use trustvault_core::{ItemKind, KdfParams, Vault};
-use trustvault_lib::commands::{items, vault as vault_cmd};
-use trustvault_lib::dto::KdfSummary;
+use trustvault_core::{FieldKind, ItemKind, KdfParams, Verdict};
+use trustvault_lib::commands::{items, vault as vault_cmd, watchtower};
+use trustvault_lib::dto::{EditField, FieldSummary, KdfSummary, NewField};
 use trustvault_lib::state::AppState;
 
 /// The master password. It crosses **inbound** and must never come back out.
@@ -37,6 +41,9 @@ const MASTER: &str = "waltz-jumbled-fox-quiz-97";
 /// The stored secret. It may cross outbound exactly once per explicit reveal, and never
 /// otherwise.
 const SECRET: &str = "correct-horse-battery-staple";
+/// The replacement typed into the edit form. It crosses **inbound only** and is never
+/// revealed, so it must not appear anywhere in the transcript at all.
+const EDITED_SECRET: &str = "staple-battery-horse-correct";
 /// A field the user declared is not secret, which is allowed to cross freely.
 const USERNAME: &str = "octocat";
 
@@ -118,18 +125,39 @@ fn scratch_path() -> PathBuf {
     ))
 }
 
-/// Seeds one login with one secret and one public field, through the **core's** API.
+/// The login's two fields, as the New-item dialog submits them.
 ///
-/// Phase 2 has no `add_item` command by design, so there is no IPC path that could do this.
-/// The seeding happens against the file the session then opens, which keeps every subsequent
-/// step a genuine command call.
-fn seed_one_item(path: &Path) {
-    let mut vault = Vault::open_file(path, MASTER).expect("the session just created it");
-    let item = vault.add_item(ItemKind::Login, "GitHub");
-    let entry = vault.item_mut(item).expect("just added");
-    entry.set_field("Username", USERNAME, false);
-    entry.set_field("Password", SECRET, true);
-    vault.save_to(path).expect("writable scratch path");
+/// Built fresh per call because `NewField` owns its plaintext and is consumed on the way in.
+fn login_fields() -> Vec<NewField> {
+    vec![
+        NewField {
+            label: "Username".into(),
+            kind: FieldKind::Username,
+            value: USERNAME.into(),
+            secret: false,
+            custom: false,
+        },
+        NewField {
+            label: "Password".into(),
+            kind: FieldKind::Password,
+            value: SECRET.into(),
+            secret: true,
+            custom: false,
+        },
+    ]
+}
+
+/// The edit an untouched field submits: everything as the detail pane received it, and
+/// `value: None` — because the pane never received the value.
+fn untouched(field: &FieldSummary) -> EditField {
+    EditField {
+        id: Some(field.id),
+        label: field.label.clone(),
+        kind: field.kind,
+        value: None,
+        secret: field.secret,
+        custom: field.custom,
+    }
 }
 
 /// The whole session, start to finish, read back as a transcript.
@@ -149,7 +177,7 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
     // ---- Onboarding: the password is scored, then the vault is created -------------------
     // TESTING parameters, not calibrated ones: this test is about what crosses the boundary,
     // and a 511 ms KDF per unlock would make it the slowest test in the workspace.
-    let strength = trustvault_lib::commands::strength::score(MASTER, &["Session Vault".into()]);
+    let strength = trustvault_core::score(MASTER, &["Session Vault"]);
     log.record_infallible("score_password", &strength);
 
     let created = vault_cmd::create_vault_inner(
@@ -166,6 +194,42 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
     log.record("create_vault", &created);
     let recovery_code = created.expect("a writable path").recovery_code;
 
+    // D-69: `create_vault` stops at memory, so nothing is on disk yet and no vault is open. The
+    // session asserts both, because the whole point of the split is a window closed here leaving
+    // no half-made vault behind — and an assertion is the only thing that keeps it true.
+    assert!(
+        !path.exists(),
+        "create_vault must not write the file; the acknowledgement on step 3 does"
+    );
+    assert!(
+        matches!(
+            state.status().state,
+            trustvault_lib::dto::VaultState::NoVault
+        ),
+        "a pending vault is neither open nor locked — it must not reach VaultState"
+    );
+
+    let committed = vault_cmd::commit_vault_inner(&state);
+    log.record_infallible("commit_vault", &committed.is_ok());
+    committed.expect("the pending vault is written on acknowledgement");
+    assert!(path.exists(), "commit_vault writes the file");
+
+    // ---- The item is created through the command, not seeded through the core --------------
+    // Phase 2 had to seed it through `trustvault_core` because it shipped no mutation command
+    // (D-38); `add_item` lands in Phase 3, so the first line of this phase's exit gate — an
+    // item created, the app quit, relaunched, and the item read back — is scripted here rather
+    // than only demonstrated by hand. `add_item` saves before returning, which is what makes
+    // the next step (a relaunch) able to find it at all.
+    let added = items::add_item_inner(
+        &state,
+        ItemKind::Login,
+        "GitHub".into(),
+        vec!["Work/Clients".into(), "dev".into()],
+        login_fields(),
+    );
+    log.record("add_item", &added);
+    let created_id = added.expect("a vault is open").item_id;
+
     // ---- Quit and relaunch ---------------------------------------------------------------
     // A fresh AppState over the same file is what a relaunch is: the host keeps nothing in
     // memory, and the only way back in is a credential. What it *does* keep is the remembered
@@ -175,7 +239,6 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
         .with(|inner| inner.settings.last_vault_path.clone())
         .flatten();
     drop(state);
-    seed_one_item(&path);
 
     let state = AppState::default();
     state.with(|inner| inner.settings.last_vault_path = remembered);
@@ -208,7 +271,17 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
     let listed = items::list_items_inner(&state);
     log.record("list_items", &listed);
     let summaries = listed.expect("unlocked");
-    let item_id = summaries.first().expect("the seeded item").id;
+    let item_id = summaries.first().expect("the created item").id;
+    assert_eq!(
+        item_id, created_id,
+        "the item read back after a relaunch is the one `add_item` created — the first line \
+         of the Phase 3 gate, minus the human at the keyboard"
+    );
+    assert_eq!(
+        summaries[0].tags,
+        vec!["Work/Clients".to_owned(), "dev".to_owned()],
+        "a folder-shaped tag survives verbatim — D-43"
+    );
 
     let detail = items::get_item_inner(&state, item_id);
     log.record("get_item", &detail);
@@ -216,7 +289,15 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
     let secret_field = fields
         .iter()
         .find(|field| field.secret)
-        .expect("the seeded password");
+        .expect("the password submitted through add_item");
+    assert_eq!(
+        fields
+            .iter()
+            .find(|field| !field.secret)
+            .and_then(|field| field.value.as_deref()),
+        Some(USERNAME),
+        "the public field comes back as its value, the secret one as a mask"
+    );
 
     // The one explicit user action that may produce a secret.
     let revealed = items::reveal_field_inner(&state, item_id, secret_field.id).map(|(r, _)| r);
@@ -232,6 +313,207 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
     // and "the machine had no clipboard" must not become a hole in the transcript.
     let copied = items::copy_field_inner(&state, item_id, secret_field.id).map(|(c, _, _)| c);
     log.record("copy_field", &copied);
+
+    // ---- Edit: rename, replace one secret, leave the other field alone --------------------
+    // This is the shape of every real edit and the one that is silent when it goes wrong. The
+    // username carries `value: None` because the detail pane never received a value it could
+    // send back; if that meant "set it to nothing", the rename below would destroy it.
+    let public_field = fields
+        .iter()
+        .find(|field| !field.secret)
+        .expect("the username");
+    let edited = items::update_item_inner(
+        &state,
+        item_id,
+        "GitHub (work)".into(),
+        vec!["dev".into()],
+        true,
+        vec![
+            untouched(public_field),
+            EditField {
+                id: Some(secret_field.id),
+                label: "Password".into(),
+                kind: FieldKind::Password,
+                value: Some(EDITED_SECRET.into()),
+                secret: true,
+                custom: false,
+            },
+            EditField {
+                id: None,
+                label: "Recovery email".into(),
+                kind: FieldKind::Text,
+                value: Some("octocat@example.com".into()),
+                secret: false,
+                custom: true,
+            },
+        ],
+    );
+    log.record("update_item", &edited);
+    edited.expect("the item exists and the edits name real fields");
+
+    let after_edit = items::get_item_inner(&state, item_id);
+    log.record("get_item", &after_edit);
+    let after_edit = after_edit.expect("the item still exists");
+    assert_eq!(after_edit.summary.title, "GitHub (work)");
+    assert!(after_edit.summary.favourite);
+    assert_eq!(after_edit.summary.tags, vec!["dev".to_owned()]);
+    assert_eq!(
+        after_edit.fields[0].value.as_deref(),
+        Some(USERNAME),
+        "the untouched field kept its value — `value: null` means unchanged, not empty"
+    );
+    assert_eq!(after_edit.fields.len(), 3, "the new field was appended");
+    assert!(after_edit.fields[2].custom);
+
+    // The replacement is stored, and reading it back is still an explicit reveal — logged
+    // like every other crossing, because a step left out of the transcript is a hole in the
+    // evidence rather than a step that did not happen.
+    let re_revealed = items::reveal_field_inner(&state, item_id, secret_field.id).map(|(r, _)| r);
+    log.record("reveal_field", &re_revealed);
+    assert_eq!(
+        re_revealed.expect("revealable").value,
+        EDITED_SECRET,
+        "the edit landed in the vault, not just in the response"
+    );
+
+    // ---- Watchtower: a scan crosses findings, and a finding is not a secret ----------------
+    // §6.9 and R-10. The scan reads **every password in the vault** — it is the only command
+    // that does — so it is the one whose response a transcript is worth searching. A twin item
+    // is added first, carrying the same value as the one the edit stored: without a reuse group
+    // there is no grouping key in play, and this step would be proving nothing about the thing
+    // §6.9 actually forbids.
+    let twin = items::add_item_inner(
+        &state,
+        ItemKind::Login,
+        "GitHub (personal)".into(),
+        Vec::new(),
+        vec![NewField {
+            label: "Password".into(),
+            kind: FieldKind::Password,
+            value: EDITED_SECRET.into(),
+            secret: true,
+            custom: false,
+        }],
+    );
+    log.record("add_item", &twin);
+    let twin_id = twin.expect("a vault is open").item_id;
+
+    let scanned = watchtower::watchtower_scan_inner(&state);
+    log.record("watchtower_scan", &scanned);
+    let report = scanned.expect("a vault is open");
+    assert_eq!(report.passwords, 2, "both stored passwords were examined");
+    assert_eq!(report.distinct, 1, "and they are the same value");
+    let reused: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.verdict == Verdict::Reused)
+        .collect();
+    assert_eq!(reused.len(), 2, "each member of the group is reported");
+    for finding in reused {
+        assert_eq!(
+            finding.shared_with,
+            vec![if finding.item_id == item_id {
+                twin_id
+            } else {
+                item_id
+            }],
+            "a finding names the other item — never a key, and never itself"
+        );
+    }
+
+    // The cache landed in the vault, which is the half the report cannot show: the item list
+    // draws its pips from `status`, and a scan whose conclusions stayed in the response would
+    // leave the list saying `unknown` beside a Watchtower screen full of findings.
+    let after_scan = items::list_items_inner(&state);
+    log.record("list_items", &after_scan);
+    for summary in after_scan.expect("unlocked") {
+        assert_eq!(
+            summary.status,
+            trustvault_core::ItemStatus::Reused,
+            "the scan wrote the status cache, not just the response"
+        );
+    }
+    let scanned_status = state.status();
+    log.record_infallible("vault_status", &scanned_status);
+    assert_eq!(
+        scanned_status.last_scan_at,
+        Some(report.scanned_at),
+        "the vault remembers when it was scanned — §6.9"
+    );
+    assert!(
+        scanned_status.last_breach_check_at.is_none(),
+        "a local scan must never be read as evidence that a breach check ran"
+    );
+
+    // ---- Watchtower: the breach half, against a range service this test runs ---------------
+    // §6.9's elision bullets are about a check that **made requests**: "the prefix and the range
+    // response are host-only" cannot be proven by a command that never sent one. So the setting
+    // is turned on and a listener answers with the committed fixture — a real range exchange,
+    // offline, with the transcript searched afterwards for anything derived from a password.
+    state.with(|inner| inner.settings.breach_check_enabled = true);
+    let (endpoint, asked) = serving(&fs::read_to_string(fixture_path()).expect("the fixture"));
+    let checked = watchtower::breach_check_inner(
+        &state,
+        &trustvault_lib::hibp::RangeClient::new(&endpoint),
+        &|_, _| {},
+    );
+    log.record("watchtower_breach_check", &checked);
+    let breach_report = checked.expect("a vault is open and the range is served");
+    assert_eq!(
+        breach_report.requested, 1,
+        "one request per distinct value — both items share one password (S-07b)"
+    );
+    assert!(
+        breach_report.breached.is_empty() && breach_report.unchecked.is_empty(),
+        "this vault's password is not in the fixture, and the check reached the service"
+    );
+
+    // What the service was actually sent: five hex characters and a padding header. The packet
+    // capture the gate asks for is this claim on the wire; this is the same claim at the socket's
+    // own doorstep, and it runs on every push.
+    let request = asked.recv().expect("the range service saw a request");
+    assert!(
+        request.starts_with("GET /range/") && request.contains(" HTTP/1.1"),
+        "the request line carried more than a range: {request}"
+    );
+    let prefix: String = request
+        .chars()
+        .skip("GET /range/".len())
+        .take_while(|c| !c.is_whitespace())
+        .collect();
+    assert_eq!(prefix.len(), 5, "R-25: five characters, and no more");
+    for forbidden in [SECRET, EDITED_SECRET, USERNAME, MASTER, "GitHub"] {
+        assert!(
+            !request.contains(forbidden),
+            "the request carried something out of the vault: {request}"
+        );
+    }
+
+    let checked_status = state.status();
+    log.record_infallible("vault_status", &checked_status);
+    assert!(
+        checked_status.last_breach_check_at.is_some(),
+        "a complete pass says when it ran — D-86"
+    );
+    state.with(|inner| inner.settings.breach_check_enabled = false);
+
+    log.record("delete_item", &items::delete_item_inner(&state, twin_id));
+
+    // ---- Delete: the item goes, and so does every way of reading it ------------------------
+    let deleted = items::delete_item_inner(&state, item_id);
+    log.record("delete_item", &deleted);
+    deleted.expect("the item exists");
+
+    let after_delete = items::list_items_inner(&state);
+    log.record("list_items", &after_delete);
+    assert!(
+        after_delete.expect("unlocked").is_empty(),
+        "the deleted item is gone from the list"
+    );
+    let gone = items::get_item_inner(&state, item_id);
+    log.record("get_item", &gone);
+    assert!(gone.is_err(), "a deleted item cannot be opened");
+    log.record("delete_item", &items::delete_item_inner(&state, item_id));
 
     // ---- Lock, then prove the shell is closed --------------------------------------------
     state.lock();
@@ -281,6 +563,37 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
         "the stored secret crossed somewhere other than a reveal"
     );
 
+    // The same for the value typed into the **edit** form, and it is the stronger statement of
+    // the two: it crossed inbound through `update_item`, so every response after that point —
+    // the read-back, the list, the deletion, the locked refusals — is a chance to echo it.
+    // Only the one explicit reveal may.
+    assert_eq!(
+        log.carrying(EDITED_SECRET),
+        vec!["reveal_field"],
+        "a value submitted through update_item came back outside a reveal"
+    );
+
+    // `add_item`, `update_item` and `delete_item` return an identifier or nothing at all. The
+    // check is by name, because what a later edit would change is the shape.
+    for crossing in log
+        .crossings
+        .iter()
+        .filter(|c| matches!(c.command, "add_item" | "update_item" | "delete_item"))
+    {
+        for secret in [SECRET, EDITED_SECRET, MASTER] {
+            assert!(
+                !crossing.payload.contains(secret),
+                "{} echoed a value it was given",
+                crossing.command
+            );
+        }
+        assert!(
+            !crossing.payload.contains(USERNAME),
+            "{} returns no field value of any kind",
+            crossing.command
+        );
+    }
+
     // Never more than one secret per invocation — R-10, over the whole session rather than
     // one response at a time.
     for crossing in &log.crossings {
@@ -312,6 +625,52 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
         );
     }
 
+    // The scan's own crossing, read out of the transcript rather than out of its return type —
+    // §6.9, and the assertion the two `carrying` checks above cannot make. A grouping key is a
+    // SHA-256 of a password, so a leak of one is 64 hex characters and contains none of the
+    // plaintext either check searches for. Nothing else in the session emits a run that long:
+    // an item id is a hyphenated UUID, and a recovery code is groups of four.
+    for crossing in log
+        .crossings
+        .iter()
+        .filter(|c| c.command == "watchtower_scan")
+    {
+        let runs = crossing
+            .payload
+            .split(|c: char| !c.is_ascii_hexdigit())
+            .filter(|run| run.len() >= 64)
+            .count();
+        assert_eq!(
+            runs, 0,
+            "watchtower_scan crossed something 64 hex characters long — a hash of a short \
+             password is a secret, and the grouping key never leaves trustvault-core"
+        );
+    }
+
+    // The breach check's own crossing, and the shorter hash. A SHA-1 in hex is **40**
+    // characters, so the run length that catches a leaked grouping key catches nothing here:
+    // a prefix, a suffix, or a whole digest reaching the webview would all be shorter than 64.
+    // §6.9's rule is that none of the three crosses in any form, and `requested` is a count
+    // precisely so that a list of prefixes has nowhere to ride along.
+    for crossing in log
+        .crossings
+        .iter()
+        .filter(|c| c.command == "watchtower_breach_check")
+    {
+        let runs = crossing
+            .payload
+            .split(|c: char| !c.is_ascii_hexdigit())
+            // Item ids are hyphenated UUIDs, so their longest hex run is twelve characters.
+            // Twenty is comfortably above that and comfortably below a SHA-1's forty.
+            .filter(|run| run.len() >= 20)
+            .count();
+        assert_eq!(
+            runs, 0,
+            "watchtower_breach_check crossed a long hex run — the 5-character prefix, the \
+             35-character suffix and the whole SHA-1 are all host-only (§6.9)"
+        );
+    }
+
     // Both recovery codes are secrets and both are accounted for: each appears in exactly the
     // one response that minted it.
     assert_eq!(
@@ -321,6 +680,119 @@ fn a_whole_session_leaks_nothing_outside_the_sanctioned_path() {
     );
 
     let _ = fs::remove_file(&path);
+}
+
+/// The profile survives a lock and a relaunch, and an unchanged one does not rewrite the file.
+///
+/// D-70. Driven against a real file rather than in `ipc_audit.rs`, because setting a profile
+/// **saves**, and the point of the test is what is on disk afterwards. Two properties, and the
+/// second is the one that would go wrong silently: the Edit-profile dialog's Save is pressed
+/// whether or not anything was typed, so a `set_profile` that wrote unconditionally would
+/// re-encrypt and atomically replace the whole vault file on every open-and-cancel.
+#[test]
+fn a_profile_persists_across_a_relaunch_and_an_unchanged_one_writes_nothing() {
+    let path = scratch_path();
+    let state = AppState::default();
+
+    vault_cmd::create_vault_inner(
+        &state,
+        "Session Vault".into(),
+        path.display().to_string(),
+        MASTER.into(),
+        KdfSummary {
+            m_cost: KdfParams::TESTING.m_cost,
+            t_cost: KdfParams::TESTING.t_cost,
+            p_cost: KdfParams::TESTING.p_cost,
+        },
+    )
+    .expect("a writable path");
+    vault_cmd::commit_vault_inner(&state).expect("the pending vault is written");
+
+    assert_eq!(
+        state.status().profile.expect("open").name,
+        "",
+        "onboarding's three steps do not ask, so a new vault has no owner named"
+    );
+
+    vault_cmd::set_profile_inner(
+        &state,
+        "  Budi Santoso  ".into(),
+        "budi@warungpintar.id".into(),
+    )
+    .expect("an open vault takes a profile");
+
+    let stored = state.status().profile.expect("still open");
+    assert_eq!(stored.name, "Budi Santoso", "trimmed on the way in");
+    assert_eq!(stored.email, "budi@warungpintar.id");
+
+    // Submitting the same values again must not touch the file. Compared by modification time
+    // rather than by bytes, because every save draws a fresh nonce — identical content
+    // re-encrypts to different ciphertext, so equal bytes could never have been the assertion.
+    let before = fs::metadata(&path)
+        .expect("the vault exists")
+        .modified()
+        .ok();
+    vault_cmd::set_profile_inner(&state, "Budi Santoso".into(), "budi@warungpintar.id".into())
+        .expect("still open");
+    let after = fs::metadata(&path).expect("still there").modified().ok();
+    assert_eq!(before, after, "an unchanged profile is not a save");
+
+    // Quit, relaunch, unlock: the profile came off disk, not out of memory.
+    drop(state);
+    let state = AppState::default();
+    assert!(
+        state.status().profile.is_none(),
+        "nothing is open, so nothing is knowable"
+    );
+    vault_cmd::unlock_inner(&state, path.display().to_string(), MASTER.into()).expect("opens");
+
+    let reopened = state.status().profile.expect("open again");
+    assert_eq!(reopened.name, "Budi Santoso");
+    assert_eq!(reopened.email, "budi@warungpintar.id");
+
+    let _ = fs::remove_file(&path);
+}
+
+/// Where the committed range fixture lives, from this test's own file.
+fn fixture_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/hibp-range-5BAA6.txt")
+}
+
+/// A range service that answers one canned response and reports what it was asked.
+///
+/// A near-copy of `hibp::testing::serving`, and the duplication is a language boundary rather
+/// than an oversight: that module is `#[cfg(test)]` inside the library crate, and an integration
+/// test links the library **without** its test configuration, so nothing in it is reachable from
+/// here. The alternative is a public test helper compiled into the shipping binary, which is a
+/// worse trade in a process that holds decrypted secrets.
+fn serving(response: &str) -> (String, std::sync::mpsc::Receiver<String>) {
+    use std::io::{Read as _, Write as _};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port");
+    let addr = listener.local_addr().expect("bound");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let body = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain\r\n\r\n{response}",
+        response.len()
+    );
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else {
+                return;
+            };
+            let mut buffer = [0_u8; 2048];
+            let read = stream.read(&mut buffer).unwrap_or(0);
+            if tx
+                .send(String::from_utf8_lossy(&buffer[..read]).into_owned())
+                .is_err()
+            {
+                return;
+            }
+            let _ = stream.write_all(body.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+    (format!("http://127.0.0.1:{}", addr.port()), rx)
 }
 
 /// The transcript is written, and it is written where the gate can find it.

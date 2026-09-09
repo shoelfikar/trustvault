@@ -16,6 +16,7 @@
     "a11y": "npm run build && node scripts/a11y.mjs",
     "fmt": "prettier --write .",
     "fmt:check": "prettier --check .",
+    "release:version": "node scripts/set-release-version.mjs",
     "tauri": "tauri"
   },
   "devDependencies": {

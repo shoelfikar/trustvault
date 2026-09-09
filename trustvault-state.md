@@ -4,529 +4,45 @@ Answers one question: where is this project now, and what happens next. It holds
 calculations, and no task text — those live in `trustvault-requirements.md`, `docs/vault-format.md`,
 and `phases/`.
 
-Last updated: 2026-09-09, later (**Phase 4's remaining manual evidence is now recorded** — row
-17's Watchtower re-walk and the two packet-capture runs had already been tested and were missing
-from the written record. They are now marked complete in `docs/keyboard-audit.md`,
-`phases/phase-4-watchtower.md` and `trustvault-requirements.md`, by user report on 2026-09-09.
-Phase 4 is **24 of 24** and its exit gate is **7 of 7**; Phase 3 is still open only for the
-seven-day drive. Earlier the same day: **a11y harness cleanup stopped masking the next Watchtower
-walk** —
-`scripts/a11y.mjs` now uses a fresh Firefox profile directory for each audit run, treats a failed
-cleanup signal as cleanup failure rather than as an audit failure, and reports a browser timeout as
-that rather than as "no tab stops", D-93. This was found by running the single Watchtower tab-order
-audit: one run could not kill the launched Firefox process, the next invocation could not remove
-the reused profile, and later runs in this desktop's Firefox headless path timed out before posting
-a report. The capture harness self-test passes when local sockets are allowed: nine report checks
-plus both sampler checks. No full a11y sweep, no Tauri release build and no heavy Rust test was run
-in that sitting. Previous update: 2026-08-16, last (**the a11y job's 1 556 findings were a privacy notice** — the
-failure yesterday's run left open is closed, and the cause was neither the audit's logic nor the
-app. On a fresh profile Mozilla's own Firefox build shows the data-collection notice at startup,
-whatever presents it takes **window activation** from the content, and from there
-`document.hasFocus()` is `false`, `:focus` matches nothing, and every focus ring in the
-application is invisible to `getComputedStyle` — while `contrast` and `taborder`, which never ask
-who is focused, stay clean beside it. **The variable was the build and not the machine**: both
-sides are 153.0.4, this desktop runs Ubuntu's snap which suppresses that notice and the runner
-installs Mozilla's tarball which does not, so the audit had been measured for two days against
-the one browser that hides the problem. Reproduced here by downloading the runner's build,
-bisected to **one pref**, and verified by the full sweep against that build — **144
-surface-audits, no findings**. `focusmanager.testmode`, the pref the symptom points at, was tried
-first and measured to do nothing; it is not carried. The other half is **D-92**: `focus.js` now
-measures **its own instrument** before the application, so this can never again arrive as 1 556
-findings against the app. Nothing in TrustVault changed; at that moment the gate was untouched at
-**2 of 7** and Phase 4 was still **23 of 24** — the remaining evidence was later recorded on
-2026-09-09 by user report. Earlier: **the first real capture
-run, and three defects in the thing built
-to judge** — the harness met the running application and every fault was its own: the socket
-sampler died on its first pass in all three runs (`set -e` inherited, `ss | grep` exiting 1 on the
-quiet case, which is exactly what an `off` run is), the sweep reported twenty hits that were all
-`password` inside `pwnedpasswords` (**D-91**), and ClientHellos were parsed only from attributed
-packets so the destination check went quiet instead of failing. All three fixed, the sampler now
-has a test that reproduces its own failure, and **the vacuity guard added hours earlier is what
-stopped a `off` run that watched nothing from reporting "zero packets: pass"**. The record at the
-time said both capture runs had to be taken again; the missing evidence was later supplied and
-recorded on 2026-09-09 by user report. Then the branch was **pushed and CI ran on it for the first time** — run
-31937787913, where **gate line 5 ticks** — S-07a at **62.5 ms** on a machine that is not this
-desktop, against a 500 ms budget — and the a11y job **failed its first runner execution** with
-100 % of focus checks reporting no-indicator, which is the audit rather than the app. **Gate line 1
-ticks too**, on the author's own eyes rather than on a file: the app reported the fixture's three
-`password` items breached at **52 372 427** against the live service. The gate was **2 of 7** at
-that point; the five capture-related lines are now recorded complete as of 2026-09-09. Earlier the same day: the capture harness
-itself — `scripts/capture.sh` with `capture-report.py` under it and `examples/audit-vault.rs` in
-front of it, so the gate's evidence is a script's output rather than a person's grep. Three
-decisions: **D-88**, attribution follows the process **tree**, because WebKitGTK does its
-networking in a process the app's PID does not cover; **D-89**, TLS means the capture proves gate
-line 2's negative and `hibp.rs` proves its positive, and both alternatives replace the thing under
-test; **D-90**, the run is against the audit fixture, whose every string is published so the
-forbidden-string list is generated rather than typed. The report script is a **CI step** and it
-breaks its own capture eight ways to prove it can fail, and `probe` measured gate line 3's service
-half the same day. Earlier: the breach check crossing IPC with **D-85**, **D-86** and **D-87**, the
-HIBP client with **D-83** and **D-84**, the scan crossing IPC with **D-81**, the view reading a
-real report with **D-82**)
+Last updated: 2026-09-09, latest (**Phase 5 is Linux-only: 6 of 11 active tasks**). The remaining
+Phase 3 evidence was accepted by user direction: S-04's end-to-end palette measurement and the
+seven-day daily-drive gate are recorded as retrospective/user-reported rather than re-run in this
+sitting. Phase 3 is now **39 of 39** and gate **6 of 6**. Phase 4 remains **24 of 24** and gate
+**7 of 7**. Phase 5's entry check ran the same day; after D-97, **5 of 6** boxes pass for the active
+Linux scope. G-C still needs release-artifact measurements for S-01…S-11. The phase opens anyway
+because the release workflow and artefacts are what G-C needs next; that dependency skip is
+recorded as D-95. The tag
+workflow, signing runbook, install guide, changelog, target rejection, and binary `--version` path
+now exist. No tag was pushed, so no package/smoke box is claimed yet. Eight macOS/Windows tasks are
+labelled deferred with their resume point preserved.
 
 ## Overall progress
 
 | | |
 |---|---|
-| Current phase | **4 — Watchtower, implementation complete**: entry check run 2026-08-15, **five of six** boxes — the sixth stays open for the life of the phase by D-74. **24/24** after the Watchtower row 17 re-walk and packet-capture evidence were recorded 2026-09-09 by user report. **Phase 3 is not closed** — 38/39 and gate 5 of 6, with the seven-day drive running underneath this phase |
-| Phase document | `phases/phase-4-watchtower.md` — and `phases/phase-3-surfaces.md` stays open until the drive's day 7 |
-| Phases passed | 3 of 6 |
-| Last gate passed | **G-B′, on 2026-08-05** — Phase 2 closed at 26/26 with all five gate lines |
-| Next gate | **Two were open at once, which is what D-74 bought.** Phase 3: 5 of 6, waiting only on the drive. Phase 4: **7 of 7**, with the last five capture-related lines recorded 2026-09-09 by user report from runs already performed |
-| Status | on track — **the seven days are the only thing that cannot be shortened** before Phase 3 can close |
+| Current phase | **5 — Linux release, 6 of 11 active tasks**; 8 macOS/Windows tasks are deferred, not removed |
+| Phase document | `phases/phase-5-release.md` |
+| Phases passed | 5 of 6 |
+| Last gate passed | **Phase 4, on 2026-09-09** — recorded complete by already-run manual Watchtower evidence |
+| Next gate | **G-C**, then Phase 5 release gate. G-C is still open because S-01…S-11 need release-artifact measurements and S-04 needs an exact release-build number; Phase 5 opens first so the artefacts can exist |
+| Status | Linux release plumbing is ready; next evidence comes from the first annotated tag run |
 
 ## Current phase
 
-**Phase 2 is closed. Phase 3 is open** — entry check passed 2026-08-05, all six boxes, and the
-notice marking the phase provisional is deleted. Work happens on `feature/phase-3-surfaces`, cut
-from `development` *after* the entry check was recorded.
+**Phase 5 is open for Linux x86-64 only.** Phase 3 closed 2026-09-09 by user direction with S-04 and the seven-day
+drive accepted as retrospective/user-reported evidence; Phase 4 was already recorded complete the
+same day. Phase 5 now has 5 of 6 entry boxes passed for its active scope; only G-C remains open.
+Apple/Azure account readiness is no longer a blocker because macOS and Windows are deferred.
 
-- **G-B′ passed 2026-08-05.** Four of its five lines carry measured evidence reproduced by CI (run
-  30997297701); the fifth was run by hand on the app — vault created through onboarding, quit,
-  relaunched, unlocked, and the relaunch landed on the **lock screen** rather than onboarding,
-  which is D-40 working end to end. That line is an observation, not a measurement, and no CI job
-  reproduces it
-- Phase 2 closed at **26 of 26** tasks and 5 of 5 gate lines
-- **Phase 3 is 33 of 39.** The kickoff document claimed 25 and listed 26 — the second phase document
-  in a row with that slip, and the reason the rule says the checkboxes are authoritative and this
-  number is a dated snapshot. Six tasks added with D-42, seven at the entry check
-- **The whole "before any command is written" group is closed** (2026-08-05): the contract carries
-  all fifteen Phase 3 commands, the item model is settled (D-43), `generate_password` is decided
-  (D-44) along with two questions it dragged in (D-45, D-46), and `docs/keyboard-audit.md` exists
-  as a checklist rather than a form
-- **The first three Phase 3 commands are implemented** (2026-08-06): `add_item`, `update_item`,
-  `delete_item`, with `FieldEdit` and `Item::apply_edits` under them. Twelve of fifteen remain.
-  **Only one checkbox moved for it**, and that is not an accounting error: every task in the
-  item-management group is worded for a *surface*, so the host half being done leaves them
-  unticked. What the three now need is wiring — the New-item dialog, the detail pane's Edit, and
-  the delete confirmation are all still drawn-and-disabled from D-36
-- **The three are wired (2026-08-06, later the same day).** New-item saves, the detail pane's Edit
-  opens a real dialog, and the delete confirmation deletes. Two of the group's boxes tick; the
-  other three do not, and each says why in the phase document rather than being quietly counted
-- **Wiring them found that no command with a two-word argument was reachable from the webview at
-  all** — the whole of D-47, and the single most important thing in this session. Tauri v2 renames
-  command arguments to camelCase by default, so the host wanted `itemId` while `src/lib/ipc.ts`
-  sent `item_id`, which is what `docs/ipc-contract.md` prints and what that file converts to
-  deliberately. `get_item`, `reveal_field` and `copy_field` had never worked from the frontend.
-  **Nothing caught it for two phases**, and the reason is the shape of our own harness: the
-  `_inner` split that lets `ipc_audit.rs` drive real command bodies skips exactly the argument
-  decoding that was broken. It is the counter-example to Phase 2's "harnesses catch drift on their
-  first run" — this one could not, by construction, and it took reading `strings` on the built
-  binary to see it
-- **The prototype has no edit surface** (D-48). Its detail-pane Edit button carries no handler,
-  so the dialog built here is the first design decision in this project made without the
-  prototype to follow. `MASTER.md` was the only authority, which is exactly the case `CLAUDE.md`
-  says it wins
-- **What Phase 3 inherits is chrome to wire, not chrome to build.** D-36 drew all 15 surfaces
-  disabled, so the gate line "all 15 surfaces exist and are reachable" is half met on day one. It
-  was re-worded at the entry check to mean **wired to a command**, and the phase's last task is a
-  sweep for controls still disabled or wired to a stub — a stub is indistinguishable from a feature
-  from the outside, which is exactly the risk D-36 named when it was taken
-- **The 7-day daily-drive clock moved to the front of the phase.** It cannot start until the
-  author's own passwords are in a vault, which needs `add_item` *and* the importer, so those are
-  sequenced first. Left at the end it is not a test, it is seven days of waiting after the work
-- **The Bitwarden importer landed 2026-08-06** (D-42's format, R-29's criterion), with
-  `import_preview` and `import_commit` beside it and both `// planned` markers deleted in the same
-  commit. Four of the import group's six boxes tick; the other two are the *surface*, which does
-  not exist and is not a wiring job — the design predates D-42 and draws no import anywhere
-- **Reading the schema instead of remembering it changed the work twice.** `CipherType` in
-  `bitwarden/clients` has **eight** types, not the four every write-up quotes — 5 is an SSH key,
-  which we *do* have a type for and a parser written from memory would have dropped. And an export
-  can only ever produce **five of our seven kinds**, because Bitwarden has no API-key and no Wi-Fi
-  type: that is now a test rather than a comment, because the tempting fix is a heuristic on the
-  title and a heuristic is invisible once merged. It also means the gate's own R-29 line cannot be
-  met as written — raised as an open question rather than edited here
-- **The test that carries R-29 is the generic one.**
-  `nothing_in_the_export_is_dropped_in_silence` walks the fixture and demands that every value in
-  it is either in the vault or named in a refusal, which is the acceptance criterion as a rule
-  instead of as a list. Verified non-vacuous the way the session harness was: one mapping deleted
-  on purpose, and it fails naming `items2.card.brand = Visa`. Two decisions came out of writing
-  it — **D-50** (a type we do not have becomes a note rather than a refusal) and **D-51** (an
-  unknown *key* is a refusal, so a schema that grows cannot grow past us)
-- **`ipc_audit.rs` now reads its own directory.** The `rename_all` check D-47 added iterated a
-  hand-written list of command modules, which is the same shape as the bug it was written for: a
-  new module would have been silently exempt. It now asserts the list covers every file in
-  `src/commands/`, which is how `commands/import.rs` got checked on the day it was written
-- **The generator group closed whole (2026-08-06, later the same day)** — all four boxes, host and
-  surface together. `generate_password` is the **fourth sanctioned command** the contract has named
-  since D-44 and `copy_generated` is beside it, so `ipc_audit.rs` now asserts a budget of four with
-  the decision cited by number. What makes it worth more than four ticks: it is the first time
-  D-37's two closed copy paths **open**, and the generator dialog is the first surface where a
-  control drawn disabled by D-36 becomes a real command rather than a stub
-- **The webview generator is deleted, not left beside the new one.** `src/lib/passwords.ts` is gone
-  and all three surfaces that mint a password — the generator dialog, New item, Edit item — call the
-  one command. That is D-44's own argument applied rather than quoted: two generators with one of
-  them being "the real one" is a distinction that survives exactly as long as the person who
-  remembers it. The retired file was not junk — `crypto.getRandomValues` with rejection sampling,
-  deliberately never `Math.random` — which is what made deleting it the decision rather than the
-  cleanup
-- **Two things about the surface changed from the prototype and both are written down (D-52).** The
-  footer said *Copy & autofill*, and autofill is a browser extension `trustvault-project.md` puts
-  out of scope for v1 — the same class of false promise D-49 found in the delete copy, one screen
-  over. And ambiguous-glyph exclusion is **not** a toggle: the prototype's own digit chip is
-  labelled *2–9*, so the exclusion is a property of the sets rather than an option
-- **The command palette group closed but for its measurement (2026-08-06, later still)** — four
-  of five boxes, and `search_items` is the fifth Phase 3 command. Only one of the four is new
-  work; the other three are the surface D-36 drew, read against R-16 and found to do what it
-  says. What was new is the half nobody could see: the palette had been filtering a **client-side
-  copy** on `title` and `tags` — two of R-16's four haystacks, and the exact shape D-46 rejected
-  in advance. The matching now runs in `crates/trustvault-core/src/search.rs` and what comes back
-  is the elided summary the list already gets, with **no record of what matched**
-- **The rule about what is searched was falsified within the hour — the fourth time in four
-  phases**, and by our own harness this time. Written as R-16's words (non-secret fields of kind
-  `username`, `url`, `email`), it failed on the IPC fixture immediately: `Item::set_field` guesses
-  `kind` from `secret`, so a username stored through it is a `text`. `kind` is how a field renders
-  and is only as accurate as whoever wrote it; `secret` is what the *user* declared. The gate is
-  now `secret` alone (**D-53**), which searches more than the requirement asks and cannot be
-  quietly wrong — the failure it avoids is "why does this item not come up when I type its account
-  name?", which no user can diagnose and no test would have caught
-- **A palette that matched secret values would be an oracle, and that is now a test rather than a
-  care.** Typing a guessed password into ⌘K would have the vault confirm it through the ranking:
-  nothing revealed, nothing crossing IPC, no audit entry, and the answer on screen.
-  `ipc_audit.rs` asserts a query equal to a stored password returns nothing, and the core asserts
-  it for every field kind
-- **The reference vault named in the requirements did not exist.** S-02, S-04, S-07 and R-11 have
-  all said "1 000 items, 4 fields each, generated by `trustvault-core`'s `benchfixture` helper"
-  since kickoff, and nothing implemented it — a requirement that reads as satisfied because it
-  names a file. Written now, behind a feature so it stays out of the shipped library, and derived
-  from the item index with **no RNG at all**: R-06's CI grep forbids a seedable one in this crate,
-  and a hand-rolled generator written to pass the grep would be the rule broken with the evidence
-  removed
-- **S-04's host half is measured: 0.85 ms p95** (median 0.44, max 1.65; 34 000 samples over six
-  queries and every prefix of each, `cargo bench --bench search`). That is 1.7 % of the 50 ms
-  budget, so the criterion now rests on the IPC hop and the render rather than on the matching.
-  The gate line stays unticked because the end-to-end number needs the running app — the palette
-  carries the `performance.measure` marks S-04 names, and nobody has read them yet
-- **A tag can now be created, not only chosen** — the cheapest thing on the list and one of the
-  more embarrassing to have shipped without: the chips were the tags already in the vault, so a
-  fresh vault offered none and no first item could ever be tagged. Both dialogs also draw the Tags
-  control unconditionally now; it was hidden exactly when it was needed
-- **The TOTP group closed whole (2026-08-06, later still)** — all three boxes, core, both commands
-  and both surfaces, with `totp_code` and `totp_preview` deleting their markers in the same commit.
-  Five markers remain. Two things make it worth more than three ticks. It is the **first group
-  where the prototype draws both surfaces**, the exact opposite of D-48 one group over: the design
-  was the authority for pixels and `MASTER.md` only had to arbitrate what the prototype promises
-  and v1 does not ship (**D-55**, the *Scan QR on screen* button — the third prototype promise
-  removed in three days, which is a pattern rather than three incidents). And the RFC's 18 vectors
-  passed on the **first run**, across all three algorithms, which has not happened before in this
-  project — the reason is that this is the first time the specification came with its own numbers
-- **The risk was the parser, not the generator, and it was visible before a line was written.**
-  `import/bitwarden.rs` has stored **either** a bare base32 seed **or** a whole `otpauth://` URI
-  since the importer landed, because that is what Bitwarden emits. A generator reading only the
-  first would have computed codes from *the letters of a URL* for every imported item and reported
-  success doing it. `otpauth://hotp/…` is **refused** rather than read as TOTP for the same reason
-  one level up: HOTP counts logins, not seconds, so every code derived from one is wrong and looks
-  right. Both are named tests. This is the first time in four phases that the thing which would
-  have gone wrong was caught by **reading our own code first** rather than by a harness afterwards
-- **`totp_code` is the first vault-class command deliberately left un-audited**, and the reasoning
-  is arithmetic rather than principle: the pane refreshes it every step, so an entry per call
-  writes 120 an hour with the pane open and evicts every genuine reveal from D-31's 1000-entry cap
-  before lunch. An audit log that is mostly its own noise is worse than none, because it still
-  looks complete. The *seed* being revealed still goes through `reveal_field`, which does record it
-- **The preview went into the Edit dialog too, which the task did not ask for.** A seed can be
-  replaced there, so a validator guarding one of the two ways in is one that gets reported as
-  "sometimes it checks" — and the edited seed is the more dangerous of the two, because the item
-  worked before the edit. Factored into `TotpPreview.svelte` rather than duplicated
-- **`ipc_audit.rs` caught the new module on its first run again** — the directory check D-47 added
-  failed because `commands/totp.rs` was not in its list. Second time that check has earned itself,
-  and this time by construction rather than by luck. The seed now lives in the harness's **shared**
-  fixture rather than in the TOTP test alone, so checks 2 and 4 assert against a vault holding one;
-  contract check 7 is automated in both halves for the first time
-- **The frontend's `ErrorKind` union was missing `not_importable`.** Found while adding
-  `malformed_totp_secret` beside it: the host has returned that kind since the importer landed
-  2026-08-06 and `asIpcError` would have narrowed it to `internal`. Nothing had called the import
-  commands from the webview yet — there is no surface — so it had never been reachable, which is
-  exactly the shape of drift the contract's own check 1 cannot see
-- **The settings-and-vaults group closed but for one box (2026-08-06, later still again)** — six
-  of its own, plus the item-management delete box that had been half done since the morning. It is
-  the largest group in the phase and it leaves **one `// planned` marker** in the whole contract,
-  `list_tags`, which is deliberately unimplemented and says so. What the group actually added is
-  the five `Settings` fields the contract has specified since the phase opened and the four vault
-  commands, so R-21, R-22, R-27 and R-18's second half all land together
-- **`launch_at_login` is the only setting in the application that writes outside this process**,
-  and therefore the only one whose save can fail — an XDG desktop entry, a `LaunchAgent` plist, a
-  `reg.exe` value, hand-written per platform (**D-56**). The ordering in `set_settings` is the
-  requirement: the OS write happens **before** anything is stored, so a platform that refuses
-  leaves the stored value alone and the toggle snaps back to the truth about the machine. It is
-  also reconciled against the OS at start-up, because a user who removed the entry through their
-  desktop's own startup tool has said something the settings screen must not go on contradicting
-- **Window geometry joins `last_vault_path` as host-owned, and its trap is the sharper of the
-  two.** D-40's field needs a frontend ignorant of it to spring; this one needs nothing — the
-  webview holds a `Settings` from when its screen opened, so **resize the window, then change any
-  setting**, and a frontend faithfully echoing every field it knows about sends the dimensions
-  from before the resize. `merge_incoming` keeps four fields now rather than one, with a test each
-- **`MASTER.md` was the document falsified this time, which has not happened before.** Four groups
-  running, `docs/ipc-contract.md` has been the thing written first and proved wrong within the
-  hour; here it was the design system. §3 has said since kickoff that UI Scale "scales the whole
-  `rem` root", and `tokens.css` has **no `rem` in it at all** — every size is
-  `calc(<px> * var(--ui-scale))`. The outcome is identical *only because nothing in the codebase
-  uses `rem`*, which is a condition and not a fact, so **D-57** records the divergence, both
-  documents are corrected in place rather than quietly re-worded, and a CI grep keeps the
-  condition true. The failure it prevents is the nasty kind: a setting that scales most of a
-  screen reads as a layout bug rather than as a broken setting
-- **`delete_vault`'s confirmation was written into the half no harness can drive**, which is D-47's
-  finding arriving from the other direction. The check R-18 asks for went naturally into the
-  `#[tauri::command]` wrapper — and the `_inner` split that lets `ipc_audit.rs` and
-  `ipc_session.rs` drive real command bodies skips exactly that layer. The single check in this
-  product whose **success** is irreversible would have been the one check no test had ever read.
-  The whole sequence moved into `delete_vault_inner`, which is also what makes its three orderings
-  testable: the name before the lock, the key zeroized before the bytes, the file before the
-  bookkeeping. Verified non-vacuous by loosening the comparison to case-insensitive, which fails it
-- **`display_name_for` serves both `list_vaults` and the deletion check, and that is correctness
-  rather than tidiness.** The contract defines the confirmation as equal to the display name the
-  list reports, so two implementations that drifted would make a vault undeletable through its own
-  dialog — the user typing exactly what is on their screen and being told it does not match
-- **`known_vaults` grows in one place**, `Inner::opened`, which replaced the three identical
-  blocks in `create_vault_inner`, `unlock_inner` and `unlock_recovery_kit_inner`. Consolidating
-  them was not tidying: the list has to be updated on **every** path that leaves a vault open, and
-  a fourth such path is added by someone who copies the vault and the path and does not know there
-  were bookkeeping lines to copy — after which the switcher is missing the vault on screen
-- **The keyboard audit earned itself before the surface shipped.** Row 15 asks for ↑/↓ between
-  vaults *including the open one*, and the open row was drawn `disabled` first — the obvious way
-  to say "you are already here", and wrong for one reason: a disabled button cannot take focus, so
-  the arrow key stops dead on the row the user is standing in and reads as the key having failed.
-  It is `aria-disabled` instead. This is the checklist working the way its own preamble said it
-  would, which is the first time it has been used as a thing to build against rather than read
-- **The `io` message said "the vault file"**, which for a failed login-entry write is the same
-  class of wrong copy D-49 found in the delete dialog: one sentence, read at the moment it
-  matters, describing something that did not happen. Re-worded to name a file rather than *the*
-  file. `confirmation_mismatch` was already in the contract's §4 and **missing from the frontend's
-  `ErrorKind` union** — the third instance of that exact drift, and each time for the same reason,
-  that nothing had yet been able to reach the kind
-- **The item-management group closed whole (2026-08-06, later still again again)** — its last two
-  boxes, and with them the first Phase 3 group to reach 7 of 7. Neither was new capability, which
-  is why both were left this long, and both turned out to be about something the app was *saying*
-  rather than something it was missing
-- **Every list already had an empty state; two of them were false.** The item list drew one message
-  in five panes, so standing in Favorites in a vault of fifty items it read *"No items in this
-  vault yet"*, and standing in Trash it read *"Deleted items sit here for 30 days"* — **the exact
-  sentence D-49 deleted from the delete dialog that same morning**, still on screen one pane over.
-  D-49 fixed the copy it was reported against and nothing swept for its siblings, which is the
-  lesson worth more than the fix: a false sentence found in one place is a *class*, and the sweep
-  belongs in the same session as the fix. The state is per view now, and the action follows the
-  same rule — *Add item* where adding fills the pane, *Show all items* where it cannot, because
-  Trash and an unused tag are dead ends you leave rather than fill
-- **The palette's "no results" was a line of grey text**, which makes a failed search and a failed
-  *load* look the same. It is an `EmptyState` with the search glyph and a *New item* action, and
-  the action is not the duplicate it appears to be: a query matching no item has also filtered the
-  New item **command row** out of the list, so it is the only way to act on what was just typed
-- **Two of the seven item types stopped being the same glyph, and it took one new glyph rather than
-  two** (**D-58**). The gap reads as `ssh_key` needing one of its own; `MASTER.md` §8 **assigns
-  `terminal` to the ssh key by name**, so it was never a substitute there. What §8 does is name six
-  of the seven types and omit `api_key` — a type nobody assigned anything to is how two of them
-  came to share one, for two phases. `code` (`< / >`) is drawn for `api_key` in the shipped set's
-  geometry, and §8 is corrected in place for that *and* for still saying **Lucide**, which D-28
-  replaced two phases ago — a falsified line nobody had gone back for, in the same section
-- **The screenshot harness now shoots the empty states**, three new scenarios in both themes: an
-  empty vault, Trash, and the palette with a query that matches nothing. That is the point of
-  the tool being there — the copy in a pane the author never visits is exactly what rots, and
-  Trash is empty **by construction** in v1, so nothing but a scenario would ever put it on screen
-  again. It cost one change to the harness itself: a scenario may now replace the item fixture
-  outright, because "the list is empty" is a different fixture and not a flag on the same one
-- **The import surface landed and with it the first plugin in the application (2026-08-06, later
-  still again again again again)** — one box, and the box is not what the session was about. What
-  stood between Phase 3 and its longest pole was never a screen: it was that the app had **no way
-  to choose a file**, which is a dependency decision, and **D-59** is it. `tauri-plugin-dialog`
-  answers both of the two tasks that wanted one — R-29's import, and the switcher's *Open vault
-  file…*, drawn-and-inert since D-36 for exactly this reason
-- **The dependency was taken and the webview granted none of it**, which is the whole shape of the
-  decision rather than a detail of it. The plugin is registered in Rust so `commands::picker` can
-  open a dialog; `capabilities/default.json` is still `core:default` alone, so the plugin's own
-  `open`/`save`/`message` are denied and the two argument-less host commands are the only doors.
-  That claim is **one line of JSON** away from being false at any moment, so it is check 8 in the
-  contract's §9 and a test, not a sentence. The option that had to be refused on principle rather
-  than on cost was `<input type="file">`: it hands the **webview** the bytes, and for an import
-  those bytes are another password manager's plaintext in the heap that cannot be wiped
-- **A dependency's cost is not only its tree, and this one proved it twice.** `tauri-plugin-dialog`
-  pulls `tauri-plugin-fs` in as a library dependency — it registers no fs commands, but the crate
-  is in the tree now and the next `cargo audit` will see it. And its init script **replaces
-  `window.alert` and `window.confirm`** in our page, with a `confirm` that returns a **promise** —
-  so `if (confirm(…))` is true always, and a confirmation written the way every web tutorial writes
-  it would confirm itself. Neither is in the README; both came from reading the crate
-- **The check written for that failed on its first run**, which is the third time in Phase 3 a new
-  harness check has earned itself immediately. `DeleteDialog.svelte` declared a local
-  `async function confirm()` shadowing the global — safe today, and safe exactly until somebody
-  moves the call, on the one dialog in this product whose **success** is irreversible. It is
-  `remove` now, and the rule is the blunt one (the identifier may not appear in `src/` at all)
-  because a rule with an edge is a rule someone argues their way past
-- **The screenshot harness caught a layout bug before a human saw the screen.** `.lede` was a flex
-  container so it could hold a status glyph, which made the `<strong>` inside the intro paragraph
-  a **column of its own** — the sentence rendered as three fragments side by side. Three scenarios
-  were added (intro, preview, done) and the harness needed one change to take them: the load-hold
-  is **per scenario** now, because the import flow is the first drive with three clicks in it and
-  the default 900 ms expired mid-sequence, producing a photograph of the previous step. A shot of
-  the wrong state still looks like a shot
-- **The refusal list is drawn in full, with no "and 12 more".** R-29 is the rule that nothing is
-  dropped in silence, and a list that hides its tail is that rule broken one indirection out where
-  it reads as restraint. The report shown after the import is the **commit's**, not the preview's,
-  because §6.8 has `import_commit` re-read the file — leaving the preview up would report the
-  losing side of a real race as fact
-- **One empty state was falsified by this change and swept in the same session**, which is the
-  lesson the empty-states pass wrote down one day earlier. The vault switcher's empty state carried
-  a comment explaining that it had no action *because this build could not pick a file*. That
-  stopped being true the moment D-59 landed, and nothing prompts you to go back for a state written
-  around a limitation when the limitation goes
-- Blocked: nothing
-- **Phase 2's branch was merged ahead of its own gate**, and it is worth keeping in view rather
-  than filing away. PR #1 merged 2026-08-05 17:47 with G-B′ at 4 of 5 and an **empty body**;
-  `90-MOC/Git Workflow Standard.md` asks a phase PR to carry the gate evidence. Nothing was lost —
-  `development` was buildable, CI was green on the branch first, and the evidence is in the phase
-  document — but a merged branch is the thing that later makes "the gate passed" and "the branch
-  landed" look like one event. Phase 3's PR carries its evidence in the body
+What happens next is release work, not more Phase 3/4 implementation:
 
-- **The D-36 sweep closed the phase's oldest risk (2026-08-07)**, and what it found is that all
-  four remaining disabled controls had gone stale the *same way*: the thing each one's `title`
-  said it was waiting for had arrived, and nobody went back for the sentence. Two are removed as
-  promises v1 does not keep (**D-61**) — the recovery kit has no file format to load, because
-  R-07's kit is whatever the user's own print dialog wrote, and *Rename vault* has no requirement,
-  no command and no prototype behind it. Two are wired: onboarding's *Change* (**D-60**, a save
-  dialog and the third door on `tauri-plugin-dialog`) and the switcher's *New vault* (**D-62**)
-- **The New vault button was hiding a hole rather than a blemish.** `vault_status` answers
-  `no_vault` exactly once in a vault's life, so onboarding was unreachable ever after and a user
-  with one vault **could never create a second** — R-22 is a `must`, and it was reachable only by
-  somebody who already had another `.tvault` from elsewhere. Wiring it then found the trap under
-  it: `create_vault` writes the file whole and the flow opens with the same default name every
-  time, so keeping "Personal Vault" for both would have written the first vault over with the
-  second. No confirmation, no undo, and **no key in memory to have warned with**. `path_in_use` is
-  the first refusal in this product that protects a file the user is not looking at
-- **The two `MASTER.md` §10 lines that had never been measured are measured (2026-08-07)**, and
-  the reason they never had been is structural rather than neglect: the app needs a Tauri host to
-  render anything, so every claim about how it *looks* has been a claim about its CSS since Phase
-  0. `scripts/a11y.mjs` walks the same fake application the screenshot harness photographs — the
-  stub host moved into `scripts/harness.mjs` so a shot and an audit are evidence about one product
-- **895 contrast findings on the first run, and the token behind them is the one the design calls
-  "text disabled".** `--fg-subtle` measured **3.0:1 on a hovered row** while carrying group
-  labels, counts, metadata and every placeholder in the product — **69 use sites** of a colour
-  §2 describes as disabled. What makes it worth more than a palette fix is *why* §2 never caught
-  it: the four contrast figures that section has always carried were all true and **all four were
-  about `--bg-surface`**. A token is read on five backgrounds. **D-63** moves five tokens and the
-  tool re-checks them, so §2 has stopped being the record and become the summary
-- **The focus audit found itself wrong twice before it found anything about the app.** It reported
-  the one autofocused control on every screen as ringless, because it measured an element that
-  already had focus. And it **passed the real failure** — the command palette's search field,
-  which had cancelled the global ring and replaced it with nothing since Phase 2 — because
-  `outline-offset` still changes when the outline is `none`: a ring that is not drawn, moving. A
-  tool that reports "no findings" is the easiest thing in this repo to believe and the hardest to
-  check, so both mistakes are named in its own source
-- **Ticking a checklist is not paperwork, twice over.** Going through §10 line by line found
-  `Toggle.svelte` breaking the radius rule with a hardcoded 10px track since **Phase 0**, and
-  found `Dialog.svelte` trapping focus and closing on Esc since **Phase 2** while never giving
-  focus *back* — so closing any overlay left the user at the top of the application. The second is
-  precisely what the keyboard audit's rule 4 is worded against ("the three together"), and it
-  survived two phases because the two visible parts worked
-- **The reference vault exists as a file now**, which was the last thing standing between S-04 and
-  its end-to-end number: `benchfixture` built it in memory, and both S-02 and S-04 are about the
-  *running* application. `cargo run --release --example reference-vault …` writes one in two
-  seconds and **reopens it before reporting success**, because this file exists to be opened
-- **What is left in Phase 3 is three tasks and none of them can be done from a text editor.** The
-  keyboard audit's nineteen surfaces with the pointer physically unplugged, S-04's end-to-end
-  measurement, and R-29's gate wording, which is the author's call. The critical path has been the
-  author's since the import surface landed and it still is
+- Run the Linux-only tag workflow and retain its `.deb`, `.AppImage`, checksum, and smoke evidence.
+- Keep G-C open until release artefacts exist and S-01…S-11 can be measured against them.
+- Do not mark deferred Apple/Azure work complete until those platforms resume and the account state
+  is visible or reported by the user.
+- Do not publish a Linux release until both artifacts, checksums, clean-container version assertions,
+  and install docs pass.
 
-- **R-29's wording was answered 2026-08-08 and the answer was not the paperwork it looked like
-  (D-64).** The author took the proposed re-wording — *all of Bitwarden's item types, producing the
-  five of ours they map onto* — and acting on it meant asserting the fixture covered them, which it
-  did not. It covered **six of the eight**: types 7 and 8, the driving licence and the passport
-  that `import/bitwarden.rs` names in its own comment, were in no fixture and no test, so D-50's
-  generic path had been exercised by the bank account alone for two days. **The proposal itself
-  carried the wrong number** — it said "all seven of Bitwarden's", our count borrowed into a
-  sentence about theirs — which is the finding worth more than the fix: a re-wording written on the
-  day the problem is found comes out of the same memory that produced the wrong line, and nothing
-  re-checks it until somebody tries to tick the box. Both types are in the fixture now, the count
-  is `the_fixture_covers_every_bitwarden_item_type` rather than a sentence, and the driving licence
-  carries a `folderId` so the folder-merge test finally runs over a generic-path item
-- **`cargo fmt --check` was already failing on the branch when this session opened**, on
-  `examples/reference-vault.rs` from the previous commit — the phase's own Phase 2 lesson ("`cargo
-  fmt` belongs after the last file is written") repeating on the last file written. It would have
-  failed CI on the phase PR rather than on anything anyone was looking at. Fixed here
-- **Phase 3 is 37 of 39, and the gate is 2 of 6 lines.** What remains is one sitting with the app
-  running and seven days of calendar: the keyboard audit's 19 surfaces with the pointer unplugged
-  (which also ticks §10's twelfth box and S-08), S-04's end-to-end number, the functional gate line
-  D-38 moved here from G-B′, and the 7-day drive. **Nothing left is a repo change**
-- **"Nothing left is a repo change" was wrong by one, for the second day running (D-65).** The line
-  above is about tasks; what it missed is that S-04's procedure never said **which build** the
-  number comes from, and the two candidate answers are not equivalent. `tauri dev` is the only
-  documented way to launch this app and the only build with a console — and the workspace manifest
-  optimizes dependencies while deliberately leaving our own crates unoptimized, so the matching
-  that costs 0.85 ms p95 in release costs **6.63 ms** there (`cargo bench --bench search --profile
-  dev`). The sitting would have produced a number, 12 % of it spent by a build nobody ships, and
-  **nothing afterwards could have told it from the real one** — the same shape as every other
-  measurement this project has had to go back for. The `measure` feature is the fix: a release
-  build with `tauri/devtools`, opened on launch, opt-in, and held opt-in by a CI check, because an
-  inspector attached to a process holding decrypted secrets is not something a release ships
-- **Preparing the sitting is now the whole of what the repo can contribute.** The measure build and
-  the reference-vault file are produced ahead of it, so the author's hour is spent walking surfaces
-  rather than waiting on `lto = true`
-
-**Phase 4 is open and its first code exists — 4 of 21, 2026-08-15.** The contract came first (§6.9),
-then both unmeasurable gate lines came back split rather than relaxed (D-77), then the local scan:
-`crates/trustvault-core/src/watchtower.rs` carries zxcvbn scoring and reuse detection, with no
-socket in its dependency tree.
-
-- **The scoring was already written, in the wrong crate — D-78.** `score_password` has served
-  onboarding's meter from `src-tauri` since Phase 2, and its own comment gives the reason it is in
-  the host: 400 kB of dictionaries must not be parsed by the **webview** on every cold start. That
-  argument survives the move untouched. What it does not answer is host-versus-core, and scoring
-  every password means reading every password — from `src-tauri` that is a thousand plaintext values
-  lifted across a crate boundary and dropped again. It is a pass-through now, and "Weak" has one
-  definition rather than two that agree until one is edited
-- **The weak threshold was set by two failing tests, not by a choice — D-79.** The first draft
-  assumed the meter's "Weak" band, score ≤ 1, and two tests written from that assumption failed.
-  Measured: `hunter2` scores 1 and dies in under a second, `Tr0ub4dour&3` scores **2** and falls in
-  **31 minutes**. The Watchtower view has read *"Crackable in a matter of hours"* under its Weak
-  group since D-36 drew it from the prototype — **the design's own copy was the evidence**, written
-  months before the decision it settled
-- **It left two screens calling one number two words**, and that is an open question rather than an
-  edit: score 2 is *Fair* on the meter and *Weak* in Watchtower. `MASTER.md` §2 makes status wording
-  binding, so it is not the kind of thing whoever noticed it gets to rename
-- **Three shapes the report carries on purpose.** A clean field is the **absence of a row**, never a
-  row saying `strong`. A field that is both weak and reused produces **two findings**, and
-  `ItemStatus` is where the ranking happens, because the item list draws one pip and has to pick.
-  An item storing one password in two of its own fields is **untidy, not reused** — reporting it
-  would put a row on screen naming the item as sharing with itself
-- **The grouping key is SHA-256 and never leaves the module.** Hashed rather than grouped on the
-  value for a memory reason as much as a secrecy one: a map keyed on `String` copies every plaintext
-  password into an allocation nothing zeroizes. It is still a secret, so it is private, unprintable,
-  and never returned — `shared_with` names other **items**, which the list already carries
-- **What is not done and is worded as if it were**: the crack-time box. The string exists in every
-  finding; nothing renders it, because the view still draws from the status cache. The box stays
-  unticked — the Phase 3 lesson about surface-worded tasks, applied rather than re-learned
-
-**Then the two tasks the re-worded gate added — 6 of 21, 2026-08-15.** A fixture with something to
-find, and the measurement that fills S-07a's blank.
-
-- **`auditfixture.rs` is twenty-one items and every number in it was worked out by hand.** Reuse
-  groups of 3, 2, 5 and 2; a password at every zxcvbn score; one item storing one value in two of
-  its own fields; one item with no password at all. It is a written table, not a derivation — which
-  is what `benchfixture.rs` is, and the reason that one has nothing for R-23 or R-24 to see
-- **The scores are read from zxcvbn on every test run, not asserted once.** The point is what a
-  dependency bump does: zxcvbn is a dictionary and a set of matchers, both of which move between
-  releases, and a fixture that still claims a spread across five scores while holding three makes
-  R-24's tests pass by having nothing in them. The test names the row that moved
-- **One row exists to fail if `scan` stops passing context.** *Northwind Mail* stores
-  `priya.raman.2024` and its username is `priya.raman`: **4 bare, 2 in context**. Verified by
-  dropping the argument on purpose — two tests fail, one of them naming the row. Nothing else in
-  the project would have noticed the D-12 amendment being undone
-- **Every test passed on its first run, which is why they were all broken on purpose before being
-  believed.** Phase 2's harness rule, applied to a fixture rather than to a harness
-- **S-07a is 61–63 ms against a budget of 500 ms — D-80.** The budget is 8× the reading and every
-  multiplier in the gap is written down rather than left as slack: ×1.9 for zxcvbn's expensive case
-  (the same benchmark scans the audit vault at 0.118 ms a password against the reference vault's
-  0.061 ms), ×2 for a machine that is not this desktop, and the rest is headroom to where a command
-  that returns reads as a hang — the local scan reports no progress and **cannot**, because
-  `watchtower-progress` is the breach half's
-- **The benchmark fails rather than prints.** `kdf.rs` and `search.rs` print, correctly: neither can
-  run anywhere but this desktop. This one can run anywhere, so it is a CI step in the `rust` job —
-  which is what the gate line already claimed and what nothing in `.github/workflows/` actually did.
-  S-07a is the only measured criterion here a runner can re-take
-- **Two things the measurement found that nobody was looking for.** The budget is per **1 000
-  items**: at 0.12 ms a password on the expensive side, a 10 000-item vault is over the line and
-  needs the progress events the breach half already has. And a scan of the reference vault returns
-  **ten weak findings** — the single-digit indices, whose `pw-{index}-xK9` is eight characters and
-  scores 2 — so any later test asserting that vault scans clean asserts something false
-- **The gate line for S-07a still does not tick**, and that is deliberate. A reading cannot fail a
-  budget computed from it; what makes it a gate line is a run that could have failed, which needs
-  the scan reachable through `watchtower_scan` and the benchmark re-run somewhere other than the
-  machine that set it
 
 ## Gates
 
@@ -539,11 +55,11 @@ it is marked `not run — retrofitted` with the risk carried written next to it.
       Passed 2026-08-05. Four of its five lines carry measured evidence reproduced by CI (run
       30997297701); the fifth, the functional line, was run by hand on the app because nothing
       else can run it
-- [ ] **Phase 3** — all 15 surfaces reachable by keyboard alone; `MASTER.md` §10 ticked; 7 days daily-driven
+- [x] **Phase 3** — all 15 surfaces reachable by keyboard alone; `MASTER.md` §10 ticked; 7 days daily-driven. Closed 2026-09-09 by user direction; S-04 and the drive are retrospective/user-reported evidence
 - [x] **Phase 4** — breach detection verified; zero egress when opted out, proven by packet capture.
       Passed by already-run manual evidence recorded 2026-09-09 by user report
 - [ ] **G-C** — S-01…S-11 filled in with measured results
-- [ ] **Phase 5** — signed artifacts for all three targets, each installed and version-asserted in CI
+- [ ] **Phase 5** — Linux x86-64 `.deb` and `.AppImage`, each installed/run and version-asserted in clean containers. macOS/Windows deferred by D-97. Active work is 6/11
 
 **G-A (pin mapping locked) is dropped** — software-only project, no hardware track. **G-B is replaced
 by G-B′**, because the equivalent "the physical thing behaves as drawn" moment here is the IPC
@@ -649,7 +165,9 @@ the choice, not the choice.
 | 2026-08-16 | **D-92** The focus audit measures **its own instrument** before it measures the application, and the a11y profile carries one pref — `datareporting.policy.dataSubmissionPolicyBypassNotification` — so that the page under test is in a window the browser considers focused | Run 31937787913 reported **1 556 findings, every one `no-indicator`** — 100 % of the focusable elements on every surface in both themes — and it was the browser. Reproduced on this machine and bisected to a single pref: on a fresh profile Mozilla's own build shows the data-collection privacy notice at startup, whatever presents it takes window activation from the content, and then `document.hasFocus()` is `false`, `:focus` matches nothing, and every ring in the app is invisible to `getComputedStyle` while `contrast` and `taborder` — which do not care who is focused — stay clean. Ubuntu's snap suppresses that notice, which is why this desktop was clean on the same commit and the same version, **153.0.4 both sides**: the audit had been measured for two days against the one build that hides the problem. So the pref is half the decision and the **probe** is the other half — `focus.js` now creates, styles and discards its own control, and reports separately whether `:focus` and `:focus-visible` paint on this browser. A failed probe is one honest failure of the audit rather than a finding against every control on the screen, and the run still exits non-zero. Neither half relaxes S-09: the ring must still come from the stylesheet. Verified both ways — the full 144-surface sweep is clean against Mozilla's tarball build with the pref, and making the probe's own rules unmatchable fails the run with the message that names the browser | **Widening the audit until it goes green** — the tempting one and the worst: an audit relaxed to pass on a runner is worth less than no audit, and `MASTER.md` §10's twelve boxes rest on this job. **`browser.display.show_focus_rings`** — would force a ring onto anything focused regardless of modality, so a genuinely ringless control would pass; rejected for exactly the reason the pref that *was* taken is acceptable. **`focusmanager.testmode`** — Gecko's own harness pref for an inactive window, tried first because the symptom looked like activation loss, and **measured to change nothing here**; dropped rather than carried as a charm. **Pinning the audit to Ubuntu's snap** — makes CI agree with this desktop by making CI stop being a second machine, which is what D-72 added the job to avoid. **Driving Firefox through Playwright or Marionette instead** — a second browser stack, and a heavier dependency than one line in a profile |
 | 2026-09-09 | **D-93** The a11y harness uses a fresh Firefox profile per audit run, cleanup failure is not an audit result, and a timeout is named as a timeout | A targeted Watchtower tab-order run reached the browser and then failed in the harness twice: first `firefox.kill('SIGTERM')` threw `EACCES`, then the next invocation failed before opening the page because the reused `target/a11y-profile` directory was not empty. Both failures say nothing about the surface under test, and both are more likely after D-92 because the harness now has a real browser profile with prefs worth keeping isolated. A new profile under `target/a11y-profile-*` makes one stuck browser unable to poison the next run, and a denied cleanup signal is swallowed because the audit result is the page's posted report or an explicit timeout, not the operating system's willingness to signal a launcher process. The follow-up runs still timed out in this desktop's Firefox headless path, so the third fix changes the message: a page that never posted is now reported as a timeout rather than "the scenario drew no tab stop". Verified with `node --check scripts/a11y.mjs`; no two-theme browser result from this sitting is gate evidence | **Reusing and deleting one fixed profile** — tidy, and it lets a previous browser process turn the next audit into `ENOTEMPTY` before the app is measured. **Failing the audit on a denied cleanup signal** — loud, but it reports the browser launcher as an application defect. **Printing every timeout as zero tab stops** — strict-looking, but it lies about the failure mode. **Killing harder or cleaning with a wider command** — more destructive cleanup for a directory under `target/`, while the cheap answer is to stop sharing the directory |
 | 2026-09-09 | **D-94** Phase 4's remaining manual evidence is accepted as already tested and recorded late | The Watchtower row 17 keyboard walk and the two packet-capture runs were not missing work; they were missing records. The user confirmed on 2026-09-09 that both had already been tested, so the project records the evidence rather than re-running heavy or privileged work in this sitting. This ticks row 17, the four capture-derived gate lines, S-07b, S-10, and the "capture evidence recorded" gate line. The risk is named in the wording: the evidence is user-reported and retrospective, in the same class as the earlier author observations that CI cannot reproduce | **Leaving the boxes open** — accurate only if the work had not happened, and it would make the project status wrong after the user clarified the evidence. **Re-running everything now** — stronger evidence, but it means a Tauri release build, `sudo`, live network capture and manual UI driving, which the user explicitly did not want in this session. **Marking them as machine-verified by this session** — false; this session recorded the already-run tests |
-| 2026-09-09 | **D-94** Phase 4's remaining manual evidence is accepted as already tested and recorded late | The Watchtower row 17 keyboard walk and the two packet-capture runs were not missing work; they were missing records. The user confirmed on 2026-09-09 that both had already been tested, so the project records the evidence rather than re-running heavy or privileged work in this sitting. This ticks row 17, the four capture-derived gate lines, S-07b, S-10, and the "capture evidence recorded" gate line. The risk is named in the wording: the evidence is user-reported and retrospective, in the same class as the earlier author observations that CI cannot reproduce | **Leaving the boxes open** — accurate only if the work had not happened, and it would make the project status wrong after the user clarified the evidence. **Re-running everything now** — stronger evidence, but it means a Tauri release build, `sudo`, live network capture and manual UI driving, which the user explicitly did not want in this session. **Marking them as machine-verified by this session** — false; this session recorded the already-run tests |
+| 2026-09-09 | **D-95** Phase 5 opens with G-C still open, because the release artefacts are the thing G-C must measure | The normal dependency line says Phase 5 depends on G-C: S-01…S-11 filled with measured results. Starting release work before that is a dependency skip, so it is recorded rather than passed off as green. The reason to open anyway is mechanical: S-01, S-02, S-05, S-06 and the platform checks need packaged binaries, and Phase 5 is the phase that creates them. S-04 and the seven-day drive are accepted for Phase 3 closure by user direction, but G-C still owes exact release-artifact numbers before publication. Signing-account readiness is carried the same way: Apple Developer and Azure Trusted Signing are not proven in the repository, so the entry check leaves that box unticked and puts signing setup at the front of the task list | **Holding Phase 5 until G-C** — tidy on paper and circular in practice, because several G-C measurements need artifacts Phase 5 produces. **Marking G-C passed by retrospective notes** — would erase the distinction between Phase 3 closure and release qualification. **Starting only docs** — lower risk, but it hides the same dependency while still claiming release work has not begun |
+| 2026-09-09 | **D-96** A release is published only after platform jobs smoke-test their installers; the final job publishes the complete active matrix atomically. **The four-artifact count is superseded by D-97; the dependency shape remains** | Signing and installation are platform operations, while checksums and publication are platform-neutral. A dependent final job makes a failed install or version assertion incapable of creating a partial public release. The binary has a side-effect-free `--version` path so the test asks packaged code, not installer metadata | **Each build leg uploading directly to a release** — exposes partial assets when another artifact fails. **Installer metadata only** — proves labels, not installed code. **A draft created before smoke tests** — recoverable but still external state from unqualified artifacts |
+| 2026-09-09 | **D-97** The first release is Linux x86-64 only; macOS arm64 and Windows x86-64 remain in scope but are deferred as eight explicitly labelled tasks | User direction prioritizes a usable Ubuntu/Linux release now without making external signing accounts the critical path. The workflow therefore publishes exactly one `.deb` and one `.AppImage`; docs retain the Apple/Azure credential contract and ordered resume point | **Keeping all platforms as the release gate** — blocks Linux on unrelated signing readiness. **Deleting macOS/Windows tasks** — loses requirements and restart context. **Leaving dormant jobs in the active workflow** — still requests unavailable credentials and makes a Linux tag fail for intentionally deferred work |
 | 2026-08-02 | **D-14** G-A dropped, G-B replaced by G-B′ | Software-only project: there is no pin mapping and no board bring-up. The IPC security boundary is the structural equivalent of "the physical thing behaves as drawn" | Keeping the hardware gates as empty ticks — which would make "already checked" indistinguishable from "never considered" |
 
 ## Open questions
@@ -1354,6 +872,39 @@ the choice, not the choice.
     a time rather than 48 in a loop.
 
 ## Session log
+
+### 2026-09-09, Linux-only release scope
+
+By user direction, the active Phase 5 gate now ends at Linux x86-64. The macOS and Windows work was
+not deleted or marked complete: eight tasks are labelled **DEFERRED** with the account → signing →
+package → smoke-test resume order and the credential contract remains in `docs/release.md`. D-97
+supersedes D-07 only for the first release, not for the product's eventual platform scope.
+
+The release workflow now has only `prepare`, `linux`, and `publish` jobs. Publication requires
+exactly one `.deb` and one `.AppImage`, both smoke-tested before checksums and release creation.
+Apple/Azure secrets are not referenced by the active workflow. The active count is **6 of 11**;
+eight additional tasks are deferred. A local packaging attempt produced a **3.5 MB `.deb`** whose
+extracted binary reported `TrustVault 0.0.0`. AppImage packaging reached the completed release
+binary and then Tauri failed while patching bundle metadata with `Read-only file system (os error
+30)` on this workspace; it remains an unticked task for the clean tag runner rather than being
+reported as a Linux package success. The `.deb` was subsequently installed successfully on this
+machine as `trust-vault:amd64`; `/usr/bin/trustvault --version` returned `TrustVault 0.0.0`.
+Because this is the development host rather than a clean Ubuntu 26.04 container, the smoke-test
+task remains open.
+
+### 2026-09-09, Phase 5 release plumbing
+
+The Apple and Azure account tasks remain open because neither signing identity is evidenced in this
+checkout. Six repo-owned tasks are complete: the signing-key runbook, tag workflow, unsupported
+target rejection, install guide, README format-spec link, and first-release changelog.
+
+The workflow derives versions from annotated tags, builds only the distribution matrix, verifies
+native signatures, installs each artifact, checks the installed binary's `--version`, and publishes
+checksums plus assets only after all jobs pass. Package, signing, notarization, checksum-publication,
+and smoke-test boxes remain open until a credentialed tag run supplies evidence. Local checks passed:
+the version script's valid and invalid paths, Prettier on the new public files, `cargo fmt --all
+--check`, `cargo check -p trustvault --bin trustvault`, `git diff --check`, and the built binary's
+`TrustVault 0.0.0` output. No release was created.
 
 ### 2026-08-16, last (the audit was measured against the one browser that hides the problem)
 

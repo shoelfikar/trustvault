@@ -30,7 +30,7 @@ recorded as failed, never deleted.
 | S-01 | Cold start to interactive lock screen | ≤ 800 ms | `hyperfine` on the packaged binary, 20 runs, median | — |
 | S-02 | Unlock: Argon2id + full decrypt, reference vault | ≤ 1500 ms | In-app timer, median of 20 | — |
 | S-03 | Argon2id work factor | ≥ 500 ms on the dev machine at default params | `cargo bench --bench kdf` — **manual, and it stays manual**: the criterion names the development machine, so a runner re-taking it would file another machine's number under this ID | **511 ms** at m=256 MiB, t=3, p=1 (2026-08-02, Ubuntu 26.04 x86-64, median of 5). Vaults calibrate at creation rather than inheriting this — see `docs/vault-format.md` §3.2 |
-| S-04 | ⌘K palette: keystroke → filtered results rendered | ≤ 50 ms p95 | Performance marks, reference vault — **manual**: the host half is `cargo bench --bench search`, which no workflow runs, and the end-to-end half needs the running app | **Host half only: 0.85 ms p95** (median 0.44 ms, max 1.65 ms; 34 000 samples, `cargo bench --bench search`, 2026-08-06, Ubuntu 26.04 x86-64). That is the matching against 1 000 items — 1.7 % of the budget. The IPC hop and the render are **not** in this number and need the running app; `CommandPalette.svelte` carries the `performance.measure` marks for it. **The last thing that blocked taking it is gone since 2026-08-07**: the reference vault is writable as a file (see the preamble), so the procedure is now build it, open it in the app, type into ⌘K, and read `performance.getEntriesByName('palette-keystroke-to-render')` from the devtools console |
+| S-04 | ⌘K palette: keystroke → filtered results rendered | ≤ 50 ms p95 | Performance marks, reference vault — **manual**: the host half is `cargo bench --bench search`, which no workflow runs, and the end-to-end half needs the running app | **Met for Phase 3, recorded 2026-09-09 by user direction/user report.** Host half: 0.85 ms p95 (median 0.44 ms, max 1.65 ms; 34 000 samples, `cargo bench --bench search`, 2026-08-06, Ubuntu 26.04 x86-64). End-to-end app measurement accepted as already taken and below 50 ms p95, but the exact p95 is not in this file; G-C must re-measure and record release-artifact numbers before publication |
 | S-05 | Idle resident memory, vault unlocked | ≤ 250 MB RSS | `ps_mem` after 5 min idle | — |
 | S-06 | Installed size per platform | ≤ 40 MB | Installer artifact size | — |
 | S-07a | Watchtower **local** scan, reference vault | **≤ 500 ms for 1 000 items** — set from the first measurement, the way S-03's 511 ms was | `cargo bench --bench watchtower`, no network involved and none reachable (N-02) | **61–63 ms** (2026-08-15, Ubuntu 26.04 x86-64, median of 5; the same run reports 2.5 ms for the 21-item audit fixture). The budget is 8× the reading and the gap is accounted for below rather than being slack. **The scan of this vault is not finding-free**: ten items score 2 and are reported weak — the single-digit indices, whose `pw-{index}-xK9` is eight characters |
@@ -170,11 +170,11 @@ is tested against. A target dropped from this table is a decision log entry.
 |--------|-----------|---------|-------|--------------|
 | Linux x86-64 | `linux_amd64` | `.deb` | not yet | ubuntu:26.04 container |
 | Linux x86-64 | `linux_amd64` | `.AppImage` | not yet | ubuntu:24.04 + fedora:42 containers |
-| macOS arm64 | `darwin_arm64` | `.dmg` (signed + notarized) | not yet | macos-15 runner |
-| Windows x86-64 | `windows_amd64` | `.msi` (signed) | not yet | windows-2025 runner |
+| macOS arm64 | `darwin_arm64` | `.dmg` (signed + notarized) | **deferred (D-97)** | macos-15 runner — deferred |
+| Windows x86-64 | `windows_amd64` | `.msi` (signed) | **deferred (D-97)** | windows-2025 runner — deferred |
 
-Linux arm64 and macOS x86-64 are **not** targets. The installer must fail on them with a message
-naming what is supported.
+Linux arm64 and macOS x86-64 are **not** targets. For the current release, Linux x86-64 is the only
+active target; macOS arm64 and Windows x86-64 remain planned but deferred, not dropped.
 
 ## Bill of materials
 

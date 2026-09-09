@@ -1,0 +1,139 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: tag
+        name: Validate release tag
+        shell: bash
+        run: |
+          tag='${{ github.ref_name }}'
+          if [[ ! "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "::error::Unsupported release tag '$tag'. Use vMAJOR.MINOR.PATCH; the current release target is linux_amd64."
+            exit 1
+          fi
+          if [[ $(git cat-file -t "refs/tags/$tag") != tag ]]; then
+            echo "::error::Release tags must be annotated, not lightweight."
+            exit 1
+          fi
+          echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+
+  linux:
+    needs: prepare
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev libgtk-3-dev librsvg2-dev libssl-dev \
+            libayatana-appindicator3-dev build-essential pkg-config patchelf
+      - run: npm ci
+      - run: npm run release:version -- '${{ needs.prepare.outputs.version }}'
+      - run: cargo check --workspace
+      - name: Build Linux bundles
+        run: npm run tauri build -- --bundles deb,appimage
+      - name: Collect exactly one bundle of each type
+        shell: bash
+        run: |
+          mkdir release-assets
+          mapfile -t debs < <(find target/release/bundle/deb -maxdepth 1 -type f -name '*.deb')
+          mapfile -t images < <(find target/release/bundle/appimage -maxdepth 1 -type f -name '*.AppImage')
+          if [[ ${#debs[@]} -ne 1 || ${#images[@]} -ne 1 ]]; then
+            echo "::error::Expected one .deb and one .AppImage for linux_amd64"
+            exit 1
+          fi
+          cp "${debs[0]}" "release-assets/TrustVault_${{ needs.prepare.outputs.version }}_linux_amd64.deb"
+          cp "${images[0]}" "release-assets/TrustVault_${{ needs.prepare.outputs.version }}_linux_amd64.AppImage"
+      - name: Smoke-test deb in clean Ubuntu 26.04
+        run: |
+          docker run --rm -v "$PWD/release-assets:/release:ro" ubuntu:26.04 bash -euxc '
+            apt-get update
+            apt-get install -y /release/*.deb
+            test "$(trustvault --version)" = "TrustVault ${{ needs.prepare.outputs.version }}"
+          '
+      - name: Smoke-test AppImage in clean Ubuntu 24.04
+        run: |
+          cp release-assets/*.AppImage /tmp/TrustVault.AppImage
+          docker run --rm -e APPIMAGE_EXTRACT_AND_RUN=1 -v /tmp/TrustVault.AppImage:/TrustVault.AppImage:ro ubuntu:24.04 bash -euxc '
+            apt-get update
+            apt-get install -y libfuse2t64 libglib2.0-0 libgtk-3-0 libwebkit2gtk-4.1-0
+            cp /TrustVault.AppImage /tmp/TrustVault.AppImage
+            chmod +x /tmp/TrustVault.AppImage
+            test "$(/tmp/TrustVault.AppImage --version)" = "TrustVault ${{ needs.prepare.outputs.version }}"
+          '
+      - name: Smoke-test AppImage in clean Fedora 42
+        run: |
+          docker run --rm -e APPIMAGE_EXTRACT_AND_RUN=1 -v /tmp/TrustVault.AppImage:/TrustVault.AppImage:ro fedora:42 bash -euxc '
+            dnf install -y fuse-libs gtk3 webkit2gtk4.1
+            cp /TrustVault.AppImage /tmp/TrustVault.AppImage
+            chmod +x /tmp/TrustVault.AppImage
+            test "$(/tmp/TrustVault.AppImage --version)" = "TrustVault ${{ needs.prepare.outputs.version }}"
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux_amd64
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, linux]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: linux_amd64
+          path: release-assets
+      - name: Require the exact distribution matrix and generate checksums
+        shell: bash
+        run: |
+          shopt -s nullglob
+          deb=(release-assets/*.deb)
+          image=(release-assets/*.AppImage)
+          if [[ ${#deb[@]} -ne 1 || ${#image[@]} -ne 1 ]]; then
+            echo "::error::Release requires exactly one .deb and one .AppImage. The current supported release target is linux_amd64; darwin_arm64 and windows_amd64 are deferred."
+            exit 1
+          fi
+          (cd release-assets && sha256sum * > SHA256SUMS && sha256sum --check SHA256SUMS)
+      - name: Publish release only after every smoke test passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create '${{ github.ref_name }}'
+          release-assets/*
+          --verify-tag
+          --title 'TrustVault ${{ needs.prepare.outputs.version }}'
+          --notes-file CHANGELOG.md

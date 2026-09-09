@@ -5,19 +5,21 @@
 A local-first desktop password manager for Linux, macOS, and Windows. Every secret lives in a
 single portable encrypted `.tvault` file that you own — no account, no server, no sync.
 
-> **Status: Phase 0 passed, Phase 1 not yet open.** Nothing is usable yet — there is no
-> cryptography in this repository at all. The vault format lands in Phase 1.
+> **Status: Phase 5 open for Linux x86-64.** Phase 0–4 are closed; the current release carries
+> `.deb` and `.AppImage` packaging, checksums, install documentation, and clean-container version
+> assertions. macOS and Windows distribution is planned but deferred.
 
 ## Planning documents
 
-The project's process record — scope, requirements, roadmap, per-phase task lists, the decision
-log, and the design system — is kept privately by the author and is not published here. Where the
-code refers to a requirement by ID (`R-10`, `N-02`, `S-04`) or to a phase gate, that identifier
-points into those documents.
+The repository carries the project record that reviewers need: scope and requirements in
+`trustvault-requirements.md`, per-phase task lists under `phases/`, the decision/progress log in
+`trustvault-state.md`, and focused evidence documents under `docs/`. Where the code refers to a
+requirement by ID (`R-10`, `N-02`, `S-04`) or to a phase gate, that identifier points into those
+documents.
 
-What the repository does carry, and what a reader actually needs, is below: the security posture
-this codebase is built around, and — from Phase 1 — `docs/vault-format.md`, which specifies the
-`.tvault` byte layout well enough to write a second implementation from.
+The main public specification is [`docs/vault-format.md`](docs/vault-format.md), which defines the `.tvault` byte layout
+well enough to write a second implementation. The sections below summarize the security posture
+and the common development commands.
 
 ## Build
 

@@ -250,6 +250,32 @@
       </div>
     </div>
 
+    <!-- R-15, D-98. It sits under Security rather than inside it: the generator is not a
+         security control the user is configuring, it is a tool whose output shape they are
+         choosing, and a symbol row among auto-lock and breach checking would read as one. -->
+    <p class="group-label">Password generator</p>
+    <div class="card">
+      <div class="row first">
+        <div class="row-text">
+          <p class="row-label">Include symbols</p>
+          <!-- The alphabet is written out rather than described, because "symbols" is exactly
+               the word whose meaning differs between this app and the site rejecting the
+               password. Off by default for the reason the row gives, and the sentence ends by
+               saying the generator can still turn it on — a default is not a restriction. -->
+          <p class="row-desc">
+            Adds <span class="mono">!@#$%&amp;*-_=+?</span> to generated passwords. Off by default, because
+            symbols are the class most often rejected by the site or system you are typing into. The generator
+            can still turn them on for one password.
+          </p>
+        </div>
+        <Toggle
+          label="Include symbols"
+          checked={settings.generatorSymbolsEnabled}
+          onchange={(next) => patch({ generatorSymbolsEnabled: next })}
+        />
+      </div>
+    </div>
+
     <p class="group-label">System</p>
     <div class="card">
       <div class="row first">
@@ -456,6 +482,11 @@
     line-height: var(--text-sm-lh);
     color: var(--fg-muted);
     text-wrap: pretty;
+  }
+  /* MASTER.md §3: a character set the user is asked to recognise is read glyph by glyph, so it
+     gets the mono face for the same reason a secret does. */
+  .row-desc .mono {
+    font-family: var(--font-mono);
   }
 
   /* Status is never colour alone — §2. The icon and the sentence carry it. */

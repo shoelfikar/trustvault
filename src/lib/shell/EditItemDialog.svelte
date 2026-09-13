@@ -28,8 +28,8 @@
   import Toggle from '../components/Toggle.svelte';
   import TotpPreview from '../components/TotpPreview.svelte';
   import {
-    ALL_SETS,
     asIpcError,
+    defaultSets,
     generatePassword,
     getItem,
     scorePassword,
@@ -47,11 +47,14 @@
     vaultFile: string;
     /** Tags already in the vault, offered as chips. */
     tags: string[];
+    /** `Settings.generatorSymbolsEnabled` — R-15, D-98. The generate button has no chips of
+     * its own, so the stored preference is the whole of its character-set choice. */
+    symbolsDefault: boolean;
     onclose: () => void;
     onsaved: () => void;
   }
 
-  const { itemId, vaultName, vaultFile, tags, onclose, onsaved }: Props = $props();
+  const { itemId, vaultName, vaultFile, tags, symbolsDefault, onclose, onsaved }: Props = $props();
 
   /**
    * One row of the form.
@@ -181,7 +184,7 @@
     const row = rows[index];
     if (!row) return;
     try {
-      const generated = await generatePassword(20, ALL_SETS);
+      const generated = await generatePassword(20, defaultSets(symbolsDefault));
       row.value = generated.password;
       row.revealed = true;
       error = '';

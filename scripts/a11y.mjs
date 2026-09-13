@@ -215,7 +215,9 @@ for (const report of reportsForOutput) {
   }
 
   if (report.timedOut) {
-    console.error(`  ${report.audit} ${where}: the page did not post an audit report before timeout`);
+    console.error(
+      `  ${report.audit} ${where}: the page did not post an audit report before timeout`,
+    );
     silent += 1;
     continue;
   }

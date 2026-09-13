@@ -20,9 +20,9 @@
   import Toggle from '../components/Toggle.svelte';
   import TotpPreview from '../components/TotpPreview.svelte';
   import {
-    ALL_SETS,
     addItem,
     asIpcError,
+    defaultSets,
     generatePassword,
     scorePassword,
     type ItemKind,
@@ -37,12 +37,15 @@
     vaultFile: string;
     /** Tags already in the vault, offered as chips. */
     tags: string[];
+    /** `Settings.generatorSymbolsEnabled` — R-15, D-98. The generate button has no chips of
+     * its own, so the stored preference is the whole of its character-set choice. */
+    symbolsDefault: boolean;
     onclose: () => void;
     /** The item landed in the vault; the shell reloads the list and selects it. */
     onsaved: (itemId: string) => void;
   }
 
-  const { vaultName, vaultFile, tags, onclose, onsaved }: Props = $props();
+  const { vaultName, vaultFile, tags, symbolsDefault, onclose, onsaved }: Props = $props();
 
   const KINDS: ItemKind[] = ['login', 'api_key', 'card', 'note', 'wifi', 'ssh_key', 'identity'];
 
@@ -121,7 +124,7 @@
    */
   async function fillGenerated(index: number) {
     try {
-      const generated = await generatePassword(20, ALL_SETS);
+      const generated = await generatePassword(20, defaultSets(symbolsDefault));
       values[index] = generated.password;
       revealed = true;
       error = '';

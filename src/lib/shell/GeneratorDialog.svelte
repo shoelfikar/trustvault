@@ -16,25 +16,35 @@
    * browser extension, and `trustvault-project.md` puts it out of scope for v1. A button
    * promising it would be the same class of mistake as D-49's Trash copy.
    */
+  import { untrack } from 'svelte';
   import Button from '../components/Button.svelte';
   import Dialog from '../components/Dialog.svelte';
   import Icon from '../icons/Icon.svelte';
   import IconButton from '../components/IconButton.svelte';
   import StrengthMeter from '../components/StrengthMeter.svelte';
   import {
-    ALL_SETS,
     asIpcError,
     copyGenerated,
+    defaultSets,
     generatePassword,
     type CharSets,
     type Strength,
   } from '../ipc';
 
   interface Props {
+    /**
+     * `Settings.generatorSymbolsEnabled` — the symbol chip's starting state, R-15 and D-98.
+     *
+     * A default, not a lock: the chip below overrides it for as long as this dialog is open,
+     * and closing the dialog goes back to the stored preference. It is a prop rather than a
+     * read of the settings here because `Shell` already holds the settings object and there is
+     * no second copy of it anywhere in this window.
+     */
+    symbolsDefault: boolean;
     onclose: () => void;
   }
 
-  const { onclose }: Props = $props();
+  const { symbolsDefault, onclose }: Props = $props();
 
   /**
    * The chips, and their labels are load-bearing.
@@ -44,6 +54,10 @@
    * anything else in the app. There is no toggle for it — the prototype draws four chips and
    * its own digit label already says 2–9, so the exclusion is a property of the sets rather
    * than an option, and the labels stay true.
+   *
+   * The first three start on and always have. The fourth starts from Settings (D-98), which is
+   * the only starting state in this dialog the user can change, because it is the only one with
+   * a reason to be off: a symbol is what the far end rejects.
    */
   const OPTIONS: { key: keyof CharSets; label: string }[] = [
     { key: 'lowercase', label: 'a–z' },
@@ -53,7 +67,11 @@
   ];
 
   let length = $state(20);
-  let enabled = $state<CharSets>({ ...ALL_SETS });
+  /* Seeded once, deliberately, and `untrack` is how that is said out loud -- the same shape
+     `Shell` uses for the pane widths. The dialog is constructed fresh on every open, so it
+     picks up the current preference then; reading the prop reactively would snap the chips
+     back to the stored default while the user was toggling them. */
+  let enabled = $state<CharSets>(untrack(() => defaultSets(symbolsDefault)));
   let value = $state('');
   let strength = $state<Strength | null>(null);
   let error = $state('');

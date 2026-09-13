@@ -1,7 +1,7 @@
 {
   "name": "trustvault",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "description": "Local-first desktop password manager. Your vault is a file you own.",
   "license": "GPL-3.0-or-later",
@@ -16,6 +16,7 @@
     "a11y": "npm run build && node scripts/a11y.mjs",
     "fmt": "prettier --write .",
     "fmt:check": "prettier --check .",
+    "release:version": "node scripts/set-release-version.mjs",
     "tauri": "tauri"
   },
   "devDependencies": {

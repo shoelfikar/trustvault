@@ -95,6 +95,22 @@ pub struct Settings {
     /// client somebody can call anyway, so the refusal lives one layer above the socket. It is
     /// also not host-owned: the user sets it, and `merge_incoming` leaves it alone.
     pub breach_check_enabled: bool,
+    /// Whether the generator starts with the symbol class on — R-15. **Off by default.**
+    ///
+    /// A *stored default*, not a switch the host obeys, and the difference from
+    /// `breach_check_enabled` above is the whole reason this field is documented at all.
+    /// `breach_check_enabled` gates the only egress in the product, so it is read in the host
+    /// where a caller cannot route around it. Symbol composition gates nothing: it decides
+    /// which alphabet a password is drawn from, and a webview that lied about it would produce
+    /// a password the user can see. So `generate_password` keeps taking `sets` as an argument
+    /// and reads no settings — it stays a function of its inputs, callable with no vault, no
+    /// lock check and no `AppState` — and this field is what the **webview** seeds its
+    /// generator controls from.
+    ///
+    /// Off by default because a symbol is the character class most often rejected by the thing
+    /// the password is being typed into, and the generator's chip is still one click away for
+    /// the sites that want one.
+    pub generator_symbols_enabled: bool,
 }
 
 impl Default for Settings {
@@ -119,6 +135,9 @@ impl Default for Settings {
             // R-26, and S-10 is measured on exactly this line. Nothing in TrustVault opens a
             // socket until somebody turns this on.
             breach_check_enabled: false,
+            // R-15. The generator's other three classes have no stored default because they
+            // have no reason to be off; this one does, so it is the only one that is stored.
+            generator_symbols_enabled: false,
         }
     }
 }
@@ -435,5 +454,14 @@ mod tests {
         // reason as the audit default above — the way this flips is somebody making a demo
         // easier, and nothing else in the product would notice.
         assert!(!Settings::default().breach_check_enabled);
+    }
+
+    #[test]
+    fn the_generator_leaves_symbols_out_by_default() {
+        // R-15, D-98. The default a fresh install starts from, and the one a settings file
+        // written before this field existed falls back to -- `#[serde(default)]` on the struct
+        // turns the missing key into exactly this value, which is what makes the upgrade a
+        // no-op for anyone who never opens the row.
+        assert!(!Settings::default().generator_symbols_enabled);
     }
 }

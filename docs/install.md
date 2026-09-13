@@ -38,6 +38,28 @@ chmod +x TrustVault_*.AppImage
 Some distributions require FUSE 2 compatibility for AppImage. If the desktop blocks execution,
 allow the file to run in its Properties dialog; do not disable system-wide application security.
 
+### Updating an existing install
+
+Quit TrustVault first, then install the newer `.deb` over the top. The package name is
+`trust-vault`, so apt upgrades in place rather than installing a second copy:
+
+```sh
+sudo apt install ./TrustVault_<version>_amd64.deb
+trustvault --version
+dpkg -l trust-vault
+```
+
+The upgrade replaces `/usr/bin/trustvault`, its icons and its desktop entry, and nothing else.
+Your `.tvault` file is not touched, and neither is the settings file — `~/.config/id.sulfikardi.trustvault/settings.json`
+on Linux — so the remembered vault path and every preference survive. A setting added by a newer
+version appears with its default the first time settings are written.
+
+To go back to an earlier package, keep its `.deb` and run
+`sudo apt install --allow-downgrades ./TrustVault_<older>_amd64.deb`. Downgrading is only safe
+while the vault format version is unchanged; `docs/vault-format.md` is what says whether it is.
+
+The AppImage carries no package manager: replace the old file with the new one and run it.
+
 ## macOS arm64 — planned, not currently released
 
 Download the `.dmg`, open it, and drag TrustVault to Applications. The release is signed with a

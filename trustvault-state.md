@@ -4,7 +4,9 @@ Answers one question: where is this project now, and what happens next. It holds
 calculations, and no task text — those live in `trustvault-requirements.md`, `docs/vault-format.md`,
 and `phases/`.
 
-Last updated: 2026-09-09, latest (**Phase 5 is Linux-only: 6 of 11 active tasks**). The remaining
+Last updated: 2026-09-13 (**D-98, the generator's symbol default, and a local 0.1.0 `.deb`**
+— not a release: no tag, no CI run, no checksums, and Phase 5's gate is unchanged at **6 of
+11 active tasks**). Before that, 2026-09-09 (**Phase 5 is Linux-only**). The remaining
 Phase 3 evidence was accepted by user direction: S-04's end-to-end palette measurement and the
 seven-day daily-drive gate are recorded as retrospective/user-reported rather than re-run in this
 sitting. Phase 3 is now **39 of 39** and gate **6 of 6**. Phase 4 remains **24 of 24** and gate
@@ -168,6 +170,7 @@ the choice, not the choice.
 | 2026-09-09 | **D-95** Phase 5 opens with G-C still open, because the release artefacts are the thing G-C must measure | The normal dependency line says Phase 5 depends on G-C: S-01…S-11 filled with measured results. Starting release work before that is a dependency skip, so it is recorded rather than passed off as green. The reason to open anyway is mechanical: S-01, S-02, S-05, S-06 and the platform checks need packaged binaries, and Phase 5 is the phase that creates them. S-04 and the seven-day drive are accepted for Phase 3 closure by user direction, but G-C still owes exact release-artifact numbers before publication. Signing-account readiness is carried the same way: Apple Developer and Azure Trusted Signing are not proven in the repository, so the entry check leaves that box unticked and puts signing setup at the front of the task list | **Holding Phase 5 until G-C** — tidy on paper and circular in practice, because several G-C measurements need artifacts Phase 5 produces. **Marking G-C passed by retrospective notes** — would erase the distinction between Phase 3 closure and release qualification. **Starting only docs** — lower risk, but it hides the same dependency while still claiming release work has not begun |
 | 2026-09-09 | **D-96** A release is published only after platform jobs smoke-test their installers; the final job publishes the complete active matrix atomically. **The four-artifact count is superseded by D-97; the dependency shape remains** | Signing and installation are platform operations, while checksums and publication are platform-neutral. A dependent final job makes a failed install or version assertion incapable of creating a partial public release. The binary has a side-effect-free `--version` path so the test asks packaged code, not installer metadata | **Each build leg uploading directly to a release** — exposes partial assets when another artifact fails. **Installer metadata only** — proves labels, not installed code. **A draft created before smoke tests** — recoverable but still external state from unqualified artifacts |
 | 2026-09-09 | **D-97** The first release is Linux x86-64 only; macOS arm64 and Windows x86-64 remain in scope but are deferred as eight explicitly labelled tasks | User direction prioritizes a usable Ubuntu/Linux release now without making external signing accounts the critical path. The workflow therefore publishes exactly one `.deb` and one `.AppImage`; docs retain the Apple/Azure credential contract and ordered resume point | **Keeping all platforms as the release gate** — blocks Linux on unrelated signing readiness. **Deleting macOS/Windows tasks** — loses requirements and restart context. **Leaving dormant jobs in the active workflow** — still requests unavailable credentials and makes a Linux tag fail for intentionally deferred work |
+| 2026-09-13 | **D-98** The generator's symbol class gets a stored default in `Settings` (`generator_symbols_enabled`, off by default); the other three classes keep no default and always start on | A symbol is the character class most often rejected by the site or system the password is typed into, and the one-click generate in the New/Edit item dialogs had no chips at all — it passed `ALL_SETS`, so symbols were unavoidable on the path most used. The field is read by the **webview** and seeds its controls; `generate_password` keeps taking `sets` as an argument and reads no settings | **Reading the flag inside `generate_password`, as `watchtower_breach_check` reads `breach_check_enabled`** — that one is host-read because it gates the only egress in the product and a caller must not route around it; symbol composition gates nothing, and making the command stateful would cost the property §7 relies on (a function of its arguments, callable with no vault, no lock check and no `AppState`). **The dialog's chip writing straight back to Settings** — turning a per-password override into a silent preference change, so a one-off would follow the user into every later password. **Leaving the generator hardcoded and adding no setting** — leaves the New/Edit quick generate with no character-set choice at all |
 | 2026-08-02 | **D-14** G-A dropped, G-B replaced by G-B′ | Software-only project: there is no pin mapping and no board bring-up. The IPC security boundary is the structural equivalent of "the physical thing behaves as drawn" | Keeping the hardware gates as empty ticks — which would make "already checked" indistinguishable from "never considered" |
 
 ## Open questions
@@ -871,7 +874,50 @@ the choice, not the choice.
     offline, never observed live), and what a **429** looks like from a client making 4 requests at
     a time rather than 48 in a loop.
 
+34. **The generator's symbol default, and the 0.1.0 package it was built into.** Done 2026-09-13,
+    D-98. Two things it leaves behind rather than closes. First, **the local `.deb` is not gate
+    evidence**: Phase 5's exit gate asks for a *tagged* run that installs both artifacts in clean
+    containers, and this was a hand build on the development host, `.deb` only, no tag, no
+    checksums. Nothing in the phase document may be ticked from it. Second, **the version is now
+    0.1.0 and `main` has never seen it** — the next person cutting the real release must not
+    assume the tag can be `v0.1.0` on the strength of an installed package that CI never produced.
+    `CHANGELOG.md` says both, in the 0.1.0 section itself.
+
+
 ## Session log
+
+### 2026-09-13, the generator's symbol default, and a 0.1.0 local package
+
+A small change asked for by the user and taken end to end: Settings gains a **Password generator**
+group with one **Include symbols** switch, off by default (**D-98**, R-15 amended to say the symbol
+class's *starting* state is stored). It reaches all three generator surfaces — the generator
+dialog's symbol chip, and the one-click generate in the New item and Edit item dialogs, which until
+now passed `ALL_SETS` and had no character-set choice at all. The chip remains a per-session
+override; closing the dialog goes back to the stored value.
+
+What the change deliberately did **not** do is read the new flag in the host.
+`generate_password` still takes `sets` as an argument and reads no settings, because it gates
+nothing — the argument for host-reading `breach_check_enabled` is that it gates the only egress in
+the product, and it does not transfer. `docs/ipc-contract.md` §6.3 and §7 now say so in both
+places, so the next person to notice the asymmetry finds the reason rather than the inconsistency.
+
+Migration cost nothing: `Settings` carries container-level `#[serde(default)]`, so the
+settings.json already on this machine deserializes the missing key as `false`, which is the wanted
+default. A unit test pins that default beside the audit-log and breach-check ones.
+
+Version bumped **0.0.0 → 0.1.0** and packaged locally as `.deb` only, matching what
+`target/release/bundle` already held. **This is not a release**: no tag was cut, CI did not build
+it, no checksums were published, and Phase 5's exit gate is untouched and still shut. The version
+exists so that `apt` sees an upgrade rather than refusing a same-version reinstall. The AppImage
+was not attempted again — it failed here on 2026-09-09 with `Read-only file system (os error 30)`
+while Tauri patched bundle metadata, and that is a clean-runner task, not a local one.
+`docs/install.md` gained an *Updating an existing install* section.
+
+Checks run: `npm run check` (0 errors), `npm run fmt:check` (clean for the files touched;
+`scripts/a11y.mjs` was already failing on this branch before the change and was left alone),
+`cargo test -p trustvault --lib` (68 passed), `cargo clippy -p trustvault --all-targets -D
+warnings` (clean). The full workspace suite was not run — nothing outside `src-tauri` and the
+frontend changed.
 
 ### 2026-09-09, Linux-only release scope
 

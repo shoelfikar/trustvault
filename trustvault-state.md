@@ -913,6 +913,13 @@ was not attempted again — it failed here on 2026-09-09 with `Read-only file sy
 while Tauri patched bundle metadata, and that is a clean-runner task, not a local one.
 `docs/install.md` gained an *Updating an existing install* section.
 
+The package that came out, recorded because a later reader will want to tell it apart from a real
+release asset: `TrustVault_0.1.0_amd64.deb`, 3 641 732 bytes, sha256
+`17fc1a99c0cb79365f10be2d646d8b036606697a5a5f26b4504e29a052207ebf`, package name `trust-vault`
+version `0.1.0`, built 2026-09-13 in 2 m 11 s (only the two workspace crates recompiled). The
+binary inside it answers `TrustVault 0.1.0`. The 0.0.0 artifact was kept rather than overwritten —
+Tauri writes a new file per version — so a downgrade is still possible from the same directory.
+
 Checks run: `npm run check` (0 errors), `npm run fmt:check` (clean for the files touched;
 `scripts/a11y.mjs` was already failing on this branch before the change and was left alone),
 `cargo test -p trustvault --lib` (68 passed), `cargo clippy -p trustvault --all-targets -D

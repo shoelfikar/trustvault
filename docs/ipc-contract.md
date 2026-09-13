@@ -693,6 +693,7 @@ type Settings = {
   window_height: number;                  // px — R-27
   window_maximized: boolean;              // R-27
   breach_check_enabled: boolean;          // R-26, default false
+  generator_symbols_enabled: boolean;     // R-15, default false — D-98
 };
 ```
 
@@ -702,6 +703,16 @@ the user sets it, from a Settings row whose copy has to say plainly what leaves 
 5-character hash prefix, never a password and never an item — because a toggle labelled "check for
 breaches" invites the reading this product exists to refuse. `watchtower_breach_check` reads it in
 the host rather than taking it as an argument (§6.9).
+
+**`generator_symbols_enabled` is the opposite arrangement, deliberately.** It is a *stored
+default the webview seeds its controls from*, and `generate_password` still takes `sets` as an
+argument and reads no settings at all. `breach_check_enabled` is read in the host because it
+gates the only egress in the product and a caller must not be able to route around it; symbol
+composition gates nothing — it selects an alphabet, and a webview that ignored the preference
+would produce a password the user is looking at. Reading it in the command would buy nothing and
+cost the property §7 relies on: `generate_password` is a function of its arguments, callable with
+no vault open, no lock check and no `AppState`. Off by default because a symbol is the character
+class most often rejected by whatever the password is being typed into.
 
 The five fields below `last_vault_path` are Phase 3's, and all five shipped 2026-08-06. Two of them
 are not merely stored:
@@ -1055,6 +1066,12 @@ generate_password({ length: number; sets: CharSets; exclude_ambiguous: boolean }
 command returns `internal`; every selected set appears in the output, which is what R-15's
 acceptance criterion asks for. `exclude_ambiguous` drops `0 O 1 l I` and defaults on, per
 `MASTER.md` §3.
+
+**The command has no defaults of its own and gains none.** Which sets the webview asks for is the
+webview's business: the three text classes start on, and the symbol class starts from
+`Settings.generator_symbols_enabled` (§6.3, D-98), which the frontend reads and this command does
+not. A caller sending `symbols: true` with the preference off is answered normally, because
+nothing here is a boundary — the generator's chips are an override the user can see the result of.
 
 Three things about this command are worth stating, because each is where the alternative was.
 

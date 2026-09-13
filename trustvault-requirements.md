@@ -98,7 +98,7 @@ stretch goal.
 | R-12 | Secret fields shall mask by default, reveal for at most 10 s, and re-mask on navigation | must | Reveal, wait 11 s, field is masked; navigate away and back, masked | 2 |
 | R-13 | Every reveal shall append an entry to a local audit log when the setting is on | must | Log file contains one entry per reveal with timestamp and item id, and no secret value | 2 |
 | R-14 | Copying a secret shall clear the clipboard after the configured interval | must | S-11 passes on all three platforms | 2 |
-| R-15 | The generator shall produce passwords from the four toggleable character classes at lengths 8–64 | must | Every combination produces a password using exactly the selected classes | 3 |
+| R-15 | The generator shall produce passwords from the four toggleable character classes at lengths 8–64. The symbol class's **starting** state is a stored preference, off by default (D-98); the other three always start on | must | Every combination produces a password using exactly the selected classes, and a fresh install generates without symbols until the Settings row is turned on | 3 |
 | R-16 | ⌘K shall fuzzy-search item titles, usernames, URLs, and tags, and expose actions | must | S-04 met; Enter copies the password, ⇧Enter opens the item, Esc closes | 3 |
 | R-17 | Items shall be creatable, editable, and deletable for all seven types | must | Each type round-trips through the Add dialog into the vault and back | 3 |
 | R-18 | Deleting an item shall require a dialog naming the item; deleting a vault shall require typing the vault name | must | Neither destructive action can complete without the confirmation | 3 |

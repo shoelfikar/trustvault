@@ -571,12 +571,18 @@
       oncopied={(clearsAt) => (clipboardUntil = clearsAt)}
     />
   {:else if overlay === 'generator'}
-    <GeneratorDialog onclose={() => closeOverlay('generator')} />
+    <!-- D-98: the three generator surfaces are handed the same stored default, from the one
+         settings object this window has, so they cannot drift apart. -->
+    <GeneratorDialog
+      symbolsDefault={settings.generatorSymbolsEnabled}
+      onclose={() => closeOverlay('generator')}
+    />
   {:else if overlay === 'add'}
     <NewItemDialog
       vaultName={status.displayName}
       {vaultFile}
       {tags}
+      symbolsDefault={settings.generatorSymbolsEnabled}
       onclose={() => closeOverlay('add')}
       onsaved={itemSaved}
     />
@@ -586,6 +592,7 @@
       vaultName={status.displayName}
       {vaultFile}
       {tags}
+      symbolsDefault={settings.generatorSymbolsEnabled}
       onclose={() => closeOverlay('edit')}
       onsaved={itemChanged}
     />

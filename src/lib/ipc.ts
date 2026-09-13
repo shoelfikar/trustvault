@@ -198,6 +198,16 @@ export interface Settings {
    * Turning it off here turns the egress off there.
    */
   breachCheckEnabled: boolean;
+  /**
+   * Whether the generator starts with the symbol class on — R-15, D-98. **Off by default.**
+   *
+   * A stored *default*, and the opposite arrangement to `breachCheckEnabled` above on purpose.
+   * That one is read in the host because it gates the only egress in the product; this one
+   * gates nothing — it picks an alphabet — so `generate_password` keeps taking `sets` as an
+   * argument and reads no settings, and this is what the three generator surfaces here seed
+   * their controls from. The dialog's chip still overrides it for one password.
+   */
+  generatorSymbolsEnabled: boolean;
 }
 
 export interface KdfSummary {
@@ -221,13 +231,24 @@ export interface CharSets {
   symbols: boolean;
 }
 
-/** All four classes, which is what every surface asks for today. */
+/** Every class the generator has. Not what any surface starts from — see `defaultSets`. */
 export const ALL_SETS: CharSets = {
   lowercase: true,
   uppercase: true,
   digits: true,
   symbols: true,
 };
+
+/**
+ * What a generator surface starts from — R-15, D-98.
+ *
+ * The three text classes are always on, because there is no reason for a generated password to
+ * be missing one. `symbols` comes from `Settings.generatorSymbolsEnabled`, which is off by
+ * default: a symbol is the character class most often rejected by whatever the password is
+ * being typed into. Every caller passes the stored preference rather than a literal, so the
+ * generator dialog and the one-click generate in the item dialogs cannot drift apart.
+ */
+export const defaultSets = (symbols: boolean): CharSets => ({ ...ALL_SETS, symbols });
 
 /**
  * What `generate_password` returns — §7.
